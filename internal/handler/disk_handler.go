@@ -2,123 +2,124 @@ package handler
 
 import (
 	"context"
-	"errors"
-	"strconv"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
-	pb "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
-	commonv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/common/v1"
-	coreerrors "github.com/PRO-Robotech/kacho-corelib/errors"
-	"github.com/PRO-Robotech/kacho-corelib/watch"
+	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
+	operationv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/operation/v1"
 
-	"github.com/PRO-Robotech/kacho-compute/internal/repo"
-	"github.com/PRO-Robotech/kacho-compute/internal/service"
+	"github.com/PRO-Robotech/kacho-compute/internal/domain"
+	svc "github.com/PRO-Robotech/kacho-compute/internal/service"
 )
 
-// DiskHandler реализует pb.DiskServiceServer.
+// DiskHandler реализует computev1.DiskServiceServer.
 type DiskHandler struct {
-	pb.UnimplementedDiskServiceServer
-	svc *service.DiskService
-	hub *watch.Hub
+	computev1.UnimplementedDiskServiceServer
+	svc *svc.DiskService
 }
 
 // NewDiskHandler создаёт DiskHandler.
-func NewDiskHandler(svc *service.DiskService, hub *watch.Hub) *DiskHandler {
-	return &DiskHandler{svc: svc, hub: hub}
+func NewDiskHandler(svc *svc.DiskService) *DiskHandler {
+	return &DiskHandler{svc: svc}
 }
 
-func (h *DiskHandler) Upsert(ctx context.Context, req *pb.DiskUpsertRequest) (*pb.DiskUpsertResponse, error) {
-	resp := &pb.DiskUpsertResponse{}
-	for _, in := range req.GetDisks() {
-		// Запрет #6: status в upsert не допускается
-		if in.GetStatus() != nil {
-			return nil, coreerrors.InvalidArgument().AddFieldViolation("status", "status cannot be set via Upsert, use Internal.UpdateDiskStatus").Err()
-		}
-		disk := repo.ProtoDiskToDomain(in)
-		result, err := h.svc.Upsert(ctx, disk)
-		if err != nil {
-			return nil, err
-		}
-		resp.Disks = append(resp.Disks, repo.DomainDiskToProto(result))
+func (h *DiskHandler) Get(ctx context.Context, req *computev1.GetDiskRequest) (*computev1.Disk, error) {
+	if req.DiskId == "" {
+		return nil, status.Error(codes.InvalidArgument, "disk_id required")
 	}
-	return resp, nil
+	d, err := h.svc.Get(ctx, req.DiskId)
+	if err != nil {
+		return nil, err
+	}
+	return diskToProto(d), nil
 }
 
-func (h *DiskHandler) Delete(ctx context.Context, req *pb.DiskDeleteRequest) (*pb.DiskDeleteResponse, error) {
-	for _, item := range req.GetItems() {
-		uid := item.GetUid()
-		if uid == "" {
-			return nil, coreerrors.InvalidArgument().AddFieldViolation("uid", "uid is required").Err()
-		}
-		if err := h.svc.Delete(ctx, uid); err != nil {
-			return nil, err
-		}
-	}
-	return &pb.DiskDeleteResponse{}, nil
-}
-
-func (h *DiskHandler) List(ctx context.Context, req *pb.DiskListRequest) (*pb.DiskListResponse, error) {
-	selectors := protoSelectorsToService(req.GetSelectors())
-	page := service.Pagination{
-		PageToken: req.GetPageToken(),
-		PageSize:  req.GetPageSize(),
-	}
-
-	disks, nextToken, snapshotRV, err := h.svc.List(ctx, selectors, page)
+func (h *DiskHandler) List(ctx context.Context, req *computev1.ListDisksRequest) (*computev1.ListDisksResponse, error) {
+	disks, nextToken, err := h.svc.List(ctx, svc.DiskFilter{
+		FolderID: req.FolderId,
+		Filter:   req.Filter,
+		OrderBy:  req.OrderBy,
+	}, svc.Pagination{
+		PageToken: req.PageToken,
+		PageSize:  req.PageSize,
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	resp := &pb.DiskListResponse{
-		ResourceVersion: int64ToString(snapshotRV),
-		NextPageToken:   nextToken,
-	}
-	for _, disk := range disks {
-		resp.Disks = append(resp.Disks, repo.DomainDiskToProto(disk))
+	resp := &computev1.ListDisksResponse{NextPageToken: nextToken}
+	for _, d := range disks {
+		resp.Disks = append(resp.Disks, diskToProto(d))
 	}
 	return resp, nil
 }
 
-func (h *DiskHandler) Watch(req *pb.DiskWatchRequest, stream pb.DiskService_WatchServer) error {
-	ctx := stream.Context()
-
-	var fromRV int64
-	if rvStr := req.GetResourceVersion(); rvStr != "" {
-		var err error
-		fromRV, err = strconv.ParseInt(rvStr, 10, 64)
-		if err != nil {
-			return status.Errorf(codes.InvalidArgument, "invalid resource_version: %v", err)
-		}
-	}
-
-	sub, err := h.hub.Subscribe(ctx, fromRV, buildDiskMatcher(req.GetSelectors()))
+func (h *DiskHandler) Create(ctx context.Context, req *computev1.CreateDiskRequest) (*operationv1.Operation, error) {
+	op, err := h.svc.Create(ctx, svc.CreateDiskReq{
+		FolderID:    req.FolderId,
+		Name:        req.Name,
+		Description: req.Description,
+		Labels:      req.Labels,
+		DiskTypeID:  req.DiskTypeId,
+		ZoneID:      req.ZoneId,
+		Size:        req.Size,
+		ImageID:     req.ImageId,
+	})
 	if err != nil {
-		if errors.Is(err, watch.ErrGone) {
-			return status.Error(codes.OutOfRange, "resourceVersion too old, please relist")
-		}
-		return err
+		return nil, err
 	}
-	defer sub.Unsubscribe()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case evt, ok := <-sub.C:
-			if !ok {
-				return nil
-			}
-			if sendErr := stream.Send(watchEventToProto(evt)); sendErr != nil {
-				return sendErr
-			}
-		}
-	}
+	return operationToProto(op), nil
 }
 
-func buildDiskMatcher(_ []*commonv1.Selector) watch.SelectorMatcher {
-	return func(evt watch.Event) bool {
-		return evt.ResourceKind == "Disk"
+func (h *DiskHandler) Update(ctx context.Context, req *computev1.UpdateDiskRequest) (*operationv1.Operation, error) {
+	if req.DiskId == "" {
+		return nil, status.Error(codes.InvalidArgument, "disk_id required")
+	}
+	op, err := h.svc.Update(ctx, svc.UpdateDiskReq{
+		DiskID:          req.DiskId,
+		ResourceVersion: req.ResourceVersion,
+		Name:            req.Name,
+		Description:     req.Description,
+		Labels:          req.Labels,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return operationToProto(op), nil
+}
+
+func (h *DiskHandler) Delete(ctx context.Context, req *computev1.DeleteDiskRequest) (*operationv1.Operation, error) {
+	if req.DiskId == "" {
+		return nil, status.Error(codes.InvalidArgument, "disk_id required")
+	}
+	op, err := h.svc.Delete(ctx, req.DiskId)
+	if err != nil {
+		return nil, err
+	}
+	return operationToProto(op), nil
+}
+
+// ---- domain → proto ----
+
+func diskToProto(d *domain.Disk) *computev1.Disk {
+	return &computev1.Disk{
+		Id:                   d.ID,
+		FolderId:             d.FolderID,
+		Name:                 d.Name,
+		Description:          d.Description,
+		CreatedAt:            timestamppb.New(d.CreatedAt),
+		Labels:               d.Labels,
+		DiskTypeId:           d.DiskTypeID,
+		ZoneId:               d.ZoneID,
+		Size:                 d.Size,
+		ImageId:              d.ImageID,
+		Status:               computev1.DiskStatus(d.Status),
+		AttachedToInstanceId: d.AttachedToInstanceID,
+		Generation:           d.Generation,
+		ResourceVersion:      d.ResourceVersion,
+		ObservedGeneration:   d.ObservedGeneration,
+		StatusLastTransitionAt: timestamppb.New(d.StatusLastTransitionAt),
 	}
 }

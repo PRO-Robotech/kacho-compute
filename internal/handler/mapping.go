@@ -1,28 +1,25 @@
 package handler
 
 import (
-	"strconv"
-
-	commonv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/common/v1"
-	"github.com/PRO-Robotech/kacho-compute/internal/service"
+	"github.com/PRO-Robotech/kacho-corelib/operations"
+	operationv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/operation/v1"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-func protoSelectorsToService(selectors []*commonv1.Selector) []service.Selector {
-	var result []service.Selector
-	for _, s := range selectors {
-		ss := service.Selector{}
-		if fs := s.GetFieldSelector(); fs != nil {
-			ss.Name = fs.GetName()
-			ss.FolderID = fs.GetFolderId()
-		}
-		if ls := s.GetLabelSelector(); ls != nil {
-			ss.Labels = ls
-		}
-		result = append(result, ss)
+// operationToProto конвертирует domain Operation в proto Operation.
+func operationToProto(op *operations.Operation) *operationv1.Operation {
+	p := &operationv1.Operation{
+		Id:          op.ID,
+		Description: op.Description,
+		CreatedAt:   timestamppb.New(op.CreatedAt),
+		ModifiedAt:  timestamppb.New(op.ModifiedAt),
+		Done:        op.Done,
+		Metadata:    op.Metadata,
 	}
-	return result
-}
-
-func int64ToString(n int64) string {
-	return strconv.FormatInt(n, 10)
+	if op.Error != nil {
+		p.Result = &operationv1.Operation_Error{Error: op.Error}
+	} else if op.Response != nil {
+		p.Result = &operationv1.Operation_Response{Response: op.Response}
+	}
+	return p
 }

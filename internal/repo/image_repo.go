@@ -4,27 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	coreerrors "github.com/PRO-Robotech/kacho-corelib/errors"
-
 	"github.com/PRO-Robotech/kacho-compute/internal/domain"
-	sqlcgen "github.com/PRO-Robotech/kacho-compute/internal/repo/gen"
 	"github.com/PRO-Robotech/kacho-compute/internal/service"
 )
 
-// imageSpec хранит spec образа в JSONB.
-type imageSpec struct {
-	DisplayName string `json:"display_name"`
-	Description string `json:"description"`
-	Family      string `json:"family"`
-	ZoneID      string `json:"zone_id"`
-	Size        string `json:"size"`
-}
-
-// ImageRepo реализует service.ImageRepo.
+// ImageRepo — реализация service.ImageRepo поверх pgxpool (read-only).
 type ImageRepo struct {
 	pool *pgxpool.Pool
 }
@@ -34,78 +22,87 @@ func NewImageRepo(pool *pgxpool.Pool) *ImageRepo {
 	return &ImageRepo{pool: pool}
 }
 
-func (r *ImageRepo) GetByUID(ctx context.Context, uid string) (*domain.Image, error) {
-	pgUID, err := strToUUID(uid)
-	if err != nil {
-		return nil, coreerrors.InvalidArgument().AddFieldViolation("uid", "invalid uuid").Err()
+func (r *ImageRepo) Get(ctx context.Context, id string) (*domain.Image, error) {
+	const q = `SELECT id, name, description, family, os_type, size, status FROM images WHERE id = $1`
+	row := r.pool.QueryRow(ctx, q, id)
+	img, err := scanImage(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, service.ErrNotFound
 	}
-	q := sqlcgen.New(r.pool)
-	row, err := q.GetImageByUID(ctx, pgUID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil
+	return img, err
+}
+
+func (r *ImageRepo) List(ctx context.Context, filter string, page service.Pagination) ([]*domain.Image, string, error) {
+	pageSize := page.PageSize
+	if pageSize <= 0 || pageSize > 1000 {
+		pageSize = 50
+	}
+
+	args := []any{}
+	conditions := []string{"status = 1"} // IMAGE_STATUS_READY
+	argIdx := 1
+
+	// Простой фильтр по family: "family=ubuntu-2204-lts"
+	if filter != "" {
+		if strings.HasPrefix(filter, "family=") {
+			family := strings.TrimPrefix(filter, "family=")
+			conditions = append(conditions, fmt.Sprintf("family = $%d", argIdx))
+			args = append(args, family)
+			argIdx++
 		}
+	}
+
+	// page_token для images использует (name, id) курсор
+	if page.PageToken != "" {
+		_, id, err := decodePageToken(page.PageToken)
+		if err != nil {
+			return nil, "", fmt.Errorf("invalid page_token: %w", err)
+		}
+		conditions = append(conditions, fmt.Sprintf("id > $%d", argIdx))
+		args = append(args, id)
+		argIdx++
+	}
+
+	where := "WHERE " + strings.Join(conditions, " AND ")
+	q := fmt.Sprintf(`SELECT id, name, description, family, os_type, size, status FROM images %s ORDER BY name ASC, id ASC LIMIT $%d`,
+		where, argIdx)
+	args = append(args, pageSize+1)
+
+	rows, err := r.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, "", err
+	}
+	defer rows.Close()
+
+	var result []*domain.Image
+	for rows.Next() {
+		img, err := scanImage(rows)
+		if err != nil {
+			return nil, "", err
+		}
+		result = append(result, img)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, "", err
+	}
+
+	var nextToken string
+	if int64(len(result)) > pageSize {
+		last := result[pageSize-1]
+		// Для images используем нулевое время, ID как курсор
+		nextToken = encodePageToken(last.CreatedAt(), last.ID)
+		result = result[:pageSize]
+	}
+	return result, nextToken, nil
+}
+
+func scanImage(row scannable) (*domain.Image, error) {
+	var img domain.Image
+	var statusInt int32
+	err := row.Scan(&img.ID, &img.Name, &img.Description, &img.Family, &img.OsType, &img.Size, &statusInt)
+	if err != nil {
 		return nil, err
 	}
-	return sqlcImageToDomain(row), nil
-}
-
-func (r *ImageRepo) List(ctx context.Context, _ []service.Selector, page service.Pagination) ([]*domain.Image, string, int64, error) {
-	pageSize := int(page.PageSize)
-	if pageSize <= 0 || pageSize > 1000 {
-		pageSize = 100
-	}
-
-	snapshotRV, err := r.SnapshotResourceVersion(ctx)
-	if err != nil {
-		return nil, "", 0, err
-	}
-
-	q := sqlcgen.New(r.pool)
-	rows, err := q.ListImages(ctx)
-	if err != nil {
-		return nil, "", 0, err
-	}
-
-	var images []*domain.Image
-	for _, row := range rows {
-		images = append(images, sqlcImageToDomain(row))
-	}
-
-	// simple truncation without pagination token for images catalog
-	var nextToken string
-	if len(images) > pageSize {
-		images = images[:pageSize]
-		last := images[len(images)-1]
-		nextToken = fmt.Sprintf("%d", last.ResourceVersion)
-	}
-
-	return images, nextToken, snapshotRV, nil
-}
-
-func (r *ImageRepo) SnapshotResourceVersion(ctx context.Context) (int64, error) {
-	q := sqlcgen.New(r.pool)
-	return q.SnapshotResourceVersion(ctx)
-}
-
-func sqlcImageToDomain(row sqlcgen.ImagesCatalog) *domain.Image {
-	var sp imageSpec
-	jsonbToAny(row.Spec, &sp)
-
-	return &domain.Image{
-		UID:               uuidToStr(row.Uid),
-		Name:              row.Name,
-		Labels:            jsonbToMap(row.Labels),
-		CreationTimestamp: tsToTime(row.CreationTimestamp),
-		ResourceVersion:   row.ResourceVersion,
-		Generation:        row.Generation,
-
-		DisplayName: sp.DisplayName,
-		Description: sp.Description,
-		Family:      sp.Family,
-		ZoneID:      sp.ZoneID,
-		Size:        sp.Size,
-
-		State: domain.ImageStateReady,
-	}
+	img.Status = domain.ImageStatus(statusInt)
+	return &img, nil
 }

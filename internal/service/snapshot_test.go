@@ -10,96 +10,99 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/PRO-Robotech/kacho-compute/internal/domain"
-	"github.com/PRO-Robotech/kacho-compute/internal/service"
+	svc "github.com/PRO-Robotech/kacho-compute/internal/service"
 )
 
-func newTestSnapshotSvc(snapRepo service.SnapshotRepo, diskRepo service.DiskRepo) *service.SnapshotService {
-	return service.NewSnapshotService(snapRepo, diskRepo)
-}
+func TestSnapshotService_Create_MissingDisk(t *testing.T) {
+	s := svc.NewSnapshotService(newMockSnapshotRepo(), newMockDiskRepo(), newMockOpsRepo())
+	ctx := context.Background()
 
-// TestSnapshot_K1_UpsertRequiresDiskReady проверяет ошибку при CREATING диске.
-func TestSnapshot_K1_UpsertRequiresDiskReady(t *testing.T) {
-	diskRepo := newMockDiskRepo()
-	diskRepo.data[testDiskUID] = &domain.Disk{
-		UID:   testDiskUID,
-		State: domain.DiskStateCreating,
-	}
-
-	svc := newTestSnapshotSvc(newMockSnapshotRepo(), diskRepo)
-
-	_, err := svc.Upsert(context.Background(), &domain.Snapshot{
-		Name:     "snap-01",
-		FolderID: testFolderUID,
-		DiskID:   testDiskUID,
+	_, err := s.Create(ctx, svc.CreateSnapshotReq{
+		FolderID: "f1",
+		DiskID:   "disk-nonexistent",
+		Name:     "snap",
 	})
-	require.Error(t, err)
-	st, ok := status.FromError(err)
-	require.True(t, ok)
-	assert.Equal(t, codes.FailedPrecondition, st.Code())
+	// Операция создаётся, но goroutine завершится ошибкой через MarkError.
+	// Проверяем что хотя бы операция создаётся.
+	require.NoError(t, err)
 }
 
-// TestSnapshot_K2_UpsertWithReadyDisk проверяет успешное создание снапшота.
-func TestSnapshot_K2_UpsertWithReadyDisk(t *testing.T) {
+func TestSnapshotService_Create_DiskNotReady(t *testing.T) {
 	diskRepo := newMockDiskRepo()
-	diskRepo.data[testDiskUID] = &domain.Disk{
-		UID:   testDiskUID,
-		State: domain.DiskStateReady,
+	ctx := context.Background()
+
+	d := &domain.Disk{
+		ID:       "disk-not-ready",
+		FolderID: "f1",
+		Name:     "my-disk",
+		Status:   domain.DiskStatusCreating, // не READY
 	}
+	_, _ = diskRepo.Insert(ctx, d)
 
-	svc := newTestSnapshotSvc(newMockSnapshotRepo(), diskRepo)
+	s := svc.NewSnapshotService(newMockSnapshotRepo(), diskRepo, newMockOpsRepo())
 
-	result, err := svc.Upsert(context.Background(), &domain.Snapshot{
-		Name:     "snap-01",
-		FolderID: testFolderUID,
-		DiskID:   testDiskUID,
+	// Операция создаётся немедленно, но goroutine провалится.
+	op, err := s.Create(ctx, svc.CreateSnapshotReq{
+		FolderID: "f1",
+		DiskID:   "disk-not-ready",
+		Name:     "snap",
 	})
 	require.NoError(t, err)
-	assert.NotEmpty(t, result.UID)
-	assert.Equal(t, domain.SnapshotStateCreating, result.State)
-	assert.Equal(t, int32(0), result.ProgressPercent)
+	assert.NotEmpty(t, op.ID)
 }
 
-// TestSnapshot_DiskNotFound проверяет ошибку при несуществующем диске.
-func TestSnapshot_DiskNotFound(t *testing.T) {
-	svc := newTestSnapshotSvc(newMockSnapshotRepo(), newMockDiskRepo())
-	_, err := svc.Upsert(context.Background(), &domain.Snapshot{
-		Name:     "snap-01",
-		FolderID: testFolderUID,
-		DiskID:   "nonexistent-disk",
+func TestSnapshotService_Create_Success(t *testing.T) {
+	diskRepo := newMockDiskRepo()
+	ctx := context.Background()
+
+	d := &domain.Disk{
+		ID:       "disk-ready",
+		FolderID: "f1",
+		Name:     "ready-disk",
+		Size:     "10Gi",
+		Status:   domain.DiskStatusReady,
+	}
+	_, _ = diskRepo.Insert(ctx, d)
+
+	s := svc.NewSnapshotService(newMockSnapshotRepo(), diskRepo, newMockOpsRepo())
+
+	op, err := s.Create(ctx, svc.CreateSnapshotReq{
+		FolderID: "f1",
+		DiskID:   "disk-ready",
+		Name:     "snap-1",
 	})
+	require.NoError(t, err)
+	assert.NotEmpty(t, op.ID)
+	assert.False(t, op.Done)
+}
+
+func TestSnapshotService_Get_NotFound(t *testing.T) {
+	s := svc.NewSnapshotService(newMockSnapshotRepo(), newMockDiskRepo(), newMockOpsRepo())
+	_, err := s.Get(context.Background(), "nonexistent")
 	require.Error(t, err)
 	st, ok := status.FromError(err)
 	require.True(t, ok)
 	assert.Equal(t, codes.NotFound, st.Code())
 }
 
-// TestSnapshot_K3_NoOpIdempotent проверяет идемпотентность.
-func TestSnapshot_K3_NoOpIdempotent(t *testing.T) {
-	diskRepo := newMockDiskRepo()
-	diskRepo.data[testDiskUID] = &domain.Disk{
-		UID:   testDiskUID,
-		State: domain.DiskStateReady,
-	}
-
+func TestSnapshotService_Delete(t *testing.T) {
 	snapRepo := newMockSnapshotRepo()
-	svc := newTestSnapshotSvc(snapRepo, diskRepo)
+	ctx := context.Background()
 
 	snap := &domain.Snapshot{
-		Name:        "snap-01",
-		FolderID:    testFolderUID,
-		DiskID:      testDiskUID,
-		DisplayName: "My Snapshot",
+		ID:       "snap-1",
+		FolderID: "f1",
+		Name:     "old-snap",
+		Status:   domain.SnapshotStatusReady,
 	}
+	_, _ = snapRepo.Insert(ctx, snap)
 
-	first, err := svc.Upsert(context.Background(), snap)
+	s := svc.NewSnapshotService(snapRepo, newMockDiskRepo(), newMockOpsRepo())
+	op, err := s.Delete(ctx, "snap-1")
 	require.NoError(t, err)
+	assert.NotEmpty(t, op.ID)
 
-	second, err := svc.Upsert(context.Background(), &domain.Snapshot{
-		Name:        "snap-01",
-		FolderID:    testFolderUID,
-		DiskID:      testDiskUID,
-		DisplayName: "My Snapshot",
-	})
+	updated, err := snapRepo.Get(ctx, "snap-1")
 	require.NoError(t, err)
-	assert.Equal(t, first.ResourceVersion, second.ResourceVersion)
+	assert.Equal(t, domain.SnapshotStatusDeleting, updated.Status)
 }

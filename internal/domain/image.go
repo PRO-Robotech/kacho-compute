@@ -2,23 +2,24 @@ package domain
 
 import "time"
 
-// Image — каталожный образ (read-only, seed data).
-type Image struct {
-	UID               string
-	FolderID          string
-	Name              string
-	Labels            map[string]string
-	CreationTimestamp time.Time
-	ResourceVersion   int64
-	Generation        int64
+// ImageStatus — статус образа диска.
+type ImageStatus int32
 
-	// Spec
-	DisplayName string
+const (
+	ImageStatusUnspecified ImageStatus = 0
+	ImageStatusReady       ImageStatus = 1
+)
+
+// Image — доменная модель образа диска (read-only catalog).
+type Image struct {
+	ID          string
+	Name        string
 	Description string
 	Family      string
-	ZoneID      string
-	Size        string
-
-	// Status — всегда READY
-	State ImageState
+	OsType      string
+	Size        int64
+	Status      ImageStatus
 }
+
+// CreatedAt — образы не хранят created_at, возвращаем zero time для совместимости курсора.
+func (img *Image) CreatedAt() time.Time { return time.Time{} }

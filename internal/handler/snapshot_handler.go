@@ -2,122 +2,118 @@ package handler
 
 import (
 	"context"
-	"errors"
-	"strconv"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
-	pb "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
-	commonv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/common/v1"
-	coreerrors "github.com/PRO-Robotech/kacho-corelib/errors"
-	"github.com/PRO-Robotech/kacho-corelib/watch"
+	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
+	operationv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/operation/v1"
 
-	"github.com/PRO-Robotech/kacho-compute/internal/repo"
-	"github.com/PRO-Robotech/kacho-compute/internal/service"
+	"github.com/PRO-Robotech/kacho-compute/internal/domain"
+	svc "github.com/PRO-Robotech/kacho-compute/internal/service"
 )
 
-// SnapshotHandler реализует pb.SnapshotServiceServer.
+// SnapshotHandler реализует computev1.SnapshotServiceServer.
 type SnapshotHandler struct {
-	pb.UnimplementedSnapshotServiceServer
-	svc *service.SnapshotService
-	hub *watch.Hub
+	computev1.UnimplementedSnapshotServiceServer
+	svc *svc.SnapshotService
 }
 
 // NewSnapshotHandler создаёт SnapshotHandler.
-func NewSnapshotHandler(svc *service.SnapshotService, hub *watch.Hub) *SnapshotHandler {
-	return &SnapshotHandler{svc: svc, hub: hub}
+func NewSnapshotHandler(svc *svc.SnapshotService) *SnapshotHandler {
+	return &SnapshotHandler{svc: svc}
 }
 
-func (h *SnapshotHandler) Upsert(ctx context.Context, req *pb.SnapshotUpsertRequest) (*pb.SnapshotUpsertResponse, error) {
-	resp := &pb.SnapshotUpsertResponse{}
-	for _, in := range req.GetSnapshots() {
-		if in.GetStatus() != nil {
-			return nil, coreerrors.InvalidArgument().AddFieldViolation("status", "status cannot be set via Upsert, use Internal.UpdateSnapshotStatus").Err()
-		}
-		snap := repo.ProtoSnapshotToDomain(in)
-		result, err := h.svc.Upsert(ctx, snap)
-		if err != nil {
-			return nil, err
-		}
-		resp.Snapshots = append(resp.Snapshots, repo.DomainSnapshotToProto(result))
+func (h *SnapshotHandler) Get(ctx context.Context, req *computev1.GetSnapshotRequest) (*computev1.Snapshot, error) {
+	if req.SnapshotId == "" {
+		return nil, status.Error(codes.InvalidArgument, "snapshot_id required")
 	}
-	return resp, nil
+	s, err := h.svc.Get(ctx, req.SnapshotId)
+	if err != nil {
+		return nil, err
+	}
+	return snapshotToProto(s), nil
 }
 
-func (h *SnapshotHandler) Delete(ctx context.Context, req *pb.SnapshotDeleteRequest) (*pb.SnapshotDeleteResponse, error) {
-	for _, item := range req.GetItems() {
-		uid := item.GetUid()
-		if uid == "" {
-			return nil, coreerrors.InvalidArgument().AddFieldViolation("uid", "uid is required").Err()
-		}
-		if err := h.svc.Delete(ctx, uid); err != nil {
-			return nil, err
-		}
-	}
-	return &pb.SnapshotDeleteResponse{}, nil
-}
-
-func (h *SnapshotHandler) List(ctx context.Context, req *pb.SnapshotListRequest) (*pb.SnapshotListResponse, error) {
-	selectors := protoSelectorsToService(req.GetSelectors())
-	page := service.Pagination{
-		PageToken: req.GetPageToken(),
-		PageSize:  req.GetPageSize(),
-	}
-
-	snaps, nextToken, snapshotRV, err := h.svc.List(ctx, selectors, page)
+func (h *SnapshotHandler) List(ctx context.Context, req *computev1.ListSnapshotsRequest) (*computev1.ListSnapshotsResponse, error) {
+	snaps, nextToken, err := h.svc.List(ctx, svc.SnapshotFilter{
+		FolderID: req.FolderId,
+		Filter:   req.Filter,
+		OrderBy:  req.OrderBy,
+	}, svc.Pagination{
+		PageToken: req.PageToken,
+		PageSize:  req.PageSize,
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	resp := &pb.SnapshotListResponse{
-		ResourceVersion: int64ToString(snapshotRV),
-		NextPageToken:   nextToken,
-	}
-	for _, snap := range snaps {
-		resp.Snapshots = append(resp.Snapshots, repo.DomainSnapshotToProto(snap))
+	resp := &computev1.ListSnapshotsResponse{NextPageToken: nextToken}
+	for _, s := range snaps {
+		resp.Snapshots = append(resp.Snapshots, snapshotToProto(s))
 	}
 	return resp, nil
 }
 
-func (h *SnapshotHandler) Watch(req *pb.SnapshotWatchRequest, stream pb.SnapshotService_WatchServer) error {
-	ctx := stream.Context()
-
-	var fromRV int64
-	if rvStr := req.GetResourceVersion(); rvStr != "" {
-		var err error
-		fromRV, err = strconv.ParseInt(rvStr, 10, 64)
-		if err != nil {
-			return status.Errorf(codes.InvalidArgument, "invalid resource_version: %v", err)
-		}
-	}
-
-	sub, err := h.hub.Subscribe(ctx, fromRV, buildSnapshotMatcher(req.GetSelectors()))
+func (h *SnapshotHandler) Create(ctx context.Context, req *computev1.CreateSnapshotRequest) (*operationv1.Operation, error) {
+	op, err := h.svc.Create(ctx, svc.CreateSnapshotReq{
+		FolderID:    req.FolderId,
+		DiskID:      req.DiskId,
+		Name:        req.Name,
+		Description: req.Description,
+		Labels:      req.Labels,
+	})
 	if err != nil {
-		if errors.Is(err, watch.ErrGone) {
-			return status.Error(codes.OutOfRange, "resourceVersion too old, please relist")
-		}
-		return err
+		return nil, err
 	}
-	defer sub.Unsubscribe()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case evt, ok := <-sub.C:
-			if !ok {
-				return nil
-			}
-			if sendErr := stream.Send(watchEventToProto(evt)); sendErr != nil {
-				return sendErr
-			}
-		}
-	}
+	return operationToProto(op), nil
 }
 
-func buildSnapshotMatcher(_ []*commonv1.Selector) watch.SelectorMatcher {
-	return func(evt watch.Event) bool {
-		return evt.ResourceKind == "Snapshot"
+func (h *SnapshotHandler) Update(ctx context.Context, req *computev1.UpdateSnapshotRequest) (*operationv1.Operation, error) {
+	if req.SnapshotId == "" {
+		return nil, status.Error(codes.InvalidArgument, "snapshot_id required")
+	}
+	op, err := h.svc.Update(ctx, svc.UpdateSnapshotReq{
+		SnapshotID:      req.SnapshotId,
+		ResourceVersion: req.ResourceVersion,
+		Name:            req.Name,
+		Description:     req.Description,
+		Labels:          req.Labels,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return operationToProto(op), nil
+}
+
+func (h *SnapshotHandler) Delete(ctx context.Context, req *computev1.DeleteSnapshotRequest) (*operationv1.Operation, error) {
+	if req.SnapshotId == "" {
+		return nil, status.Error(codes.InvalidArgument, "snapshot_id required")
+	}
+	op, err := h.svc.Delete(ctx, req.SnapshotId)
+	if err != nil {
+		return nil, err
+	}
+	return operationToProto(op), nil
+}
+
+// ---- domain → proto ----
+
+func snapshotToProto(s *domain.Snapshot) *computev1.Snapshot {
+	return &computev1.Snapshot{
+		Id:                 s.ID,
+		FolderId:           s.FolderID,
+		Name:               s.Name,
+		Description:        s.Description,
+		CreatedAt:          timestamppb.New(s.CreatedAt),
+		Labels:             s.Labels,
+		DiskId:             s.DiskID,
+		Size:               s.Size,
+		Status:             computev1.SnapshotStatus(s.Status),
+		ProgressPercent:    s.ProgressPercent,
+		Generation:         s.Generation,
+		ResourceVersion:    s.ResourceVersion,
+		ObservedGeneration: s.ObservedGeneration,
 	}
 }

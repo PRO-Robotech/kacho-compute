@@ -2,44 +2,94 @@ package domain
 
 import "time"
 
-// Instance — сущность виртуальной машины (entity).
-// Импортирует только stdlib.
+// InstanceStatus — статус жизненного цикла VM.
+type InstanceStatus int32
+
+const (
+	InstanceStatusUnspecified  InstanceStatus = 0
+	InstanceStatusProvisioning InstanceStatus = 1
+	InstanceStatusRunning      InstanceStatus = 2
+	InstanceStatusStopping     InstanceStatus = 3
+	InstanceStatusStopped      InstanceStatus = 4
+	InstanceStatusStarting     InstanceStatus = 5
+	InstanceStatusError        InstanceStatus = 6
+	InstanceStatusDeleting     InstanceStatus = 7
+)
+
+// PowerState — желаемое состояние питания.
+type PowerState int32
+
+const (
+	PowerStateUnspecified PowerState = 0
+	PowerStateRunning     PowerState = 1
+	PowerStateStopped     PowerState = 2
+)
+
+// NetworkInterface — сетевой интерфейс VM.
+type NetworkInterface struct {
+	SubnetID          string
+	PrimaryV4Address  string
+	SecurityGroupIDs  []string
+}
+
+// Resources — вычислительные ресурсы VM.
+type Resources struct {
+	Cores        int64
+	Memory       string // "4Gi", "8Gi"
+	CoreFraction int32
+	GPUs         int64
+}
+
+// BootDisk — загрузочный диск.
+type BootDisk struct {
+	DiskID     string
+	DeviceName string
+	AutoDelete bool
+}
+
+// AttachedDisk — дополнительный диск.
+type AttachedDisk struct {
+	DiskID     string
+	DeviceName string
+	AutoDelete bool
+}
+
+// SchedulingPolicy — политика планирования.
+type SchedulingPolicy struct {
+	Preemptible bool
+}
+
+// Ips — IP-адреса VM.
+type Ips struct {
+	Internal []string
+	External []string
+}
+
+// Instance — доменная модель виртуальной машины.
 type Instance struct {
-	UID               string
-	FolderID          string
-	CloudID           string
-	OrganizationID    string
-	Name              string
-	Labels            map[string]string
-	Annotations       map[string]string
-	CreationTimestamp time.Time
-	ResourceVersion   int64
-	Generation        int64
-	DeletionTimestamp *time.Time
-	Finalizers        []string
-	RestartedAt       *time.Time
-
-	// Spec
-	DisplayName       string
-	Description       string
-	PlatformID        string
-	ZoneID            string
-	Resources         *ResourceSpec
-	BootDisk          *AttachedDisk
-	SecondaryDisks    []*AttachedDisk
-	NetworkInterfaces []*NetworkInterface
-	SchedulingPolicy  *SchedulingPolicy
-	Metadata          map[string]string // user-data
-	FQDN              string
-	DesiredPowerState DesiredPowerState
-
-	// Status (only written via Internal.UpdateStatus)
-	State                  InstanceState
-	StateLastTransitionAt  time.Time
-	IPs                    *IPs
-	StatusFQDN             string
-	HostID                 string
+	ID                    string
+	FolderID              string
+	CreatedAt             time.Time
+	Name                  string
+	Description           string
+	Labels                map[string]string
+	ZoneID                string
+	PlatformID            string
+	Resources             Resources
+	Status                InstanceStatus
+	FQDN                  string
+	Metadata              map[string]string
+	BootDisk              BootDisk
+	SecondaryDisks        []AttachedDisk
+	NetworkInterfaces     []NetworkInterface
+	ServiceAccountID      string
+	SchedulingPolicy      SchedulingPolicy
+	DesiredPowerState     PowerState
+	Generation            int64
+	ResourceVersion       string
+	ObservedGeneration    int64
+	StatusLastTransitionAt time.Time
+	IPs                   Ips
 	LastRestartCompletedAt *time.Time
-	Conditions             []*Condition
-	ObservedGeneration     int64
+	DeletedAt             *time.Time
 }

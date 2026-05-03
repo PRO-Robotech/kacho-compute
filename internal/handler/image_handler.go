@@ -2,79 +2,64 @@ package handler
 
 import (
 	"context"
-	"strconv"
 
-	pb "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
-	commonv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/common/v1"
-	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
 
 	"github.com/PRO-Robotech/kacho-compute/internal/domain"
-	"github.com/PRO-Robotech/kacho-compute/internal/service"
+	svc "github.com/PRO-Robotech/kacho-compute/internal/service"
 )
 
-// ImageHandler реализует pb.ImageServiceServer (read-only).
+// ImageHandler реализует computev1.ImageServiceServer.
 type ImageHandler struct {
-	pb.UnimplementedImageServiceServer
-	svc *service.ImageService
+	computev1.UnimplementedImageServiceServer
+	svc *svc.ImageService
 }
 
 // NewImageHandler создаёт ImageHandler.
-func NewImageHandler(svc *service.ImageService) *ImageHandler {
+func NewImageHandler(svc *svc.ImageService) *ImageHandler {
 	return &ImageHandler{svc: svc}
 }
 
-func (h *ImageHandler) Get(ctx context.Context, req *pb.ImageGetRequest) (*pb.ImageGetResponse, error) {
-	img, err := h.svc.GetByUID(ctx, req.GetUid())
+func (h *ImageHandler) Get(ctx context.Context, req *computev1.GetImageRequest) (*computev1.Image, error) {
+	if req.ImageId == "" {
+		return nil, status.Error(codes.InvalidArgument, "image_id required")
+	}
+	img, err := h.svc.Get(ctx, req.ImageId)
 	if err != nil {
 		return nil, err
 	}
-	return &pb.ImageGetResponse{Image: domainImageToProto(img)}, nil
+	return imageToProto(img), nil
 }
 
-func (h *ImageHandler) List(ctx context.Context, req *pb.ImageListRequest) (*pb.ImageListResponse, error) {
-	selectors := protoSelectorsToService(req.GetSelectors())
-	page := service.Pagination{
-		PageToken: req.GetPageToken(),
-		PageSize:  req.GetPageSize(),
-	}
-
-	images, nextToken, snapshotRV, err := h.svc.List(ctx, selectors, page)
+func (h *ImageHandler) List(ctx context.Context, req *computev1.ListImagesRequest) (*computev1.ListImagesResponse, error) {
+	images, nextToken, err := h.svc.List(ctx, req.Filter, svc.Pagination{
+		PageToken: req.PageToken,
+		PageSize:  req.PageSize,
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	resp := &pb.ImageListResponse{
-		ResourceVersion: int64ToString(snapshotRV),
-		NextPageToken:   nextToken,
-	}
+	resp := &computev1.ListImagesResponse{NextPageToken: nextToken}
 	for _, img := range images {
-		resp.Images = append(resp.Images, domainImageToProto(img))
+		resp.Images = append(resp.Images, imageToProto(img))
 	}
 	return resp, nil
 }
 
-func domainImageToProto(img *domain.Image) *pb.Image {
-	meta := &commonv1.ResourceMeta{
-		Uid:             img.UID,
-		Name:            img.Name,
-		Labels:          img.Labels,
-		ResourceVersion: strconv.FormatInt(img.ResourceVersion, 10),
-		Generation:      img.Generation,
-	}
-	if !img.CreationTimestamp.IsZero() {
-		meta.CreationTimestamp = timestamppb.New(img.CreationTimestamp)
-	}
+// ---- domain → proto ----
 
-	return &pb.Image{
-		Metadata: meta,
-		Spec: &pb.ImageSpec{
-			DisplayName: img.DisplayName,
-			Description: img.Description,
-			Family:      img.Family,
-		},
-		Status: &pb.ImageStatus{
-			State: pb.ImageStatus_STATE_READY,
-		},
+func imageToProto(img *domain.Image) *computev1.Image {
+	return &computev1.Image{
+		Id:          img.ID,
+		Name:        img.Name,
+		Description: img.Description,
+		Family:      img.Family,
+		OsType:      img.OsType,
+		Size:        img.Size,
+		Status:      computev1.ImageStatus(img.Status),
 	}
 }
-

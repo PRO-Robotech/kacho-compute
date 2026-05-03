@@ -5,139 +5,102 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/PRO-Robotech/kacho-compute/internal/service"
+	"github.com/PRO-Robotech/kacho-corelib/operations"
+	"github.com/PRO-Robotech/kacho-compute/internal/config"
+	"github.com/PRO-Robotech/kacho-compute/internal/repo"
 )
 
-const pollInterval = 1 * time.Second
+const (
+	// pollInterval — интервал опроса БД для поиска ресурсов в переходных состояниях.
+	pollInterval = 1 * time.Second
+	// reconcileBatchSize — количество ресурсов за одну итерацию.
+	reconcileBatchSize = 10
+)
 
-// Dispatcher — главный цикл reconciler-а.
+// Dispatcher — главный цикл reconciler-а. Запускает InstanceHandler, DiskHandler, SnapshotHandler.
 type Dispatcher struct {
-	pool            *pgxpool.Pool
-	instanceRepo    service.InstanceRepo
-	diskRepo        service.DiskRepo
-	snapshotRepo    service.SnapshotRepo
-	instanceHandler *InstanceHandler
-	diskHandler     *DiskHandler
-	snapshotHandler *SnapshotHandler
-	logger          *slog.Logger
+	instRepo *repo.InstanceRepo
+	diskRepo *repo.DiskRepo
+	snapRepo *repo.SnapshotRepo
+	opsRepo  operations.Repo
+	sim      config.SimConfig
+	logger   *slog.Logger
+
+	instHandler *InstanceHandler
+	diskHandler *DiskHandler
+	snapHandler *SnapshotHandler
 }
 
 // NewDispatcher создаёт Dispatcher.
 func NewDispatcher(
-	pool *pgxpool.Pool,
-	instanceRepo service.InstanceRepo,
-	diskRepo service.DiskRepo,
-	snapshotRepo service.SnapshotRepo,
-	instanceHandler *InstanceHandler,
-	diskHandler *DiskHandler,
-	snapshotHandler *SnapshotHandler,
+	instRepo *repo.InstanceRepo,
+	diskRepo *repo.DiskRepo,
+	snapRepo *repo.SnapshotRepo,
+	opsRepo operations.Repo,
+	sim config.SimConfig,
 	logger *slog.Logger,
 ) *Dispatcher {
 	return &Dispatcher{
-		pool:            pool,
-		instanceRepo:    instanceRepo,
-		diskRepo:        diskRepo,
-		snapshotRepo:    snapshotRepo,
-		instanceHandler: instanceHandler,
-		diskHandler:     diskHandler,
-		snapshotHandler: snapshotHandler,
-		logger:          logger,
+		instRepo: instRepo,
+		diskRepo: diskRepo,
+		snapRepo: snapRepo,
+		opsRepo:  opsRepo,
+		sim:      sim,
+		logger:   logger,
+		instHandler: NewInstanceHandler(instRepo, diskRepo, opsRepo, sim, logger),
+		diskHandler: NewDiskHandler(diskRepo, opsRepo, sim, logger),
+		snapHandler: NewSnapshotHandler(snapRepo, opsRepo, sim, logger),
 	}
 }
 
-// Run запускает главный цикл reconciler-а. Блокирует до отмены ctx.
+// Run запускает reconcile-цикл. Блокирует до отмены ctx.
 func (d *Dispatcher) Run(ctx context.Context) {
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
 	d.logger.Info("reconciler started")
 	for {
 		select {
 		case <-ctx.Done():
-			d.logger.Info("reconciler stopping")
+			d.logger.Info("reconciler stopped")
 			return
-		case <-time.After(pollInterval):
-			d.tick(ctx)
+		case <-ticker.C:
+			d.reconcileOnce(ctx)
 		}
 	}
 }
 
-func (d *Dispatcher) tick(ctx context.Context) {
-	d.processInstances(ctx)
-	d.processDisks(ctx)
-	d.processSnapshots(ctx)
-}
-
-func (d *Dispatcher) processInstances(ctx context.Context) {
-	instances, err := d.instanceRepo.ListPendingReconcile(ctx)
+func (d *Dispatcher) reconcileOnce(ctx context.Context) {
+	// Инстансы.
+	insts, err := d.instRepo.ListPendingReconcile(ctx, reconcileBatchSize)
 	if err != nil {
-		d.logger.Error("list pending instances", "err", err)
-		return
+		d.logger.Error("reconcile: list pending instances", "err", err)
+	} else {
+		for _, inst := range insts {
+			inst := inst // capture
+			go d.instHandler.Reconcile(ctx, inst)
+		}
 	}
 
-	for _, inst := range instances {
-		inst := inst
-		acquired, err := tryAdvisoryLock(ctx, d.pool, inst.UID)
-		if err != nil {
-			d.logger.Error("advisory lock error", "uid", inst.UID, "err", err)
-			continue
-		}
-		if !acquired {
-			continue
-		}
-
-		go func() {
-			defer advisoryUnlock(ctx, d.pool, inst.UID)
-			d.instanceHandler.Process(ctx, inst)
-		}()
-	}
-}
-
-func (d *Dispatcher) processDisks(ctx context.Context) {
-	disks, err := d.diskRepo.ListPendingReconcile(ctx)
+	// Диски.
+	disks, err := d.diskRepo.ListPendingReconcile(ctx, reconcileBatchSize)
 	if err != nil {
-		d.logger.Error("list pending disks", "err", err)
-		return
+		d.logger.Error("reconcile: list pending disks", "err", err)
+	} else {
+		for _, disk := range disks {
+			disk := disk
+			go d.diskHandler.Reconcile(ctx, disk)
+		}
 	}
 
-	for _, disk := range disks {
-		disk := disk
-		acquired, err := tryAdvisoryLock(ctx, d.pool, disk.UID)
-		if err != nil {
-			d.logger.Error("advisory lock error", "uid", disk.UID, "err", err)
-			continue
-		}
-		if !acquired {
-			continue
-		}
-
-		go func() {
-			defer advisoryUnlock(ctx, d.pool, disk.UID)
-			d.diskHandler.Process(ctx, disk)
-		}()
-	}
-}
-
-func (d *Dispatcher) processSnapshots(ctx context.Context) {
-	snaps, err := d.snapshotRepo.ListPendingReconcile(ctx)
+	// Снимки.
+	snaps, err := d.snapRepo.ListPendingReconcile(ctx, reconcileBatchSize)
 	if err != nil {
-		d.logger.Error("list pending snapshots", "err", err)
-		return
-	}
-
-	for _, snap := range snaps {
-		snap := snap
-		acquired, err := tryAdvisoryLock(ctx, d.pool, snap.UID)
-		if err != nil {
-			d.logger.Error("advisory lock error", "uid", snap.UID, "err", err)
-			continue
+		d.logger.Error("reconcile: list pending snapshots", "err", err)
+	} else {
+		for _, snap := range snaps {
+			snap := snap
+			go d.snapHandler.Reconcile(ctx, snap)
 		}
-		if !acquired {
-			continue
-		}
-
-		go func() {
-			defer advisoryUnlock(ctx, d.pool, snap.UID)
-			d.snapshotHandler.Process(ctx, snap)
-		}()
 	}
 }

@@ -18,8 +18,7 @@ import (
 	coredb "github.com/PRO-Robotech/kacho-corelib/db"
 	"github.com/PRO-Robotech/kacho-corelib/grpcsrv"
 	"github.com/PRO-Robotech/kacho-corelib/observability"
-	"github.com/PRO-Robotech/kacho-corelib/outbox"
-	"github.com/PRO-Robotech/kacho-corelib/watch"
+	"github.com/PRO-Robotech/kacho-corelib/operations"
 
 	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
 
@@ -63,6 +62,7 @@ func runServe(cfg config.Config) error {
 	defer cancel()
 
 	logger := observability.NewSlogger(os.Stdout)
+	slog.SetDefault(logger)
 
 	pool, err := coredb.NewPool(ctx, cfg.DSN())
 	if err != nil {
@@ -70,11 +70,10 @@ func runServe(cfg config.Config) error {
 	}
 	defer pool.Close()
 
-	transactor := coredb.NewTransactor(pool)
-	outboxWriter := outbox.NewWriter("kacho_compute")
-	hub := watch.NewHub(ctx, pool, "kacho_compute")
+	// Operations repo.
+	opsRepo := operations.NewRepo(pool, "public")
 
-	// gRPC клиенты к resource-manager и vpc
+	// gRPC клиенты к resource-manager и vpc.
 	rmConn, err := grpc.NewClient(cfg.ResourceManagerGRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return err
@@ -90,47 +89,35 @@ func runServe(cfg config.Config) error {
 	folderClient := clients.NewFolderClient(rmConn)
 	subnetClient := clients.NewSubnetClient(vpcConn)
 
-	// Repos
-	instanceRepo := repo.NewInstanceRepo(pool, transactor, outboxWriter)
-	diskRepo := repo.NewDiskRepo(pool, transactor, outboxWriter)
+	// Repos.
+	instanceRepo := repo.NewInstanceRepo(pool)
+	diskRepo := repo.NewDiskRepo(pool)
 	imageRepo := repo.NewImageRepo(pool)
-	snapshotRepo := repo.NewSnapshotRepo(pool, transactor, outboxWriter)
+	snapshotRepo := repo.NewSnapshotRepo(pool)
 
-	// Services
-	instanceSvc := service.NewInstanceService(instanceRepo, diskRepo, folderClient, subnetClient)
-	diskSvc := service.NewDiskService(diskRepo, imageRepo, folderClient)
+	// Services.
+	instanceSvc := service.NewInstanceService(instanceRepo, diskRepo, folderClient, subnetClient, opsRepo)
+	diskSvc := service.NewDiskService(diskRepo, imageRepo, folderClient, opsRepo)
 	imageSvc := service.NewImageService(imageRepo)
-	snapshotSvc := service.NewSnapshotService(snapshotRepo, diskRepo)
+	snapshotSvc := service.NewSnapshotService(snapshotRepo, diskRepo, opsRepo)
 
-	// Reconciler
-	instanceHandler := reconciler.NewInstanceHandler(instanceRepo, diskRepo, cfg.Sim)
-	diskHandler := reconciler.NewDiskHandler(diskRepo, diskSvc, cfg.Sim)
-	snapshotHandler := reconciler.NewSnapshotHandler(snapshotRepo, cfg.Sim)
-
+	// Reconciler.
 	dispatcher := reconciler.NewDispatcher(
-		pool,
 		instanceRepo,
 		diskRepo,
 		snapshotRepo,
-		instanceHandler,
-		diskHandler,
-		snapshotHandler,
+		opsRepo,
+		cfg.Sim,
 		slog.Default(),
 	)
-
-	go watch.RunCleanup(ctx, pool, "compute")
 	go dispatcher.Run(ctx)
 
-	// gRPC server
+	// gRPC server.
 	grpcSrv := grpcsrv.NewServer()
-	computev1.RegisterInstanceServiceServer(grpcSrv, handler.NewInstanceHandler(instanceSvc, hub))
-	computev1.RegisterDiskServiceServer(grpcSrv, handler.NewDiskHandler(diskSvc, hub))
+	computev1.RegisterInstanceServiceServer(grpcSrv, handler.NewInstanceHandler(instanceSvc))
+	computev1.RegisterDiskServiceServer(grpcSrv, handler.NewDiskHandler(diskSvc))
 	computev1.RegisterImageServiceServer(grpcSrv, handler.NewImageHandler(imageSvc))
-	computev1.RegisterSnapshotServiceServer(grpcSrv, handler.NewSnapshotHandler(snapshotSvc, hub))
-	computev1.RegisterComputeInternalServiceServer(grpcSrv, handler.NewComputeInternalHandler(
-		instanceSvc, diskSvc, snapshotSvc,
-		instanceRepo, diskRepo, snapshotRepo,
-	))
+	computev1.RegisterSnapshotServiceServer(grpcSrv, handler.NewSnapshotHandler(snapshotSvc))
 
 	listener, err := net.Listen("tcp", ":"+cfg.GrpcPort)
 	if err != nil {

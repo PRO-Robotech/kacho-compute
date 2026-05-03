@@ -2,29 +2,31 @@ package domain
 
 import "time"
 
-// Snapshot — снапшот диска.
+// SnapshotStatus — статус жизненного цикла снимка диска.
+type SnapshotStatus int32
+
+const (
+	SnapshotStatusUnspecified SnapshotStatus = 0
+	SnapshotStatusCreating    SnapshotStatus = 1
+	SnapshotStatusReady       SnapshotStatus = 2
+	SnapshotStatusError       SnapshotStatus = 3
+	SnapshotStatusDeleting    SnapshotStatus = 4
+)
+
+// Snapshot — доменная модель снимка диска.
 type Snapshot struct {
-	UID               string
-	FolderID          string
-	CloudID           string
-	OrganizationID    string
-	Name              string
-	Labels            map[string]string
-	Annotations       map[string]string
-	CreationTimestamp time.Time
-	ResourceVersion   int64
-	Generation        int64
-	DeletionTimestamp *time.Time
-	Finalizers        []string
-
-	// Spec
-	DisplayName string
-	Description string
-	DiskID      string
-
-	// Status
-	State                 SnapshotState
-	StateLastTransitionAt time.Time
-	ProgressPercent       int32
-	ObservedGeneration    int64
+	ID                 string
+	FolderID           string
+	Name               string
+	Description        string
+	CreatedAt          time.Time
+	Labels             map[string]string
+	DiskID             string
+	Size               int64
+	Status             SnapshotStatus
+	ProgressPercent    int32
+	Generation         int64
+	ResourceVersion    string
+	ObservedGeneration int64
+	DeletedAt          *time.Time
 }

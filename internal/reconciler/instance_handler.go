@@ -2,294 +2,267 @@ package reconciler
 
 import (
 	"context"
-	"math/rand"
-	"net"
+	"fmt"
+	"log/slog"
 	"time"
 
+	"github.com/PRO-Robotech/kacho-corelib/ids"
+	"github.com/PRO-Robotech/kacho-corelib/operations"
+	"github.com/PRO-Robotech/kacho-compute/internal/config"
 	"github.com/PRO-Robotech/kacho-compute/internal/domain"
-	"github.com/PRO-Robotech/kacho-compute/internal/service"
+	"github.com/PRO-Robotech/kacho-compute/internal/repo"
+	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
+	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// InstanceHandler обрабатывает переходы состояний Instance.
+// InstanceHandler — reconciler для Instance.
 type InstanceHandler struct {
-	instanceRepo service.InstanceRepo
-	diskRepo     service.DiskRepo
-	simCfg       SimConfig
+	instRepo *repo.InstanceRepo
+	diskRepo *repo.DiskRepo
+	opsRepo  operations.Repo
+	sim      config.SimConfig
+	logger   *slog.Logger
 }
 
 // NewInstanceHandler создаёт InstanceHandler.
-func NewInstanceHandler(instanceRepo service.InstanceRepo, diskRepo service.DiskRepo, simCfg SimConfig) *InstanceHandler {
+func NewInstanceHandler(
+	instRepo *repo.InstanceRepo,
+	diskRepo *repo.DiskRepo,
+	opsRepo operations.Repo,
+	sim config.SimConfig,
+	logger *slog.Logger,
+) *InstanceHandler {
 	return &InstanceHandler{
-		instanceRepo: instanceRepo,
-		diskRepo:     diskRepo,
-		simCfg:       simCfg,
+		instRepo: instRepo,
+		diskRepo: diskRepo,
+		opsRepo:  opsRepo,
+		sim:      sim,
+		logger:   logger,
 	}
 }
 
-// Process обрабатывает один Instance.
-func (h *InstanceHandler) Process(ctx context.Context, inst *domain.Instance) {
-	// Finalizer: deletionTimestamp + disk-detach finalizer
-	if inst.DeletionTimestamp != nil && containsString(inst.Finalizers, "compute.kacho.io/disk-detach") {
-		h.processFinalizerDiskDetach(ctx, inst)
-		return
-	}
-
-	// Restart: restartedAt > lastRestartCompletedAt
-	if inst.RestartedAt != nil {
-		if inst.LastRestartCompletedAt == nil || inst.RestartedAt.After(*inst.LastRestartCompletedAt) {
-			if inst.State == domain.InstanceStateRunning {
-				h.processRestart(ctx, inst)
-				return
-			}
-		}
-	}
-
-	switch inst.State {
-	case domain.InstanceStateProvisioning:
-		h.processProvisioning(ctx, inst)
-	case domain.InstanceStateStopping:
-		h.processStopping(ctx, inst)
-	case domain.InstanceStateStarting:
-		h.processStarting(ctx, inst)
-	case domain.InstanceStateRunning:
-		// Check if desiredPowerState = STOPPED
-		if inst.DesiredPowerState == domain.DesiredPowerStateStopped {
-			h.beginStopping(ctx, inst)
-		}
-	case domain.InstanceStateStopped:
-		// Check if desiredPowerState = RUNNING
-		if inst.DesiredPowerState == domain.DesiredPowerStateRunning {
-			h.beginStarting(ctx, inst)
-		}
+// Reconcile обрабатывает одну итерацию reconcile для Instance.
+func (h *InstanceHandler) Reconcile(ctx context.Context, inst *domain.Instance) {
+	switch inst.Status {
+	case domain.InstanceStatusProvisioning:
+		h.handleProvisioning(ctx, inst)
+	case domain.InstanceStatusStarting:
+		h.handleStarting(ctx, inst)
+	case domain.InstanceStatusStopping:
+		h.handleStopping(ctx, inst)
+	case domain.InstanceStatusDeleting:
+		h.handleDeleting(ctx, inst)
 	}
 }
 
-// processProvisioning: PROVISIONING → (диски ATTACHING → READY-attached) → RUNNING
-func (h *InstanceHandler) processProvisioning(ctx context.Context, inst *domain.Instance) {
-	// Фаза 1: attach диски
-	allDisks := h.collectDisks(inst)
+func (h *InstanceHandler) handleProvisioning(ctx context.Context, inst *domain.Instance) {
+	min, max := h.sim.ProvisionDuration()
+	delay := randDuration(min, max)
+	h.logger.Info("instance provisioning", "id", inst.ID, "delay_ms", delay.Milliseconds())
 
-	for _, diskUID := range allDisks {
-		if diskUID == "" {
-			continue
-		}
-		disk, err := h.diskRepo.GetByUID(ctx, diskUID)
-		if err != nil || disk == nil {
-			continue
-		}
-		// Переводим диск в ATTACHING
-		disk.State = domain.DiskStateAttaching
-		disk.StateLastTransitionAt = time.Now().UTC()
-		disk.AttachedToInstanceID = inst.UID
-		_, _ = h.diskRepo.UpdateStatus(ctx, disk)
-	}
-
-	// Фаза 2: симулируем задержку provisioning
-	delay := randBetween(h.simCfg.InstanceProvisionMinMs, h.simCfg.InstanceProvisionMaxMs)
 	select {
 	case <-ctx.Done():
 		return
-	case <-time.After(time.Duration(delay) * time.Millisecond):
+	case <-time.After(delay):
 	}
 
-	// Фаза 3: диски → READY-attached, Instance → RUNNING
-	for _, diskUID := range allDisks {
-		if diskUID == "" {
-			continue
-		}
-		disk, err := h.diskRepo.GetByUID(ctx, diskUID)
-		if err != nil || disk == nil {
-			continue
-		}
-		disk.State = domain.DiskStateReady
-		disk.StateLastTransitionAt = time.Now().UTC()
-		disk.AttachedToInstanceID = inst.UID
-		_, _ = h.diskRepo.UpdateStatus(ctx, disk)
+	now := time.Now().UTC()
+	inst.Status = domain.InstanceStatusRunning
+	inst.ObservedGeneration = inst.Generation
+	inst.StatusLastTransitionAt = now
+	inst.IPs = domain.Ips{
+		Internal: []string{generateInternalIP()},
 	}
 
-	// Instance → RUNNING
-	inst.State = domain.InstanceStateRunning
-	inst.StateLastTransitionAt = time.Now().UTC()
-	inst.IPs = &domain.IPs{
-		Internal: assignInternalIP(inst.UID),
-	}
-	_, _ = h.instanceRepo.UpdateStatus(ctx, inst)
-}
-
-// processStopping: STOPPING → STOPPED
-func (h *InstanceHandler) processStopping(ctx context.Context, inst *domain.Instance) {
-	delay := randBetween(h.simCfg.InstanceStopMinMs, h.simCfg.InstanceStopMaxMs)
-	select {
-	case <-ctx.Done():
-		return
-	case <-time.After(time.Duration(delay) * time.Millisecond):
-	}
-
-	inst.State = domain.InstanceStateStopped
-	inst.StateLastTransitionAt = time.Now().UTC()
-	_, _ = h.instanceRepo.UpdateStatus(ctx, inst)
-}
-
-// processStarting: STARTING → RUNNING
-func (h *InstanceHandler) processStarting(ctx context.Context, inst *domain.Instance) {
-	delay := randBetween(h.simCfg.InstanceStartMinMs, h.simCfg.InstanceStartMaxMs)
-	select {
-	case <-ctx.Done():
-		return
-	case <-time.After(time.Duration(delay) * time.Millisecond):
-	}
-
-	inst.State = domain.InstanceStateRunning
-	inst.StateLastTransitionAt = time.Now().UTC()
-	if inst.IPs == nil {
-		inst.IPs = &domain.IPs{Internal: assignInternalIP(inst.UID)}
-	}
-	_, _ = h.instanceRepo.UpdateStatus(ctx, inst)
-}
-
-// beginStopping: RUNNING → STOPPING (немедленно, потом reconciler доделает)
-func (h *InstanceHandler) beginStopping(ctx context.Context, inst *domain.Instance) {
-	inst.State = domain.InstanceStateStopping
-	inst.StateLastTransitionAt = time.Now().UTC()
-	_, _ = h.instanceRepo.UpdateStatus(ctx, inst)
-}
-
-// beginStarting: STOPPED → STARTING
-func (h *InstanceHandler) beginStarting(ctx context.Context, inst *domain.Instance) {
-	inst.State = domain.InstanceStateStarting
-	inst.StateLastTransitionAt = time.Now().UTC()
-	_, _ = h.instanceRepo.UpdateStatus(ctx, inst)
-}
-
-// processRestart: Restart — stop + start цикл
-func (h *InstanceHandler) processRestart(ctx context.Context, inst *domain.Instance) {
-	restartedAt := inst.RestartedAt
-
-	// Step 1: RUNNING → STOPPING
-	inst.State = domain.InstanceStateStopping
-	inst.StateLastTransitionAt = time.Now().UTC()
-	_, _ = h.instanceRepo.UpdateStatus(ctx, inst)
-
-	// Step 2: задержка STOPPING
-	delay := randBetween(h.simCfg.InstanceStopMinMs, h.simCfg.InstanceStopMaxMs)
-	select {
-	case <-ctx.Done():
-		return
-	case <-time.After(time.Duration(delay) * time.Millisecond):
-	}
-
-	// Step 3: STOPPING → STOPPED
-	inst.State = domain.InstanceStateStopped
-	inst.StateLastTransitionAt = time.Now().UTC()
-	_, _ = h.instanceRepo.UpdateStatus(ctx, inst)
-
-	// Step 4: STOPPED → STARTING
-	inst.State = domain.InstanceStateStarting
-	inst.StateLastTransitionAt = time.Now().UTC()
-	_, _ = h.instanceRepo.UpdateStatus(ctx, inst)
-
-	// Step 5: задержка STARTING
-	delay = randBetween(h.simCfg.InstanceStartMinMs, h.simCfg.InstanceStartMaxMs)
-	select {
-	case <-ctx.Done():
-		return
-	case <-time.After(time.Duration(delay) * time.Millisecond):
-	}
-
-	// Step 6: STARTING → RUNNING, lastRestartCompletedAt = restartedAt
-	inst.State = domain.InstanceStateRunning
-	inst.StateLastTransitionAt = time.Now().UTC()
-	inst.LastRestartCompletedAt = restartedAt
-	_, _ = h.instanceRepo.UpdateStatus(ctx, inst)
-}
-
-// processFinalizerDiskDetach: безопасное удаление с отключением дисков.
-func (h *InstanceHandler) processFinalizerDiskDetach(ctx context.Context, inst *domain.Instance) {
-	// Получаем все прикреплённые диски
-	attachedDisks, err := h.diskRepo.ListAttachedToInstance(ctx, inst.UID)
+	updated, err := h.instRepo.Update(ctx, inst)
 	if err != nil {
+		h.logger.Error("instance provisioning: update failed", "id", inst.ID, "err", err)
 		return
 	}
 
-	// Детачим каждый диск
-	for _, disk := range attachedDisks {
-		disk.State = domain.DiskStateReady
-		disk.StateLastTransitionAt = time.Now().UTC()
-		disk.AttachedToInstanceID = ""
-		disk.DeviceName = ""
-		_, _ = h.diskRepo.UpdateStatus(ctx, disk)
-	}
-
-	// Убираем finalizer compute.kacho.io/disk-detach
-	newFinalizers := removeString(inst.Finalizers, "compute.kacho.io/disk-detach")
-
-	restartedAtStr := (*string)(nil)
-	_, _ = h.instanceRepo.UpdateMetadata(ctx, inst.UID, newFinalizers, true, restartedAtStr)
-
-	// Если finalizers пустые — физически удаляем Instance
-	if len(newFinalizers) == 0 {
-		_ = h.instanceRepo.HardDelete(ctx, inst.UID)
+	// Найти и завершить операцию Create/Update для этого инстанса.
+	if err := h.markOperationDone(ctx, inst.ID, updated); err != nil {
+		h.logger.Error("instance provisioning: markDone failed", "id", inst.ID, "err", err)
 	}
 }
 
-func (h *InstanceHandler) collectDisks(inst *domain.Instance) []string {
-	var uids []string
-	if inst.BootDisk != nil && inst.BootDisk.DiskID != "" {
-		uids = append(uids, inst.BootDisk.DiskID)
+func (h *InstanceHandler) handleStarting(ctx context.Context, inst *domain.Instance) {
+	min, max := h.sim.StartStopDuration()
+	delay := randDuration(min, max)
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(delay):
 	}
+
+	now := time.Now().UTC()
+	inst.Status = domain.InstanceStatusRunning
+	inst.ObservedGeneration = inst.Generation
+	inst.StatusLastTransitionAt = now
+
+	updated, err := h.instRepo.Update(ctx, inst)
+	if err != nil {
+		h.logger.Error("instance starting: update failed", "id", inst.ID, "err", err)
+		return
+	}
+
+	if err := h.markOperationDone(ctx, inst.ID, updated); err != nil {
+		h.logger.Error("instance starting: markDone failed", "id", inst.ID, "err", err)
+	}
+}
+
+func (h *InstanceHandler) handleStopping(ctx context.Context, inst *domain.Instance) {
+	min, max := h.sim.StartStopDuration()
+	delay := randDuration(min, max)
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(delay):
+	}
+
+	now := time.Now().UTC()
+
+	// Если DesiredPowerState=RUNNING — это была остановка для restart, переходим в STARTING.
+	if inst.DesiredPowerState == domain.PowerStateRunning {
+		// Restart cycle: STOPPING → STARTING
+		inst.Status = domain.InstanceStatusStarting
+		inst.StatusLastTransitionAt = now
+		// Запишем время как последнего restart.
+		inst.LastRestartCompletedAt = &now
+
+		if _, err := h.instRepo.Update(ctx, inst); err != nil {
+			h.logger.Error("instance restart-stopping: update failed", "id", inst.ID, "err", err)
+		}
+		// Не markDone — reconciler подхватит STARTING на следующей итерации.
+		return
+	}
+
+	// Обычная остановка: STOPPING → STOPPED.
+	inst.Status = domain.InstanceStatusStopped
+	inst.ObservedGeneration = inst.Generation
+	inst.StatusLastTransitionAt = now
+
+	updated, err := h.instRepo.Update(ctx, inst)
+	if err != nil {
+		h.logger.Error("instance stopping: update failed", "id", inst.ID, "err", err)
+		return
+	}
+
+	if err := h.markOperationDone(ctx, inst.ID, updated); err != nil {
+		h.logger.Error("instance stopping: markDone failed", "id", inst.ID, "err", err)
+	}
+}
+
+func (h *InstanceHandler) handleDeleting(ctx context.Context, inst *domain.Instance) {
+	// Открепляем диски.
 	for _, sd := range inst.SecondaryDisks {
-		if sd.DiskID != "" {
-			uids = append(uids, sd.DiskID)
+		if sd.DiskID == "" {
+			continue
+		}
+		disk, err := h.diskRepo.Get(ctx, sd.DiskID)
+		if err != nil {
+			continue
+		}
+		disk.AttachedToInstanceID = ""
+		if _, err := h.diskRepo.Update(ctx, disk); err != nil {
+			h.logger.Error("deleting: detach secondary disk", "disk_id", sd.DiskID, "err", err)
 		}
 	}
-	return uids
-}
 
-// assignInternalIP генерирует детерминированный псевдо-IP на основе UID.
-// OQ-4: 10.0.0.<hash(uid) % 250 + 2>
-func assignInternalIP(uid string) string {
-	h := fnv32(uid)
-	last := int(h%250) + 2
-	ip := net.IP{10, 0, 0, byte(last)}
-	return ip.String()
-}
-
-func fnv32(s string) uint32 {
-	b := []byte(s)
-	var h uint32 = 2166136261
-	for _, c := range b {
-		h ^= uint32(c)
-		h *= 16777619
-	}
-	return h
-}
-
-// containsString проверяет наличие строки в слайсе.
-func containsString(slice []string, s string) bool {
-	for _, v := range slice {
-		if v == s {
-			return true
+	// Физическое удаление (boot disk с auto_delete тоже удаляем).
+	if inst.BootDisk.DiskID != "" && inst.BootDisk.AutoDelete {
+		if err := h.diskRepo.HardDelete(ctx, inst.BootDisk.DiskID); err != nil {
+			h.logger.Error("deleting: delete boot disk", "disk_id", inst.BootDisk.DiskID, "err", err)
 		}
 	}
-	return false
+
+	if err := h.instRepo.HardDelete(ctx, inst.ID); err != nil {
+		h.logger.Error("instance deleting: hard delete failed", "id", inst.ID, "err", err)
+		return
+	}
+
+	// Завершаем операцию Delete.
+	// Так как инстанс удалён, передаём пустой ответ.
+	emptyInst := &computev1.Instance{Id: inst.ID}
+	resp, _ := anypb.New(emptyInst)
+	if err := h.markOperationDoneWithResp(ctx, inst.ID, resp); err != nil {
+		h.logger.Error("instance deleting: markDone failed", "id", inst.ID, "err", err)
+	}
 }
 
-// removeString удаляет строку из слайса.
-func removeString(slice []string, s string) []string {
-	var result []string
-	for _, v := range slice {
-		if v != s {
-			result = append(result, v)
+// markOperationDone находит незавершённую операцию для ресурса и вызывает MarkDone.
+func (h *InstanceHandler) markOperationDone(ctx context.Context, instanceID string, inst *domain.Instance) error {
+	resp, err := anypb.New(domainInstanceToProto(inst))
+	if err != nil {
+		return err
+	}
+	return h.markOperationDoneWithResp(ctx, instanceID, resp)
+}
+
+func (h *InstanceHandler) markOperationDoneWithResp(ctx context.Context, instanceID string, resp *anypb.Any) error {
+	ops, _, err := h.opsRepo.List(ctx, operations.ListFilter{
+		ResourceID: instanceID,
+		PageSize:   10,
+	})
+	if err != nil {
+		return fmt.Errorf("list ops: %w", err)
+	}
+	for _, op := range ops {
+		if op.Done {
+			continue
+		}
+		if err := h.opsRepo.MarkDone(ctx, op.ID, resp); err != nil {
+			return fmt.Errorf("mark done op %s: %w", op.ID, err)
+		}
+		break // помечаем только первую незавершённую
+	}
+	return nil
+}
+
+// generateInternalIP — имитация назначения IP reconciler-ом.
+func generateInternalIP() string {
+	uid := ids.NewUID()
+	// детерминированный fake: берём первые 12 символов UUID для формирования IP
+	return fmt.Sprintf("10.%d.%d.%d",
+		int(uid[0])%256,
+		int(uid[1])%256,
+		int(uid[2])%256,
+	)
+}
+
+// domainInstanceToProto конвертирует domain.Instance в proto для сохранения в operation response.
+func domainInstanceToProto(inst *domain.Instance) *computev1.Instance {
+	p := &computev1.Instance{
+		Id:                 inst.ID,
+		FolderId:           inst.FolderID,
+		CreatedAt:          timestamppb.New(inst.CreatedAt),
+		Name:               inst.Name,
+		Description:        inst.Description,
+		Labels:             inst.Labels,
+		ZoneId:             inst.ZoneID,
+		PlatformId:         inst.PlatformID,
+		Status:             computev1.Status(inst.Status),
+		Fqdn:               inst.FQDN,
+		Metadata:           inst.Metadata,
+		DesiredPowerState:  computev1.PowerState(inst.DesiredPowerState),
+		Generation:         inst.Generation,
+		ResourceVersion:    inst.ResourceVersion,
+		ObservedGeneration: inst.ObservedGeneration,
+		Ips: &computev1.Ips{
+			Internal: inst.IPs.Internal,
+			External: inst.IPs.External,
+		},
+	}
+	if inst.Resources.Cores > 0 || inst.Resources.Memory != "" {
+		p.Resources = &computev1.Resources{
+			Cores:        inst.Resources.Cores,
+			Memory:       inst.Resources.Memory,
+			CoreFraction: inst.Resources.CoreFraction,
+			Gpus:         inst.Resources.GPUs,
 		}
 	}
-	return result
+	return p
 }
-
-// randBetween возвращает случайное число в диапазоне [min, max].
-func randBetween(minVal, maxVal int) int {
-	if minVal >= maxVal {
-		return minVal
-	}
-	return minVal + rand.Intn(maxVal-minVal+1)
-}
-
