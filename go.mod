@@ -80,3 +80,5 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260427160629-7cedc36a6bc4 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/H-BF/corlib => github.com/PRO-Robotech/corelib v1.2.28-dev
