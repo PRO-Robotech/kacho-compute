@@ -274,7 +274,71 @@ func (s *InstanceService) doCreate(ctx context.Context, instanceID string, req C
 		s.releaseAddresses(ctx, createdAddrIDs)
 		return nil, mapRepoErr(err)
 	}
+	// Referrer-tracking (YC-like): attach a compute_instance reference to every
+	// VPC Address this instance's NICs use (ephemeral internal/external + any
+	// reserved one-to-one-NAT address). Best-effort — the IPs are already
+	// allocated; a missing reference must not fail the instance create.
+	s.setNICAddressReferences(ctx, created)
 	return anypb.New(protoconv.Instance(created))
+}
+
+// setNICAddressReferences best-effort выставляет referrer (type=compute_instance,
+// id=instance id, name=instance name) на каждый VPC Address-ресурс, который
+// используют NIC-и инстанса: эфемерный internal (PrimaryV4AddressID), эфемерный
+// ИЛИ reserved external NAT (PrimaryV4Nat.AddressID / PrimaryV6Nat.AddressID).
+// Ошибка → warning в лог, не валит вызывающую операцию.
+func (s *InstanceService) setNICAddressReferences(ctx context.Context, in *domain.Instance) {
+	for i := range in.NetworkInterfaces {
+		nic := &in.NetworkInterfaces[i]
+		s.setAddressReference(ctx, nic.PrimaryV4AddressID, in.ID, in.Name)
+		if nic.PrimaryV4Nat != nil {
+			s.setAddressReference(ctx, nic.PrimaryV4Nat.AddressID, in.ID, in.Name)
+		}
+		if nic.PrimaryV6Nat != nil {
+			s.setAddressReference(ctx, nic.PrimaryV6Nat.AddressID, in.ID, in.Name)
+		}
+	}
+}
+
+// setAddressReference — best-effort SetAddressReference на один Address (no-op
+// если addressID пуст). Ошибка → warning, не fatal.
+func (s *InstanceService) setAddressReference(ctx context.Context, addressID, instanceID, instanceName string) {
+	if addressID == "" {
+		return
+	}
+	if err := s.vpcClient.SetAddressReference(ctx, addressID, "compute_instance", instanceID, instanceName); err != nil {
+		slog.WarnContext(ctx, "failed to set vpc address referrer (best-effort)",
+			"address_id", addressID, "instance_id", instanceID, "err", err)
+	}
+}
+
+// clearAddressReference — best-effort ClearAddressReference на один Address
+// (no-op если addressID пуст). Ошибка → warning, не fatal.
+func (s *InstanceService) clearAddressReference(ctx context.Context, addressID string) {
+	if addressID == "" {
+		return
+	}
+	if err := s.vpcClient.ClearAddressReference(ctx, addressID); err != nil {
+		slog.WarnContext(ctx, "failed to clear vpc address referrer (best-effort)",
+			"address_id", addressID, "err", err)
+	}
+}
+
+// reservedNatAddressIDs возвращает id reserved (Ephemeral=false) external
+// NAT-адресов, на которые ссылаются NIC-и инстанса. Эфемерные не включаются —
+// для них referrer уходит через FK CASCADE при DeleteAddress.
+func reservedNatAddressIDs(in *domain.Instance) []string {
+	var out []string
+	for i := range in.NetworkInterfaces {
+		nic := &in.NetworkInterfaces[i]
+		if nic.PrimaryV4Nat != nil && !nic.PrimaryV4Nat.Ephemeral && nic.PrimaryV4Nat.AddressID != "" {
+			out = append(out, nic.PrimaryV4Nat.AddressID)
+		}
+		if nic.PrimaryV6Nat != nil && !nic.PrimaryV6Nat.Ephemeral && nic.PrimaryV6Nat.AddressID != "" {
+			out = append(out, nic.PrimaryV6Nat.AddressID)
+		}
+	}
+	return out
 }
 
 // materializeNICs валидирует cross-service refs каждого NIC-spec'а (subnet,
@@ -809,6 +873,9 @@ func (s *InstanceService) AddOneToOneNat(ctx context.Context, id, nicIndex strin
 			}
 			return nil, mapRepoErr(err)
 		}
+		// Referrer-tracking: attach a compute_instance reference to the NAT
+		// address (ephemeral or reserved). Best-effort.
+		s.setAddressReference(ctx, addrID, in.ID, in.Name)
 		return anypb.New(protoconv.Instance(updated))
 	})
 	return &op, nil
@@ -839,9 +906,12 @@ func (s *InstanceService) RemoveOneToOneNat(ctx context.Context, id, nicIndex st
 		if nic.PrimaryV4Nat == nil {
 			return nil, status.Error(codes.FailedPrecondition, "One-to-one NAT is not enabled on the network interface")
 		}
-		releaseID := ""
+		releaseID := ""  // ephemeral address to delete (referrer goes via FK CASCADE)
+		clearRefID := "" // reserved address whose referrer we explicitly clear
 		if nic.PrimaryV4Nat.Ephemeral {
 			releaseID = nic.PrimaryV4Nat.AddressID
+		} else {
+			clearRefID = nic.PrimaryV4Nat.AddressID
 		}
 		copyNIC := *nic
 		copyNIC.PrimaryV4Nat = nil
@@ -850,10 +920,11 @@ func (s *InstanceService) RemoveOneToOneNat(ctx context.Context, id, nicIndex st
 			return nil, mapRepoErr(err)
 		}
 		// Free the ephemeral external Address (best-effort) now that the NIC no
-		// longer references it.
+		// longer references it; or clear the referrer on a reserved address.
 		if releaseID != "" {
 			s.releaseAddresses(ctx, []string{releaseID})
 		}
+		s.clearAddressReference(ctx, clearRefID)
 		return anypb.New(protoconv.Instance(updated))
 	})
 	return &op, nil
@@ -940,8 +1011,14 @@ func (s *InstanceService) Delete(ctx context.Context, id string) (*operations.Op
 		}
 		// Release ephemeral VPC Address resources owned by this instance's NICs
 		// (best-effort: VPC unavailable / already-gone → log warning, don't fail
-		// the delete — mirrors the legacy NAT-release best-effort path).
+		// the delete — mirrors the legacy NAT-release best-effort path). The
+		// referrer rows of ephemeral addresses go away via FK CASCADE on delete;
+		// for any reserved one-to-one-NAT address we explicitly clear the referrer
+		// so it shows used=false again.
 		s.releaseAddresses(ctx, ephemeralAddressIDs(in))
+		for _, addrID := range reservedNatAddressIDs(in) {
+			s.clearAddressReference(ctx, addrID)
+		}
 		return anypb.New(&emptypb.Empty{})
 	})
 	return &op, nil

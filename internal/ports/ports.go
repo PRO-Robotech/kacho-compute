@@ -192,6 +192,16 @@ type VPCClient interface {
 	// DeleteAddress удаляет Address-ресурс (best-effort: поллит Operation;
 	// NotFound трактуется как успех — ресурс уже удалён).
 	DeleteAddress(ctx context.Context, addressID string) error
+	// SetAddressReference привязывает referrer к Address-ресурсу (кто его
+	// использует — type=compute_instance, id=instance id, name=instance name).
+	// Идемпотентно. Вызывается best-effort из instance.go при аллокации
+	// NIC-адресов (ошибка не валит Instance.Create — IP уже выделен).
+	SetAddressReference(ctx context.Context, addressID, referrerType, referrerID, referrerName string) error
+	// ClearAddressReference снимает referrer с Address-ресурса (best-effort;
+	// NotFound = адрес уже удалён → успех). Вызывается при отвязке
+	// reserved-адреса от ВМ (для эфемерных адресов referrer уходит через FK
+	// CASCADE при DeleteAddress).
+	ClearAddressReference(ctx context.Context, addressID string) error
 	// ZoneSource — kacho-vpc InternalZoneService (на internal-порту :9091) —
 	// авторитетный источник справочника зон для compute (Get/List + existence-check).
 	ZoneSource

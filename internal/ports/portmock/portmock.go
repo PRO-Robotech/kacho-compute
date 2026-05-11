@@ -722,6 +722,10 @@ type VPCClient struct {
 	addrSeq        int
 	CreatedAddrIDs []string
 	DeletedAddrIDs []string
+	// SetRefs — addressID → referrerID, протоколирует SetAddressReference.
+	// ClearedRefs — addressID'ы, переданные в ClearAddressReference.
+	SetRefs     map[string]string
+	ClearedRefs []string
 }
 
 // zonesOrDefault — Zones либо стандартный набор ru-central1-{a,b,d}.
@@ -808,6 +812,25 @@ func (c *VPCClient) DeleteAddress(_ context.Context, addressID string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.DeletedAddrIDs = append(c.DeletedAddrIDs, addressID)
+	return nil
+}
+
+// SetAddressReference протоколирует (addressID → referrerID) и возвращает nil.
+func (c *VPCClient) SetAddressReference(_ context.Context, addressID, _, referrerID, _ string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.SetRefs == nil {
+		c.SetRefs = make(map[string]string)
+	}
+	c.SetRefs[addressID] = referrerID
+	return nil
+}
+
+// ClearAddressReference протоколирует addressID и возвращает nil.
+func (c *VPCClient) ClearAddressReference(_ context.Context, addressID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.ClearedRefs = append(c.ClearedRefs, addressID)
 	return nil
 }
 

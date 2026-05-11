@@ -377,6 +377,75 @@ func TestInstance_AddRemoveNAT_RealIP(t *testing.T) {
 	require.ElementsMatch(t, vpc.CreatedAddrIDs, vpc.DeletedAddrIDs) // ephemeral external Address released
 }
 
+func TestInstance_Create_SetsAddressReferences(t *testing.T) {
+	vpc := &portmock.VPCClient{SubnetFound: true, SubnetCidrBlocks: []string{"10.123.0.0/24"}, SGFound: true, AddrFound: true,
+		InternalIP: "10.123.0.7", ExternalIP: "198.51.100.42"}
+	svc, repo, _, ops := newInstanceSvcVPC(t, vpc)
+	req := baseCreateReq()
+	req.NICs = []NICSpec{{SubnetID: "e9bsubnet", OneToOneNat: &NatSpec{}}}
+	op, err := svc.Create(context.Background(), req)
+	require.NoError(t, err)
+	in := instanceFromOp(t, portmock.AwaitOpDone(t, ops, op.ID))
+	stored, err := repo.Get(context.Background(), in.Id)
+	require.NoError(t, err)
+	intAddrID := stored.NetworkInterfaces[0].PrimaryV4AddressID
+	extAddrID := stored.NetworkInterfaces[0].PrimaryV4Nat.AddressID
+	require.NotEmpty(t, intAddrID)
+	require.NotEmpty(t, extAddrID)
+	// Both ephemeral addresses got a compute_instance referrer pointing at this VM.
+	require.Equal(t, in.Id, vpc.SetRefs[intAddrID])
+	require.Equal(t, in.Id, vpc.SetRefs[extAddrID])
+
+	// Delete → ephemeral addresses deleted (referrer rows go via FK CASCADE in VPC).
+	op, err = svc.Delete(context.Background(), in.Id)
+	require.NoError(t, err)
+	require.Nil(t, portmock.AwaitOpDone(t, ops, op.ID).Error)
+	require.ElementsMatch(t, []string{intAddrID, extAddrID}, vpc.DeletedAddrIDs)
+}
+
+func TestInstance_Create_ReservedNatAddress_SetsAndClearsReference(t *testing.T) {
+	vpc := &portmock.VPCClient{SubnetFound: true, SubnetCidrBlocks: []string{"10.123.0.0/24"}, SGFound: true, AddrFound: true,
+		InternalIP: "10.123.0.7", ExternalIP: "198.51.100.99"}
+	svc, repo, _, ops := newInstanceSvcVPC(t, vpc)
+	req := baseCreateReq()
+	const reservedAddrID = "e9breservedaddr01"
+	req.NICs = []NICSpec{{SubnetID: "e9bsubnet", OneToOneNat: &NatSpec{AddressID: reservedAddrID}}}
+	op, err := svc.Create(context.Background(), req)
+	require.NoError(t, err)
+	in := instanceFromOp(t, portmock.AwaitOpDone(t, ops, op.ID))
+	stored, err := repo.Get(context.Background(), in.Id)
+	require.NoError(t, err)
+	require.False(t, stored.NetworkInterfaces[0].PrimaryV4Nat.Ephemeral)
+	require.Equal(t, reservedAddrID, stored.NetworkInterfaces[0].PrimaryV4Nat.AddressID)
+	// Reserved NAT address got a referrer.
+	require.Equal(t, in.Id, vpc.SetRefs[reservedAddrID])
+
+	// Delete → reserved address NOT deleted, but its referrer is cleared.
+	op, err = svc.Delete(context.Background(), in.Id)
+	require.NoError(t, err)
+	require.Nil(t, portmock.AwaitOpDone(t, ops, op.ID).Error)
+	require.NotContains(t, vpc.DeletedAddrIDs, reservedAddrID)
+	require.Contains(t, vpc.ClearedRefs, reservedAddrID)
+}
+
+func TestInstance_AddRemoveNAT_SetsAndClearsEphemeralReference(t *testing.T) {
+	vpc := &portmock.VPCClient{SubnetFound: true, SGFound: true, ExternalIP: "198.51.100.77"}
+	svc, repo, _, ops := newInstanceSvcVPC(t, vpc)
+	seedRunningInstance(repo, domain.InstanceStatusRunning)
+
+	op, err := svc.AddOneToOneNat(context.Background(), "epdvm1", "0", nil)
+	require.NoError(t, err)
+	require.Nil(t, portmock.AwaitOpDone(t, ops, op.ID).Error)
+	require.Len(t, vpc.CreatedAddrIDs, 1)
+	ephAddrID := vpc.CreatedAddrIDs[0]
+	require.Equal(t, "epdvm1", vpc.SetRefs[ephAddrID])
+
+	op, err = svc.RemoveOneToOneNat(context.Background(), "epdvm1", "0")
+	require.NoError(t, err)
+	require.Nil(t, portmock.AwaitOpDone(t, ops, op.ID).Error)
+	require.Contains(t, vpc.DeletedAddrIDs, ephAddrID) // ephemeral → deleted (referrer via CASCADE)
+}
+
 // TestInstance_Create_ZoneFromVPCSource — zone_id валидируется через ZoneRegistry
 // (в проде — kacho-vpc InternalZoneService; здесь — VPCClient-mock). Неизвестная
 // VPC-зона → операция падает с InvalidArgument "Zone ... not found".

@@ -33,20 +33,25 @@ const (
 // AddressService + OperationService — IPAM-аллокация реальных IPv4 для
 // Instance NIC-ей через создание эфемерных Address-ресурсов;
 // InternalZoneService — справочник зон, который compute проксирует как
-// собственный ZoneService и использует для existence-check zone_id).
+// собственный ZoneService и использует для existence-check zone_id;
+// InternalAddressService — referrer-tracking адресов: привязка/отвязка
+// «кто использует адрес» (type=compute_instance, id=instance id)).
 //
 // Использует ДВА gRPC-conn: публичный (:9090 — Subnet/SG/Address/Operation) и
-// internal (:9091 — InternalZoneService, не выставлен на external endpoint).
+// internal (:9091 — InternalZoneService + InternalAddressService, не
+// выставлены на external endpoint).
 type VPCClient struct {
 	subnets       vpcv1.SubnetServiceClient
 	sgs           vpcv1.SecurityGroupServiceClient
 	addrs         vpcv1.AddressServiceClient
 	ops           operationv1.OperationServiceClient
 	internalZones vpcv1.InternalZoneServiceClient
+	internalAddrs vpcv1.InternalAddressServiceClient
 }
 
 // NewVPCClient создаёт VPCClient. conn — публичный gRPC-conn kacho-vpc (:9090);
-// internalConn — conn к internal-порту kacho-vpc (:9091, InternalZoneService).
+// internalConn — conn к internal-порту kacho-vpc (:9091, InternalZoneService +
+// InternalAddressService).
 func NewVPCClient(conn, internalConn *grpc.ClientConn) *VPCClient {
 	return &VPCClient{
 		subnets:       vpcv1.NewSubnetServiceClient(conn),
@@ -54,6 +59,7 @@ func NewVPCClient(conn, internalConn *grpc.ClientConn) *VPCClient {
 		addrs:         vpcv1.NewAddressServiceClient(conn),
 		ops:           operationv1.NewOperationServiceClient(conn),
 		internalZones: vpcv1.NewInternalZoneServiceClient(internalConn),
+		internalAddrs: vpcv1.NewInternalAddressServiceClient(internalConn),
 	}
 }
 
@@ -247,6 +253,40 @@ func (c *VPCClient) DeleteAddress(ctx context.Context, addressID string) error {
 	return nil
 }
 
+// SetAddressReference привязывает referrer к VPC Address-ресурсу (кто его
+// использует). Идемпотентно. gRPC NotFound (адрес исчез на стороне VPC) →
+// возвращается обёрнутая ошибка; вызывающий код в instance.go трактует это
+// best-effort (warn + continue — IP уже выделен).
+func (c *VPCClient) SetAddressReference(ctx context.Context, addressID, referrerType, referrerID, referrerName string) error {
+	return retry.OnUnavailable(ctx, func(ctx context.Context) error {
+		_, rerr := c.internalAddrs.SetAddressReference(ctx, &vpcv1.SetAddressReferenceRequest{
+			AddressId:    addressID,
+			ReferrerType: referrerType,
+			ReferrerId:   referrerID,
+			ReferrerName: referrerName,
+		})
+		if rerr != nil {
+			return fmt.Errorf("set address reference %s: %w", addressID, rerr)
+		}
+		return nil
+	})
+}
+
+// ClearAddressReference снимает referrer с VPC Address-ресурса. gRPC NotFound
+// (адрес уже удалён) → трактуется как успех (нечего снимать).
+func (c *VPCClient) ClearAddressReference(ctx context.Context, addressID string) error {
+	return retry.OnUnavailable(ctx, func(ctx context.Context) error {
+		_, rerr := c.internalAddrs.ClearAddressReference(ctx, &vpcv1.ClearAddressReferenceRequest{AddressId: addressID})
+		if rerr != nil {
+			if st, ok := status.FromError(rerr); ok && st.Code() == codes.NotFound {
+				return nil
+			}
+			return fmt.Errorf("clear address reference %s: %w", addressID, rerr)
+		}
+		return nil
+	})
+}
+
 // createAddressAndWait вызывает AddressService.Create, поллит Operation до
 // завершения и читает созданный Address (Operation.response — Address).
 func (c *VPCClient) createAddressAndWait(ctx context.Context, req *vpcv1.CreateAddressRequest) (*vpcv1.Address, error) {
@@ -345,6 +385,12 @@ func (NoopVPCClient) GetExternalAddress(_ context.Context, addressID string) (se
 
 // DeleteAddress — no-op.
 func (NoopVPCClient) DeleteAddress(_ context.Context, _ string) error { return nil }
+
+// SetAddressReference — no-op (referrer-tracking disabled in SKIP_PEER_VALIDATION).
+func (NoopVPCClient) SetAddressReference(_ context.Context, _, _, _, _ string) error { return nil }
+
+// ClearAddressReference — no-op.
+func (NoopVPCClient) ClearAddressReference(_ context.Context, _ string) error { return nil }
 
 // GetZone — любой непустой zoneID считается существующим (region "ru-central1").
 // Реально не вызывается: в SKIP_PEER_VALIDATION-режиме compute берёт зоны из

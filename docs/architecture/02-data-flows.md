@@ -241,12 +241,19 @@ sequenceDiagram
     S->>DB: UPDATE operation error
   else success
     S->>DB: UPDATE operation done=true, response=protoconv.Instance(created)  # status RUNNING
+    loop for each NIC address (internal + external NAT; ephemeral or reserved)
+      S->>VPC: InternalAddressService.SetAddressReference(address_id, "compute_instance", instance_id, instance_name) — best-effort (ошибка → warning, не валит)
+    end
   end
   end
 ```
 
 Control-plane имитация: статус переходит `PROVISIONING → RUNNING` синхронно в той
 же TX (без таймеров; см. [`03-instance-lifecycle.md`](03-instance-lifecycle.md)).
+После успешной вставки compute привязывает referrer (`type=compute_instance`,
+`id=instance_id`, `name=instance_name`) к каждому VPC `Address`-ресурсу NIC-ей —
+эти адреса становятся `used=true` и видны в `SubnetService.ListUsedAddresses`
+с `references[]` (YC-like; см. [`07-known-divergences.md`](07-known-divergences.md) §8).
 
 ---
 

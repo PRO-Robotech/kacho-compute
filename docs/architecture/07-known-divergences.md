@@ -218,6 +218,18 @@ internal `:9091` (`InternalZoneService`) — конфигурируется че
 NIC-ам по-прежнему выдаются синтетические IP (`10.0.0.x` / `203.0.113.x`), VPC не
 дёргается.
 
+**Referrer-tracking (YC-like, с этой фичи):** при аллокации каждого NIC-адреса
+(internal + external NAT, эфемерного ИЛИ reserved) compute вызывает
+`InternalAddressService.SetAddressReference(addressId, "compute_instance",
+instanceId, instanceName)` — best-effort (ошибка → warning, IP уже выделен,
+Instance.Create не валится). В результате `Address.used = true` и адрес виден в
+`GET /vpc/v1/subnets/<id>/addresses` (`SubnetService.ListUsedAddresses`) с
+`references: [{type:"compute_instance", referrerId:"<instanceId>"}]`. На
+`Instance.Delete`/`RemoveOneToOneNat`: эфемерные адреса удаляются (referrer-row
+уходит через FK CASCADE в kacho-vpc), у reserved-адреса referrer снимается явно
+(`ClearAddressReference`) — адрес снова `used=false`. В
+`KACHO_COMPUTE_SKIP_PEER_VALIDATION=true` Set/ClearAddressReference — no-op.
+
 **Расхождение с verbatim YC:** в реальном YC внутренние NIC-адреса инстанса
 **не** материализуются как видимые в `AddressService.List` ресурсы — IPAM
 прозрачен. У нас каждый авто-аллоцированный NIC-IP — это полноценная строка в
