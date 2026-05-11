@@ -160,6 +160,39 @@ endpoint (advertised для `yc` CLI) эти POST/PATCH/DELETE paths **не до
 > каких условиях браться». Этот файл — карта by-design состояния; Issues —
 > трекинг работы.
 
+## 8. Instance NIC IPv4 — реальные адреса через эфемерные VPC `Address`-ресурсы
+
+`Instance.Create` (и `AddOneToOneNat`) выделяют **реальные** IPv4 для NIC-ей
+через kacho-vpc IPAM, создавая в kacho-vpc эфемерные `Address`-ресурсы:
+
+- **internal IP** — `AddressService.Create` с `internal_ipv4_address_spec.subnet_id`
+  → kacho-vpc inline выделяет IP из CIDR подсети; compute читает его обратно и
+  хранит `address.id` в колонке `instance_network_interfaces.primary_v4_address_id`;
+- **external (one-to-one NAT) IP** — `AddressService.Create` с
+  `external_ipv4_address_spec.zone_id` → kacho-vpc inline выделяет публичный IP
+  из `AddressPool` (cascade resolve); `address.id` + флаг `ephemeral` хранятся
+  в JSONB `primary_v4_nat`. Если клиент передал `one_to_one_nat.address_id` — это
+  его reserved Address, compute его **не** создаёт и **не** удаляет (`ephemeral=false`).
+
+На `Instance.Delete` (и `RemoveOneToOneNat`) compute удаляет эти эфемерные
+`Address`-ресурсы (best-effort: VPC недоступен / уже удалён → warning в лог, не
+валит операцию). Если клиент передал `primary_v4_address_spec.address` вручную —
+адрес валидируется на принадлежность CIDR подсети и используется как есть,
+`Address`-ресурс не создаётся. В режиме `KACHO_COMPUTE_SKIP_PEER_VALIDATION=true`
+NIC-ам по-прежнему выдаются синтетические IP (`10.0.0.x` / `203.0.113.x`), VPC не
+дёргается.
+
+**Расхождение с verbatim YC:** в реальном YC внутренние NIC-адреса инстанса
+**не** материализуются как видимые в `AddressService.List` ресурсы — IPAM
+прозрачен. У нас каждый авто-аллоцированный NIC-IP — это полноценная строка в
+`addresses` (видна в `GET /vpc/v1/addresses?folderId=...`, с `name` вида
+`<instanceId>-nic0` / `<instanceId>-nat0`). Это сознательный trade-off ради
+переиспользования существующего VPC IPAM без новых cross-service RPC / миграций
+в kacho-vpc; альтернатива (тонкий internal-RPC `AllocateInternalIPInSubnet` /
+`AllocateExternalIPInZone` + лёгкая таблица allocations в kacho-vpc) отложена.
+Newman-кейсы kacho-vpc, проверяющие `AddressService.List`, изолированы по `runId`
+и не пересекаются с compute-инстансами, так что parity-сьюты не ломаются.
+
 ---
 
 ## Подтверждённые расхождения, вынесенные в issues (здесь — указатель)

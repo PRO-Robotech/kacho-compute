@@ -103,7 +103,7 @@ func runServe(cfg config.Config) error {
 		}
 	}()
 
-	svcs := buildServices(pool, folderClient, vpcClient, opsRepo)
+	svcs := buildServices(pool, folderClient, vpcClient, opsRepo, cfg.SkipPeerValidation)
 
 	// Публичный listener — requireAdmin=false; internal :9091 — requireAdmin=true
 	// (defense-in-depth поверх NetworkPolicy в helm). Зеркалит kacho-vpc.
@@ -219,7 +219,9 @@ func dialPeer(addr string, useTLS bool) (*grpc.ClientConn, error) {
 }
 
 // buildServices создаёт все repo'ы поверх pool и собирает из них бизнес-сервисы.
-func buildServices(pool *pgxpool.Pool, folderClient service.FolderClient, vpcClient service.VPCClient, opsRepo operations.Repo) *services {
+// skipIPAM (== cfg.SkipPeerValidation) → Instance NIC-ам выдаются синтетические
+// IP вместо реальных, выделенных через kacho-vpc IPAM.
+func buildServices(pool *pgxpool.Pool, folderClient service.FolderClient, vpcClient service.VPCClient, opsRepo operations.Repo, skipIPAM bool) *services {
 	diskRepo := repo.NewDiskRepo(pool)
 	imageRepo := repo.NewImageRepo(pool)
 	snapshotRepo := repo.NewSnapshotRepo(pool)
@@ -235,7 +237,7 @@ func buildServices(pool *pgxpool.Pool, folderClient service.FolderClient, vpcCli
 		snapshot: service.NewSnapshotService(snapshotRepo, diskRepo, folderClient, opsRepo),
 		diskType: diskTypeSvc,
 		zone:     zoneSvc,
-		instance: service.NewInstanceService(instanceRepo, diskRepo, imageRepo, snapshotRepo, zoneRepo, folderClient, vpcClient, opsRepo),
+		instance: service.NewInstanceService(instanceRepo, diskRepo, imageRepo, snapshotRepo, zoneRepo, folderClient, vpcClient, opsRepo, skipIPAM),
 	}
 }
 

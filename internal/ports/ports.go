@@ -129,14 +129,43 @@ type FolderClient interface {
 	Exists(ctx context.Context, folderID string) (bool, error)
 }
 
-// VPCClient — port для проверки существования cross-service VPC-ресурсов
-// (subnet / security group / address) при валидации Instance NIC-spec.
+// SubnetInfo — минимальные данные о subnet, нужные compute'у при материализации
+// Instance NIC-spec: zone (для cross-zone-проверки) и v4-CIDR-блоки (для
+// валидации manual primary_v4_address и как контекст в ошибках).
+type SubnetInfo struct {
+	ZoneID       string
+	V4CidrBlocks []string
+}
+
+// VPCAddress — выделенный IP-адрес VPC (результат CreateInternal/ExternalAddress
+// или GetExternalAddress): сам IP + id Address-ресурса в kacho-vpc.
+type VPCAddress struct {
+	IP        string
+	AddressID string
+}
+
+// VPCClient — port для cross-service взаимодействия с kacho-vpc: валидация
+// NIC-spec (subnet / security group), IPAM-аллокация реальных IPv4 (создание
+// эфемерных Address-ресурсов через AddressService.Create, который inline
+// выделяет IP из CIDR подсети / из AddressPool), и teardown этих ресурсов.
 type VPCClient interface {
-	// GetSubnet возвращает (zoneID, found, error). found=false если subnet
-	// не существует на стороне VPC; zoneID — для проверки совпадения с zone ВМ.
-	GetSubnet(ctx context.Context, subnetID string) (zoneID string, found bool, err error)
+	// GetSubnet возвращает (info, found, error). found=false если subnet
+	// не существует на стороне VPC.
+	GetSubnet(ctx context.Context, subnetID string) (info SubnetInfo, found bool, err error)
 	// SecurityGroupExists — true если SG существует.
 	SecurityGroupExists(ctx context.Context, sgID string) (bool, error)
-	// AddressExists — true если Address существует.
-	AddressExists(ctx context.Context, addressID string) (bool, error)
+	// CreateInternalAddress создаёт эфемерный internal Address в указанном
+	// folder с привязкой к subnetID; kacho-vpc inline выделяет IPv4 из CIDR
+	// подсети. Поллит Operation до завершения и возвращает выделенный IP + id.
+	CreateInternalAddress(ctx context.Context, folderID, name, subnetID string) (VPCAddress, error)
+	// CreateExternalAddress создаёт эфемерный external Address в указанном
+	// folder/zone; kacho-vpc inline выделяет публичный IPv4 из AddressPool
+	// (cascade resolve). Поллит Operation до завершения и возвращает IP + id.
+	CreateExternalAddress(ctx context.Context, folderID, name, zoneID string) (VPCAddress, error)
+	// GetExternalAddress возвращает (addr, found, error) для уже существующего
+	// (reserved) Address-ресурса: его id и выделенный external IPv4.
+	GetExternalAddress(ctx context.Context, addressID string) (addr VPCAddress, found bool, err error)
+	// DeleteAddress удаляет Address-ресурс (best-effort: поллит Operation;
+	// NotFound трактуется как успех — ресурс уже удалён).
+	DeleteAddress(ctx context.Context, addressID string) error
 }

@@ -23,7 +23,7 @@ func newInstanceSvc(t *testing.T, folderOK bool) (*InstanceService, *portmock.In
 	instanceRepo := portmock.NewInstanceRepo().WithDiskRepo(diskRepo)
 	ops := portmock.NewOpsRepo()
 	svc := NewInstanceService(instanceRepo, diskRepo, imgRepo, snapRepo, portmock.NewZoneRepo(),
-		&portmock.FolderClient{OK: folderOK}, &portmock.VPCClient{SubnetFound: true, SubnetZone: "", SGFound: true, AddrFound: true}, ops)
+		&portmock.FolderClient{OK: folderOK}, &portmock.VPCClient{SubnetFound: true, SubnetZone: "", SGFound: true, AddrFound: true}, ops, false)
 	return svc, instanceRepo, diskRepo, imgRepo, ops
 }
 
@@ -95,7 +95,7 @@ func TestInstance_Create_SubnetNotFound(t *testing.T) {
 	instanceRepo := portmock.NewInstanceRepo().WithDiskRepo(diskRepo)
 	ops := portmock.NewOpsRepo()
 	svc := NewInstanceService(instanceRepo, diskRepo, imgRepo, portmock.NewSnapshotRepo(), portmock.NewZoneRepo(),
-		&portmock.FolderClient{OK: true}, &portmock.VPCClient{SubnetFound: false}, ops)
+		&portmock.FolderClient{OK: true}, &portmock.VPCClient{SubnetFound: false}, ops, false)
 	op, err := svc.Create(context.Background(), baseCreateReq())
 	require.NoError(t, err)
 	done := portmock.AwaitOpDone(t, ops, op.ID)
@@ -108,7 +108,7 @@ func TestInstance_Create_SubnetZoneMismatch(t *testing.T) {
 	instanceRepo := portmock.NewInstanceRepo().WithDiskRepo(diskRepo)
 	ops := portmock.NewOpsRepo()
 	svc := NewInstanceService(instanceRepo, diskRepo, portmock.NewImageRepo(), portmock.NewSnapshotRepo(), portmock.NewZoneRepo(),
-		&portmock.FolderClient{OK: true}, &portmock.VPCClient{SubnetFound: true, SubnetZone: "ru-central1-b"}, ops)
+		&portmock.FolderClient{OK: true}, &portmock.VPCClient{SubnetFound: true, SubnetZone: "ru-central1-b"}, ops, false)
 	op, err := svc.Create(context.Background(), baseCreateReq())
 	require.NoError(t, err)
 	done := portmock.AwaitOpDone(t, ops, op.ID)
@@ -271,4 +271,108 @@ func TestInstance_GetSerialPortOutput(t *testing.T) {
 	out, err := svc.GetSerialPortOutput(context.Background(), "epdvm1")
 	require.NoError(t, err)
 	require.Contains(t, out, "epdvm1")
+}
+
+// --- real IPAM (kacho-vpc Address allocation) ---
+
+func newInstanceSvcVPC(t *testing.T, vpc *portmock.VPCClient) (*InstanceService, *portmock.InstanceRepo, *portmock.DiskRepo, *portmock.OpsRepo) {
+	t.Helper()
+	diskRepo := portmock.NewDiskRepo()
+	instanceRepo := portmock.NewInstanceRepo().WithDiskRepo(diskRepo)
+	ops := portmock.NewOpsRepo()
+	svc := NewInstanceService(instanceRepo, diskRepo, portmock.NewImageRepo(), portmock.NewSnapshotRepo(), portmock.NewZoneRepo(),
+		&portmock.FolderClient{OK: true}, vpc, ops, false)
+	return svc, instanceRepo, diskRepo, ops
+}
+
+func TestInstance_Create_AllocatesRealIPs(t *testing.T) {
+	vpc := &portmock.VPCClient{SubnetFound: true, SubnetCidrBlocks: []string{"10.123.0.0/24"}, SGFound: true, AddrFound: true,
+		InternalIP: "10.123.0.7", ExternalIP: "198.51.100.42"}
+	svc, repo, _, ops := newInstanceSvcVPC(t, vpc)
+	req := baseCreateReq()
+	req.NICs = []NICSpec{{SubnetID: "e9bsubnet", OneToOneNat: &NatSpec{}}}
+	op, err := svc.Create(context.Background(), req)
+	require.NoError(t, err)
+	in := instanceFromOp(t, portmock.AwaitOpDone(t, ops, op.ID))
+	require.Len(t, in.NetworkInterfaces, 1)
+	require.Equal(t, "10.123.0.7", in.NetworkInterfaces[0].PrimaryV4Address.Address)
+	require.NotNil(t, in.NetworkInterfaces[0].PrimaryV4Address.OneToOneNat)
+	require.Equal(t, "198.51.100.42", in.NetworkInterfaces[0].PrimaryV4Address.OneToOneNat.Address)
+	// 2 ephemeral Address resources created (internal + external NAT).
+	require.Len(t, vpc.CreatedAddrIDs, 2)
+	stored, err := repo.Get(context.Background(), in.Id)
+	require.NoError(t, err)
+	require.NotEmpty(t, stored.NetworkInterfaces[0].PrimaryV4AddressID)
+	require.NotNil(t, stored.NetworkInterfaces[0].PrimaryV4Nat)
+	require.True(t, stored.NetworkInterfaces[0].PrimaryV4Nat.Ephemeral)
+	require.NotEmpty(t, stored.NetworkInterfaces[0].PrimaryV4Nat.AddressID)
+
+	// Delete → both ephemeral Address resources released.
+	op, err = svc.Delete(context.Background(), in.Id)
+	require.NoError(t, err)
+	done := portmock.AwaitOpDone(t, ops, op.ID)
+	require.Nil(t, done.Error)
+	require.ElementsMatch(t, vpc.CreatedAddrIDs, vpc.DeletedAddrIDs)
+}
+
+func TestInstance_Create_ManualInternalIP_NoAddressResource(t *testing.T) {
+	vpc := &portmock.VPCClient{SubnetFound: true, SubnetCidrBlocks: []string{"10.123.0.0/24"}, SGFound: true}
+	svc, repo, _, ops := newInstanceSvcVPC(t, vpc)
+	req := baseCreateReq()
+	req.NICs = []NICSpec{{SubnetID: "e9bsubnet", PrimaryV4Address: "10.123.0.55"}}
+	op, err := svc.Create(context.Background(), req)
+	require.NoError(t, err)
+	in := instanceFromOp(t, portmock.AwaitOpDone(t, ops, op.ID))
+	require.Equal(t, "10.123.0.55", in.NetworkInterfaces[0].PrimaryV4Address.Address)
+	require.Empty(t, vpc.CreatedAddrIDs) // manual IP — no Address resource
+	stored, err := repo.Get(context.Background(), in.Id)
+	require.NoError(t, err)
+	require.Empty(t, stored.NetworkInterfaces[0].PrimaryV4AddressID)
+}
+
+func TestInstance_Create_ManualInternalIP_OutsideCIDR(t *testing.T) {
+	vpc := &portmock.VPCClient{SubnetFound: true, SubnetCidrBlocks: []string{"10.123.0.0/24"}, SGFound: true}
+	svc, _, _, ops := newInstanceSvcVPC(t, vpc)
+	req := baseCreateReq()
+	req.NICs = []NICSpec{{SubnetID: "e9bsubnet", PrimaryV4Address: "192.0.2.5"}}
+	op, err := svc.Create(context.Background(), req)
+	require.NoError(t, err)
+	done := portmock.AwaitOpDone(t, ops, op.ID)
+	require.NotNil(t, done.Error)
+	require.Equal(t, int32(codes.InvalidArgument), done.Error.Code)
+}
+
+func TestInstance_Create_DiskFailure_ReleasesAllocatedIPs(t *testing.T) {
+	vpc := &portmock.VPCClient{SubnetFound: true, SubnetCidrBlocks: []string{"10.123.0.0/24"}, SGFound: true}
+	svc, _, _, ops := newInstanceSvcVPC(t, vpc)
+	req := baseCreateReq()
+	req.NICs = []NICSpec{{SubnetID: "e9bsubnet", OneToOneNat: &NatSpec{}}}
+	// Boot disk refers to a non-existent disk → resolveDiskSource fails after
+	// NIC IPs were allocated.
+	req.BootDisk = DiskSourceSpec{DiskID: "epdmissing"}
+	op, err := svc.Create(context.Background(), req)
+	require.NoError(t, err)
+	done := portmock.AwaitOpDone(t, ops, op.ID)
+	require.NotNil(t, done.Error)
+	require.NotEmpty(t, vpc.CreatedAddrIDs)
+	require.ElementsMatch(t, vpc.CreatedAddrIDs, vpc.DeletedAddrIDs) // all released
+}
+
+func TestInstance_AddRemoveNAT_RealIP(t *testing.T) {
+	vpc := &portmock.VPCClient{SubnetFound: true, SGFound: true, ExternalIP: "198.51.100.77"}
+	svc, repo, _, ops := newInstanceSvcVPC(t, vpc)
+	seedRunningInstance(repo, domain.InstanceStatusRunning)
+
+	op, err := svc.AddOneToOneNat(context.Background(), "epdvm1", "0", nil)
+	require.NoError(t, err)
+	in := instanceFromOp(t, portmock.AwaitOpDone(t, ops, op.ID))
+	require.NotNil(t, in.NetworkInterfaces[0].PrimaryV4Address.OneToOneNat)
+	require.Equal(t, "198.51.100.77", in.NetworkInterfaces[0].PrimaryV4Address.OneToOneNat.Address)
+	require.Len(t, vpc.CreatedAddrIDs, 1)
+
+	op, err = svc.RemoveOneToOneNat(context.Background(), "epdvm1", "0")
+	require.NoError(t, err)
+	in = instanceFromOp(t, portmock.AwaitOpDone(t, ops, op.ID))
+	require.Nil(t, in.NetworkInterfaces[0].PrimaryV4Address.OneToOneNat)
+	require.ElementsMatch(t, vpc.CreatedAddrIDs, vpc.DeletedAddrIDs) // ephemeral external Address released
 }

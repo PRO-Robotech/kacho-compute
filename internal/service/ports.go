@@ -36,6 +36,11 @@ type (
 
 	// FolderClient — port для проверки существования Folder.
 	FolderClient = ports.FolderClient
-	// VPCClient — port для проверки cross-service VPC-ресурсов.
+	// VPCClient — port для cross-service взаимодействия с kacho-vpc (валидация
+	// NIC-spec + IPAM-аллокация реальных IPv4 + teardown эфемерных Address).
 	VPCClient = ports.VPCClient
+	// SubnetInfo — минимальные данные о subnet, нужные при материализации NIC.
+	SubnetInfo = ports.SubnetInfo
+	// VPCAddress — выделенный IP-адрес VPC (IP + id Address-ресурса).
+	VPCAddress = ports.VPCAddress
 )

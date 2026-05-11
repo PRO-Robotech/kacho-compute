@@ -9,6 +9,7 @@ package portmock
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -674,17 +675,31 @@ type FolderClient struct{ OK bool }
 // Exists возвращает FolderClient.OK.
 func (c *FolderClient) Exists(_ context.Context, _ string) (bool, error) { return c.OK, nil }
 
-// VPCClient — fake VPCClient. Если SubnetZone задан — GetSubnet возвращает его.
+// VPCClient — fake VPCClient. SubnetFound/SubnetZone/SubnetCidrBlocks задают
+// ответ GetSubnet; SGFound — SecurityGroupExists; AddrFound — GetExternalAddress.
+// CreateInternalAddress / CreateExternalAddress возвращают детерминированные
+// «выделенные» IP (InternalIP/ExternalIP) + последовательные id; CreatedAddrIDs
+// и DeletedAddrIDs протоколируют вызовы для проверки teardown-логики в тестах.
 type VPCClient struct {
-	SubnetFound bool
-	SubnetZone  string
-	SGFound     bool
-	AddrFound   bool
+	SubnetFound      bool
+	SubnetZone       string
+	SubnetCidrBlocks []string
+	SGFound          bool
+	AddrFound        bool
+	// InternalIP/ExternalIP — IP, который вернёт CreateInternalAddress/
+	// CreateExternalAddress (если "" — используются дефолты ниже).
+	InternalIP string
+	ExternalIP string
+
+	mu             sync.Mutex
+	addrSeq        int
+	CreatedAddrIDs []string
+	DeletedAddrIDs []string
 }
 
-// GetSubnet возвращает (SubnetZone, SubnetFound, nil).
-func (c *VPCClient) GetSubnet(_ context.Context, _ string) (string, bool, error) {
-	return c.SubnetZone, c.SubnetFound, nil
+// GetSubnet возвращает ({SubnetZone, SubnetCidrBlocks}, SubnetFound, nil).
+func (c *VPCClient) GetSubnet(_ context.Context, _ string) (ports.SubnetInfo, bool, error) {
+	return ports.SubnetInfo{ZoneID: c.SubnetZone, V4CidrBlocks: c.SubnetCidrBlocks}, c.SubnetFound, nil
 }
 
 // SecurityGroupExists возвращает SGFound.
@@ -692,8 +707,50 @@ func (c *VPCClient) SecurityGroupExists(_ context.Context, _ string) (bool, erro
 	return c.SGFound, nil
 }
 
-// AddressExists возвращает AddrFound.
-func (c *VPCClient) AddressExists(_ context.Context, _ string) (bool, error) { return c.AddrFound, nil }
+// CreateInternalAddress возвращает «выделенный» internal IP + новый id.
+func (c *VPCClient) CreateInternalAddress(_ context.Context, _, _, _ string) (ports.VPCAddress, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.addrSeq++
+	id := fmt.Sprintf("e9bfakeaddr%08d", c.addrSeq)
+	c.CreatedAddrIDs = append(c.CreatedAddrIDs, id)
+	ip := c.InternalIP
+	if ip == "" {
+		ip = fmt.Sprintf("10.0.0.%d", 100+c.addrSeq)
+	}
+	return ports.VPCAddress{IP: ip, AddressID: id}, nil
+}
+
+// CreateExternalAddress возвращает «выделенный» external IP + новый id.
+func (c *VPCClient) CreateExternalAddress(_ context.Context, _, _, _ string) (ports.VPCAddress, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.addrSeq++
+	id := fmt.Sprintf("e9bfakeaddr%08d", c.addrSeq)
+	c.CreatedAddrIDs = append(c.CreatedAddrIDs, id)
+	ip := c.ExternalIP
+	if ip == "" {
+		ip = fmt.Sprintf("198.51.100.%d", 100+c.addrSeq)
+	}
+	return ports.VPCAddress{IP: ip, AddressID: id}, nil
+}
+
+// GetExternalAddress возвращает ({ExternalIP, addressID}, AddrFound, nil).
+func (c *VPCClient) GetExternalAddress(_ context.Context, addressID string) (ports.VPCAddress, bool, error) {
+	ip := c.ExternalIP
+	if ip == "" {
+		ip = "198.51.100.50"
+	}
+	return ports.VPCAddress{IP: ip, AddressID: addressID}, c.AddrFound, nil
+}
+
+// DeleteAddress протоколирует id и возвращает nil.
+func (c *VPCClient) DeleteAddress(_ context.Context, addressID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.DeletedAddrIDs = append(c.DeletedAddrIDs, addressID)
+	return nil
+}
 
 // ---- operations.Repo ----
 

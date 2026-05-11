@@ -45,24 +45,39 @@ type AttachedDisk struct {
 	AttachedAt time.Time
 }
 
-// OneToOneNat — конфигурация one-to-one NAT на NIC (control-plane: address —
-// синтетический). Хранится как JSONB в primary_v4_nat / primary_v6_nat.
+// OneToOneNat — конфигурация one-to-one NAT на NIC. `Address` — реальный
+// внешний IPv4 (выделен из AddressPool через kacho-vpc IPAM), `AddressID` — id
+// соответствующего VPC Address-ресурса. `Ephemeral` = true если этот Address
+// был создан compute'ом для данного NIC (значит compute обязан удалить его при
+// teardown); false — если клиент передал ссылку на свой reserved Address (или
+// если IP синтетический в SKIP_PEER_VALIDATION-режиме). Хранится как JSONB в
+// primary_v4_nat / primary_v6_nat.
 type OneToOneNat struct {
 	Address    string `json:"address,omitempty"`
+	AddressID  string `json:"address_id,omitempty"`
+	Ephemeral  bool   `json:"ephemeral,omitempty"`
 	IPVersion  int32  `json:"ip_version,omitempty"`
 	DNSRecords []byte `json:"dns_records,omitempty"`
 }
 
 // NetworkInterface — строка таблицы instance_network_interfaces (cascade child).
+//
+// PrimaryV4Address — реальный внутренний IPv4 из CIDR подсети (выделен через
+// kacho-vpc IPAM, либо задан клиентом вручную). PrimaryV4AddressID — id
+// VPC Address-ресурса, который compute создал для авто-аллокации этого IP;
+// "" если IP задан клиентом вручную (тогда Address-ресурс не создаётся) либо
+// если IP синтетический (SKIP_PEER_VALIDATION). Непустой PrimaryV4AddressID
+// означает «эфемерный» Address — compute удалит его при teardown.
 type NetworkInterface struct {
-	Index            string
-	MACAddress       string
-	SubnetID         string
-	PrimaryV4Address string
-	PrimaryV4Nat     *OneToOneNat
-	PrimaryV6Address string
-	PrimaryV6Nat     *OneToOneNat
-	SecurityGroupIDs []string
+	Index              string
+	MACAddress         string
+	SubnetID           string
+	PrimaryV4Address   string
+	PrimaryV4AddressID string
+	PrimaryV4Nat       *OneToOneNat
+	PrimaryV6Address   string
+	PrimaryV6Nat       *OneToOneNat
+	SecurityGroupIDs   []string
 }
 
 // Instance — виртуальная машина (folder-level ресурс).

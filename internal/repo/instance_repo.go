@@ -353,7 +353,7 @@ func (r *InstanceRepo) fillChildrenTx(ctx context.Context, tx pgx.Tx, in *domain
 
 func (r *InstanceRepo) fillChildrenGeneric(ctx context.Context, q querier, in *domain.Instance) error {
 	// NIC-и.
-	nicRows, err := q.Query(ctx, `SELECT idx, mac_address, subnet_id, primary_v4_address, primary_v4_nat, primary_v6_address, primary_v6_nat, security_group_ids
+	nicRows, err := q.Query(ctx, `SELECT idx, mac_address, subnet_id, primary_v4_address, primary_v4_address_id, primary_v4_nat, primary_v6_address, primary_v6_nat, security_group_ids
 		FROM instance_network_interfaces WHERE instance_id = $1 ORDER BY idx`, in.ID)
 	if err != nil {
 		return wrapPgErr(err, "Instance", in.ID)
@@ -361,7 +361,7 @@ func (r *InstanceRepo) fillChildrenGeneric(ctx context.Context, q querier, in *d
 	for nicRows.Next() {
 		var nic domain.NetworkInterface
 		var v4NatJSON, v6NatJSON, sgJSON []byte
-		if err := nicRows.Scan(&nic.Index, &nic.MACAddress, &nic.SubnetID, &nic.PrimaryV4Address, &v4NatJSON, &nic.PrimaryV6Address, &v6NatJSON, &sgJSON); err != nil {
+		if err := nicRows.Scan(&nic.Index, &nic.MACAddress, &nic.SubnetID, &nic.PrimaryV4Address, &nic.PrimaryV4AddressID, &v4NatJSON, &nic.PrimaryV6Address, &v6NatJSON, &sgJSON); err != nil {
 			nicRows.Close()
 			return wrapPgErr(err, "Instance", in.ID)
 		}
@@ -420,9 +420,9 @@ func insertNICTx(ctx context.Context, tx pgx.Tx, instanceID string, nic domain.N
 		return err
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO instance_network_interfaces
-		(instance_id, idx, mac_address, subnet_id, primary_v4_address, primary_v4_nat, primary_v4_dns_records, primary_v6_address, primary_v6_nat, primary_v6_dns_records, security_group_ids)
-		VALUES ($1,$2,$3,$4,$5,$6,'[]'::jsonb,$7,$8,'[]'::jsonb,$9)`,
-		instanceID, nic.Index, nic.MACAddress, nic.SubnetID, nic.PrimaryV4Address, v4NatJSON, nic.PrimaryV6Address, v6NatJSON, sgJSON)
+		(instance_id, idx, mac_address, subnet_id, primary_v4_address, primary_v4_address_id, primary_v4_nat, primary_v4_dns_records, primary_v6_address, primary_v6_nat, primary_v6_dns_records, security_group_ids)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,'[]'::jsonb,$8,$9,'[]'::jsonb,$10)`,
+		instanceID, nic.Index, nic.MACAddress, nic.SubnetID, nic.PrimaryV4Address, nic.PrimaryV4AddressID, v4NatJSON, nic.PrimaryV6Address, v6NatJSON, sgJSON)
 	return err
 }
 
