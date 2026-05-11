@@ -11,8 +11,10 @@ permissions:
 # и Dockerfile COPY ../kacho-corelib и т.п. → CI должен воспроизвести local layout
 # (kacho-workspace/project/{kacho-compute, kacho-corelib, ...}). actions/checkout не пускает
 # path вне $GITHUB_WORKSPACE, поэтому: main-репо в подкаталог `kacho-compute/`, siblings рядом.
-# ПОКА kacho-proto пиннится к feature-ветке (compute-vendored-proto): новые stubs ещё не в main.
-# После merge — убрать `ref:`-строки (или → `ref: main`). См. workspace CLAUDE.md «Кросс-репо…».
+# kacho-proto / kacho-corelib чекаутятся без `ref:` (→ `main`): compute-vendored proto-stubs
+# (compute domain + InternalDiskType/Zone) и corelib (compute id-prefixes + NameCompute) уже
+# смёржены в их `main`. Если снова появится незакрытая upstream-зависимость — временно вернуть
+# `ref: feat/...` и убрать после merge. См. workspace CLAUDE.md «Кросс-репо…».
 
 defaults:
   run:
