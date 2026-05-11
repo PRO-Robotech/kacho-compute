@@ -1,0 +1,506 @@
+{
+  "info": {
+    "_postman_id": "090ab745-131d-4cff-aa8b-8376abbd5861",
+    "name": "kacho-compute / newman / zone",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (!pm.environment.get('runId') || pm.environment.get('runId') === '') {",
+          "  // runId формат: только [a-z0-9], без точки, начинается с буквы — чтобы проходить compute name regex",
+          "  const t = Date.now().toString(36);",
+          "  const r = Math.floor(Math.random() * 1e9).toString(36);",
+          "  pm.environment.set('runId', ('r' + t + r).replace(/[^a-z0-9]/g, '').slice(0, 11));",
+          "}",
+          "pm.environment.set('_suiteFolderId', pm.environment.get('existingFolderId'));",
+          "pm.environment.set('_suiteFolderCrossId', pm.environment.get('existingFolderCrossId'));"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "ZONE-LST-CRUD-OK — List zones → ≥3 зон, содержит ru-central1-{a,b,d}, у каждой status UP и regionId set",
+      "description": "class:CRUD | priority:P1",
+      "item": [
+        {
+          "name": "list",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/zones",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "zones"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('zones is array', () => pm.expect(j.zones || []).to.be.an('array'));",
+                  "const ids = (j.zones || []).map(z => z.id);",
+                  "pm.test('at least 3 zones', () => pm.expect(ids.length).to.be.at.least(3));",
+                  "pm.test('contains ru-central1-a/b/d', () => { ['ru-central1-a','ru-central1-b','ru-central1-d'].forEach(z => pm.expect(ids, z).to.include(z)); });",
+                  "pm.test('seeded zones status UP', () => (j.zones || []).filter(z => z.id.startsWith('ru-central1-')).forEach(z => pm.expect(z.status, z.id).to.eql('UP')));",
+                  "pm.test('each has regionId', () => (j.zones || []).forEach(z => pm.expect(z.regionId, z.id).to.be.a('string').and.length.greaterThan(0)));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ZONE-GET-CRUD-OK — Get ru-central1-a → id matches, status UP, regionId == ru-central1",
+      "description": "class:CRUD | priority:P1",
+      "item": [
+        {
+          "name": "get",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/zones/{{existingZoneId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "zones",
+                "{{existingZoneId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('id matches', () => pm.expect(j.id).to.eql(pm.environment.get('existingZoneId')));",
+                  "pm.test('status UP', () => pm.expect(j.status).to.eql('UP'));",
+                  "pm.test('regionId set', () => pm.expect(j.regionId).to.be.a('string').and.length.greaterThan(0));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ZONE-GET-CRUD-ALT-OK — Get ru-central1-b (другая seeded зона) → id matches, status UP",
+      "description": "class:CRUD | priority:P2",
+      "item": [
+        {
+          "name": "get-alt",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/zones/{{existingZoneAltId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "zones",
+                "{{existingZoneAltId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('id matches', () => pm.expect(j.id).to.eql(pm.environment.get('existingZoneAltId')));",
+                  "pm.test('status UP', () => pm.expect(j.status).to.eql('UP'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ZONE-GET-NEG-NOTFOUND — Get garbage zoneId → 404 NOT_FOUND",
+      "description": "class:NEG | priority:P0",
+      "item": [
+        {
+          "name": "get-nx",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/zones/ru-central1-zzz",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "zones",
+                "ru-central1-zzz"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 404', () => pm.expect(pm.response.code).to.eql(404));",
+                  "pm.test('grpc code 5 (NOT_FOUND)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(5);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ZONE-GET-CONF-NF-TEXT — Get garbage zoneId → текст содержит 'not found'",
+      "description": "class:CONF | class:NEG | priority:P1",
+      "item": [
+        {
+          "name": "get-nx",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/zones/ru-central1-zzz",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "zones",
+                "ru-central1-zzz"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 404', () => pm.expect(pm.response.code).to.eql(404));",
+                  "pm.test('grpc code 5 (NOT_FOUND)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(5);",
+                  "});",
+                  "pm.test('text mentions not found', () => pm.expect((pm.response.json().message || '').toLowerCase()).to.include('not found'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ZONE-LST-BVA-PAGESIZE-1 — List zones pageSize=1 → ≤1 item",
+      "description": "class:BVA | class:PAGE | priority:P2",
+      "item": [
+        {
+          "name": "ps1",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/zones?pageSize=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "zones?pageSize=1"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('at most 1 item', () => pm.expect((pm.response.json().zones || []).length).to.be.at.most(1));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ZONE-LST-BVA-PAGESIZE-ZERO — List zones pageSize=0 → default applied (200)",
+      "description": "class:BVA | class:PAGE | priority:P2",
+      "item": [
+        {
+          "name": "ps0",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/zones?pageSize=0",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "zones?pageSize=0"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ZONE-LST-BVA-PAGESIZE-OVER-1001 — List zones pageSize=1001 → 400 InvalidArgument",
+      "description": "class:BVA | class:VAL | priority:P1",
+      "item": [
+        {
+          "name": "ps1001",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/zones?pageSize=1001",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "zones?pageSize=1001"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.expect(pm.response.code).to.eql(400));",
+                  "pm.test('grpc code 3 (INVALID_ARGUMENT)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ZONE-LST-PAGE-ROUNDTRIP — List zones pageSize=1 → nextPageToken → page 2 с ним → 200",
+      "description": "class:PAGE | class:BVA | priority:P2",
+      "item": [
+        {
+          "name": "p1",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/zones?pageSize=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "zones?pageSize=1"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const tok = pm.response.json().nextPageToken || '';",
+                  "pm.environment.set('zoneNextToken', tok);",
+                  "pm.test('token is string', () => pm.expect(tok).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "p2",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/zones?pageSize=1&pageToken={{zoneNextToken}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "zones?pageSize=1&pageToken={{zoneNextToken}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ZONE-CR-NEG-NOT-ALLOWED — POST /compute/v1/zones (Create) → справочник read-only → 404/405/501",
+      "description": "class:VAL | class:NEG | priority:P3",
+      "item": [
+        {
+          "name": "cr-zone",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/zones",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "zones"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"id\": \"newman-fake-zone\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('not allowed', () => pm.expect(pm.response.code).to.be.oneOf([404, 405, 501]));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": []
+}

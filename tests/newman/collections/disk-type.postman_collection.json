@@ -1,0 +1,467 @@
+{
+  "info": {
+    "_postman_id": "5b753dbb-a1b6-41b7-ba3a-055d07eadb79",
+    "name": "kacho-compute / newman / disk-type",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (!pm.environment.get('runId') || pm.environment.get('runId') === '') {",
+          "  // runId формат: только [a-z0-9], без точки, начинается с буквы — чтобы проходить compute name regex",
+          "  const t = Date.now().toString(36);",
+          "  const r = Math.floor(Math.random() * 1e9).toString(36);",
+          "  pm.environment.set('runId', ('r' + t + r).replace(/[^a-z0-9]/g, '').slice(0, 11));",
+          "}",
+          "pm.environment.set('_suiteFolderId', pm.environment.get('existingFolderId'));",
+          "pm.environment.set('_suiteFolderCrossId', pm.environment.get('existingFolderCrossId'));"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "DT-LST-CRUD-OK — List diskTypes → ≥4 типов, содержит network-ssd / network-hdd; у каждого zoneIds непустой",
+      "description": "class:CRUD | priority:P1",
+      "item": [
+        {
+          "name": "list",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/diskTypes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "diskTypes"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('diskTypes is array', () => pm.expect(j.diskTypes || []).to.be.an('array'));",
+                  "const ids = (j.diskTypes || []).map(x => x.id);",
+                  "pm.test('at least 4 disk types', () => pm.expect(ids.length).to.be.at.least(4));",
+                  "pm.test('contains network-ssd', () => pm.expect(ids).to.include('network-ssd'));",
+                  "pm.test('contains network-hdd', () => pm.expect(ids).to.include('network-hdd'));",
+                  "pm.test('each has non-empty zoneIds', () => (j.diskTypes || []).forEach(t => pm.expect((t.zoneIds || []).length, t.id).to.be.at.least(1)));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "DT-GET-CRUD-OK — Get network-ssd → id == network-ssd, zoneIds содержит ru-central1-a",
+      "description": "class:CRUD | priority:P1",
+      "item": [
+        {
+          "name": "get",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/diskTypes/{{existingDiskTypeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "diskTypes",
+                "{{existingDiskTypeId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('id matches', () => pm.expect(j.id).to.eql(pm.environment.get('existingDiskTypeId')));",
+                  "pm.test('zoneIds non-empty', () => pm.expect((j.zoneIds || []).length).to.be.at.least(1));",
+                  "pm.test('zoneIds contains existingZoneId', () => pm.expect(j.zoneIds || []).to.include(pm.environment.get('existingZoneId')));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "DT-GET-CRUD-HDD-OK — Get network-hdd (другой seeded тип) → id matches",
+      "description": "class:CRUD | priority:P2",
+      "item": [
+        {
+          "name": "get-hdd",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/diskTypes/network-hdd",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "diskTypes",
+                "network-hdd"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('id == network-hdd', () => pm.expect(pm.response.json().id).to.eql('network-hdd'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "DT-GET-NEG-NOTFOUND — Get garbage diskTypeId → 404 NOT_FOUND",
+      "description": "class:NEG | priority:P0",
+      "item": [
+        {
+          "name": "get-nx",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/diskTypes/garbage-disk-type-xyz",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "diskTypes",
+                "garbage-disk-type-xyz"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 404', () => pm.expect(pm.response.code).to.eql(404));",
+                  "pm.test('grpc code 5 (NOT_FOUND)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(5);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "DT-GET-CONF-NF-TEXT — Get garbage diskTypeId → текст содержит 'not found'",
+      "description": "class:CONF | class:NEG | priority:P1",
+      "item": [
+        {
+          "name": "get-nx",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/diskTypes/garbage-disk-type-xyz",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "diskTypes",
+                "garbage-disk-type-xyz"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 404', () => pm.expect(pm.response.code).to.eql(404));",
+                  "pm.test('grpc code 5 (NOT_FOUND)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(5);",
+                  "});",
+                  "pm.test('text mentions not found', () => pm.expect((pm.response.json().message || '').toLowerCase()).to.include('not found'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "DT-LST-BVA-PAGESIZE-1 — List diskTypes pageSize=1 → ≤1 item",
+      "description": "class:BVA | class:PAGE | priority:P2",
+      "item": [
+        {
+          "name": "ps1",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/diskTypes?pageSize=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "diskTypes?pageSize=1"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('at most 1 item', () => pm.expect((pm.response.json().diskTypes || []).length).to.be.at.most(1));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "DT-LST-BVA-PAGESIZE-ZERO — List diskTypes pageSize=0 → default applied (200)",
+      "description": "class:BVA | class:PAGE | priority:P2",
+      "item": [
+        {
+          "name": "ps0",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/diskTypes?pageSize=0",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "diskTypes?pageSize=0"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "DT-LST-BVA-PAGESIZE-OVER-1001 — List diskTypes pageSize=1001 → 400 InvalidArgument",
+      "description": "class:BVA | class:VAL | priority:P1",
+      "item": [
+        {
+          "name": "ps1001",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/diskTypes?pageSize=1001",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "diskTypes?pageSize=1001"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.expect(pm.response.code).to.eql(400));",
+                  "pm.test('grpc code 3 (INVALID_ARGUMENT)', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "DT-LST-PAGE-TOKEN-GARBAGE — List diskTypes с garbage pageToken → 400 InvalidArgument или 200 (справочник мал)",
+      "description": "class:PAGE | class:VAL | priority:P2",
+      "item": [
+        {
+          "name": "bad-token",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/diskTypes?pageSize=2&pageToken=not-a-real-token",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "diskTypes?pageSize=2&pageToken=not-a-real-token"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 or 400', () => pm.expect(pm.response.code).to.be.oneOf([200, 400]));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "DT-CR-NEG-NOT-ALLOWED — POST /compute/v1/diskTypes (Create) → справочник read-only → 404/405/501",
+      "description": "class:VAL | class:NEG | priority:P3",
+      "item": [
+        {
+          "name": "cr-dt",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/diskTypes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "diskTypes"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"id\": \"newman-fake-type\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('not allowed', () => pm.expect(pm.response.code).to.be.oneOf([404, 405, 501]));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": []
+}
