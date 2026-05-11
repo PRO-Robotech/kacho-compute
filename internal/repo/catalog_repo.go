@@ -2,12 +2,14 @@ package repo
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kacho-compute/internal/domain"
 	"github.com/PRO-Robotech/kacho-compute/internal/service"
+	"github.com/PRO-Robotech/kacho-corelib/validate"
 )
 
 // ---- DiskTypeRepo ----
@@ -35,9 +37,26 @@ func (r *DiskTypeRepo) Get(ctx context.Context, id string) (*domain.DiskType, er
 	return &t, nil
 }
 
-// List возвращает все типы дисков.
-func (r *DiskTypeRepo) List(ctx context.Context, _ service.Pagination) ([]*domain.DiskType, string, error) {
-	rows, err := r.pool.Query(ctx, `SELECT id, description, zone_ids, created_at FROM disk_types ORDER BY id ASC`)
+// List возвращает типы дисков с cursor-пагинацией по id (verbatim YC:
+// page_size валидируется через corevalidate.PageSize, garbage page_token → InvalidArgument).
+func (r *DiskTypeRepo) List(ctx context.Context, p service.Pagination) ([]*domain.DiskType, string, error) {
+	pageSize, err := validate.PageSize("page_size", p.PageSize)
+	if err != nil {
+		return nil, "", err
+	}
+	args := []any{}
+	where := ""
+	if p.PageToken != "" {
+		_, cursorID, derr := decodePageToken(p.PageToken)
+		if derr != nil {
+			return nil, "", invalidPageTokenErr(derr)
+		}
+		where = "WHERE id > $1"
+		args = append(args, cursorID)
+	}
+	q := fmt.Sprintf(`SELECT id, description, zone_ids, created_at FROM disk_types %s ORDER BY id ASC LIMIT $%d`, where, len(args)+1)
+	args = append(args, pageSize+1)
+	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, "", wrapPgErr(err, "Disk type", "")
 	}
@@ -57,7 +76,13 @@ func (r *DiskTypeRepo) List(ctx context.Context, _ service.Pagination) ([]*domai
 	if err := rows.Err(); err != nil {
 		return nil, "", wrapPgErr(err, "Disk type", "")
 	}
-	return out, "", nil
+	var next string
+	if int64(len(out)) > pageSize {
+		last := out[pageSize-1]
+		next = encodePageToken(last.CreatedAt, last.ID)
+		out = out[:pageSize]
+	}
+	return out, next, nil
 }
 
 // Insert вставляет тип диска (admin-only).
@@ -137,9 +162,26 @@ func (r *ZoneRepo) Get(ctx context.Context, id string) (*domain.Zone, error) {
 	return &z, nil
 }
 
-// List возвращает все зоны.
-func (r *ZoneRepo) List(ctx context.Context, _ service.Pagination) ([]*domain.Zone, string, error) {
-	rows, err := r.pool.Query(ctx, `SELECT id, region_id, status, created_at FROM zones ORDER BY id ASC`)
+// List возвращает зоны с cursor-пагинацией по id (verbatim YC: page_size валидируется,
+// garbage page_token → InvalidArgument).
+func (r *ZoneRepo) List(ctx context.Context, p service.Pagination) ([]*domain.Zone, string, error) {
+	pageSize, err := validate.PageSize("page_size", p.PageSize)
+	if err != nil {
+		return nil, "", err
+	}
+	args := []any{}
+	where := ""
+	if p.PageToken != "" {
+		_, cursorID, derr := decodePageToken(p.PageToken)
+		if derr != nil {
+			return nil, "", invalidPageTokenErr(derr)
+		}
+		where = "WHERE id > $1"
+		args = append(args, cursorID)
+	}
+	q := fmt.Sprintf(`SELECT id, region_id, status, created_at FROM zones %s ORDER BY id ASC LIMIT $%d`, where, len(args)+1)
+	args = append(args, pageSize+1)
+	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, "", wrapPgErr(err, "Zone", "")
 	}
@@ -157,7 +199,13 @@ func (r *ZoneRepo) List(ctx context.Context, _ service.Pagination) ([]*domain.Zo
 	if err := rows.Err(); err != nil {
 		return nil, "", wrapPgErr(err, "Zone", "")
 	}
-	return out, "", nil
+	var next string
+	if int64(len(out)) > pageSize {
+		last := out[pageSize-1]
+		next = encodePageToken(last.CreatedAt, last.ID)
+		out = out[:pageSize]
+	}
+	return out, next, nil
 }
 
 // Insert вставляет зону (admin-only).
