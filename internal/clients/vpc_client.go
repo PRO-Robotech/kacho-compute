@@ -287,6 +287,29 @@ func (c *VPCClient) ClearAddressReference(ctx context.Context, addressID string)
 	})
 }
 
+// MarkAddressEphemeralInUse атомарно (в одной tx на стороне kacho-vpc) помечает
+// Address-ресурс как «эфемерный, в работе»: выставляет reserved=false, used=true
+// и upsert-ит referrer (kто его использует — type=compute_instance, id/name
+// инстанса). Используется для эфемерных NIC/NAT-адресов, которые compute создаёт
+// сам через AddressService.Create (а не для reserved пользовательских адресов —
+// у тех reserved не трогаем, см. SetAddressReference). gRPC NotFound (адрес исчез
+// на стороне VPC) → обёрнутая ошибка; вызывающий код в instance.go трактует это
+// best-effort (warn + continue — IP уже выделен).
+func (c *VPCClient) MarkAddressEphemeralInUse(ctx context.Context, addressID, referrerType, referrerID, referrerName string) error {
+	return retry.OnUnavailable(ctx, func(ctx context.Context) error {
+		_, rerr := c.internalAddrs.MarkAddressEphemeralInUse(ctx, &vpcv1.MarkAddressEphemeralInUseRequest{
+			AddressId:    addressID,
+			ReferrerType: referrerType,
+			ReferrerId:   referrerID,
+			ReferrerName: referrerName,
+		})
+		if rerr != nil {
+			return fmt.Errorf("mark address ephemeral-in-use %s: %w", addressID, rerr)
+		}
+		return nil
+	})
+}
+
 // createAddressAndWait вызывает AddressService.Create, поллит Operation до
 // завершения и читает созданный Address (Operation.response — Address).
 func (c *VPCClient) createAddressAndWait(ctx context.Context, req *vpcv1.CreateAddressRequest) (*vpcv1.Address, error) {
@@ -391,6 +414,11 @@ func (NoopVPCClient) SetAddressReference(_ context.Context, _, _, _, _ string) e
 
 // ClearAddressReference — no-op.
 func (NoopVPCClient) ClearAddressReference(_ context.Context, _ string) error { return nil }
+
+// MarkAddressEphemeralInUse — no-op (referrer-tracking disabled in SKIP_PEER_VALIDATION).
+func (NoopVPCClient) MarkAddressEphemeralInUse(_ context.Context, _, _, _, _ string) error {
+	return nil
+}
 
 // GetZone — любой непустой zoneID считается существующим (region "ru-central1").
 // Реально не вызывается: в SKIP_PEER_VALIDATION-режиме compute берёт зоны из

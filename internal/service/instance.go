@@ -274,34 +274,68 @@ func (s *InstanceService) doCreate(ctx context.Context, instanceID string, req C
 		s.releaseAddresses(ctx, createdAddrIDs)
 		return nil, mapRepoErr(err)
 	}
-	// Referrer-tracking (YC-like): attach a compute_instance reference to every
-	// VPC Address this instance's NICs use (ephemeral internal/external + any
-	// reserved one-to-one-NAT address). Best-effort — the IPs are already
-	// allocated; a missing reference must not fail the instance create.
+	// Referrer-tracking (YC-like): mark every VPC Address this instance's NICs
+	// use with a compute_instance reference. Ephemeral addresses compute itself
+	// created (internal <vmid>-nicN + ephemeral external <vmid>-natN) get
+	// MarkAddressEphemeralInUse → reserved=false, used=true + referrer atomically;
+	// reserved user addresses (one-to-one NAT by address_id) keep their reserved
+	// flag and just get a referrer via SetAddressReference. Best-effort — the IPs
+	// are already allocated; a missing reference must not fail the instance create.
 	s.setNICAddressReferences(ctx, created)
 	return anypb.New(protoconv.Instance(created))
 }
 
-// setNICAddressReferences best-effort выставляет referrer (type=compute_instance,
-// id=instance id, name=instance name) на каждый VPC Address-ресурс, который
-// используют NIC-и инстанса: эфемерный internal (PrimaryV4AddressID), эфемерный
-// ИЛИ reserved external NAT (PrimaryV4Nat.AddressID / PrimaryV6Nat.AddressID).
+// setNICAddressReferences best-effort помечает каждый VPC Address-ресурс, который
+// используют NIC-и инстанса:
+//   - эфемерный internal (PrimaryV4AddressID — compute создал его сам) и
+//     эфемерный external NAT (PrimaryV4Nat/PrimaryV6Nat.AddressID при Ephemeral=true)
+//     → MarkAddressEphemeralInUse (reserved=false, used=true + referrer);
+//   - reserved external NAT (Ephemeral=false, передан клиентом по address_id)
+//     → SetAddressReference (referrer, reserved не трогаем).
+//
 // Ошибка → warning в лог, не валит вызывающую операцию.
 func (s *InstanceService) setNICAddressReferences(ctx context.Context, in *domain.Instance) {
 	for i := range in.NetworkInterfaces {
 		nic := &in.NetworkInterfaces[i]
-		s.setAddressReference(ctx, nic.PrimaryV4AddressID, in.ID, in.Name)
-		if nic.PrimaryV4Nat != nil {
-			s.setAddressReference(ctx, nic.PrimaryV4Nat.AddressID, in.ID, in.Name)
+		// PrimaryV4AddressID is always an ephemeral internal Address compute created.
+		s.markEphemeralAddressInUse(ctx, nic.PrimaryV4AddressID, in.ID, in.Name)
+		if nat := nic.PrimaryV4Nat; nat != nil {
+			s.markNatAddress(ctx, nat, in.ID, in.Name)
 		}
-		if nic.PrimaryV6Nat != nil {
-			s.setAddressReference(ctx, nic.PrimaryV6Nat.AddressID, in.ID, in.Name)
+		if nat := nic.PrimaryV6Nat; nat != nil {
+			s.markNatAddress(ctx, nat, in.ID, in.Name)
 		}
 	}
 }
 
+// markNatAddress помечает one-to-one-NAT Address: эфемерный (compute создал) →
+// MarkAddressEphemeralInUse; reserved (по address_id) → SetAddressReference.
+func (s *InstanceService) markNatAddress(ctx context.Context, nat *domain.OneToOneNat, instanceID, instanceName string) {
+	if nat.AddressID == "" {
+		return
+	}
+	if nat.Ephemeral {
+		s.markEphemeralAddressInUse(ctx, nat.AddressID, instanceID, instanceName)
+		return
+	}
+	s.setAddressReference(ctx, nat.AddressID, instanceID, instanceName)
+}
+
+// markEphemeralAddressInUse — best-effort MarkAddressEphemeralInUse на один
+// Address (no-op если addressID пуст): reserved=false, used=true + referrer.
+// Ошибка → warning, не fatal.
+func (s *InstanceService) markEphemeralAddressInUse(ctx context.Context, addressID, instanceID, instanceName string) {
+	if addressID == "" {
+		return
+	}
+	if err := s.vpcClient.MarkAddressEphemeralInUse(ctx, addressID, "compute_instance", instanceID, instanceName); err != nil {
+		slog.WarnContext(ctx, "failed to mark vpc address ephemeral-in-use (best-effort)",
+			"address_id", addressID, "instance_id", instanceID, "err", err)
+	}
+}
+
 // setAddressReference — best-effort SetAddressReference на один Address (no-op
-// если addressID пуст). Ошибка → warning, не fatal.
+// если addressID пуст; reserved-флаг адреса не меняется). Ошибка → warning, не fatal.
 func (s *InstanceService) setAddressReference(ctx context.Context, addressID, instanceID, instanceName string) {
 	if addressID == "" {
 		return
@@ -873,9 +907,11 @@ func (s *InstanceService) AddOneToOneNat(ctx context.Context, id, nicIndex strin
 			}
 			return nil, mapRepoErr(err)
 		}
-		// Referrer-tracking: attach a compute_instance reference to the NAT
-		// address (ephemeral or reserved). Best-effort.
-		s.setAddressReference(ctx, addrID, in.ID, in.Name)
+		// Referrer-tracking: a newly-created ephemeral external Address →
+		// MarkAddressEphemeralInUse (reserved=false, used=true + referrer); a
+		// user-provided reserved address → SetAddressReference (referrer only).
+		// Best-effort.
+		s.markNatAddress(ctx, nat, in.ID, in.Name)
 		return anypb.New(protoconv.Instance(updated))
 	})
 	return &op, nil

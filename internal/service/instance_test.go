@@ -377,7 +377,7 @@ func TestInstance_AddRemoveNAT_RealIP(t *testing.T) {
 	require.ElementsMatch(t, vpc.CreatedAddrIDs, vpc.DeletedAddrIDs) // ephemeral external Address released
 }
 
-func TestInstance_Create_SetsAddressReferences(t *testing.T) {
+func TestInstance_Create_MarksEphemeralAddressesInUse(t *testing.T) {
 	vpc := &portmock.VPCClient{SubnetFound: true, SubnetCidrBlocks: []string{"10.123.0.0/24"}, SGFound: true, AddrFound: true,
 		InternalIP: "10.123.0.7", ExternalIP: "198.51.100.42"}
 	svc, repo, _, ops := newInstanceSvcVPC(t, vpc)
@@ -392,9 +392,13 @@ func TestInstance_Create_SetsAddressReferences(t *testing.T) {
 	extAddrID := stored.NetworkInterfaces[0].PrimaryV4Nat.AddressID
 	require.NotEmpty(t, intAddrID)
 	require.NotEmpty(t, extAddrID)
-	// Both ephemeral addresses got a compute_instance referrer pointing at this VM.
-	require.Equal(t, in.Id, vpc.SetRefs[intAddrID])
-	require.Equal(t, in.Id, vpc.SetRefs[extAddrID])
+	// Ephemeral NIC + ephemeral NAT addresses → MarkAddressEphemeralInUse
+	// (reserved=false, used=true + compute_instance referrer atomically).
+	require.Equal(t, in.Id, vpc.MarkedEphemeral[intAddrID])
+	require.Equal(t, in.Id, vpc.MarkedEphemeral[extAddrID])
+	// And NOT through plain SetAddressReference — that's only for reserved addresses.
+	require.NotContains(t, vpc.SetRefs, intAddrID)
+	require.NotContains(t, vpc.SetRefs, extAddrID)
 
 	// Delete → ephemeral addresses deleted (referrer rows go via FK CASCADE in VPC).
 	op, err = svc.Delete(context.Background(), in.Id)
@@ -417,8 +421,14 @@ func TestInstance_Create_ReservedNatAddress_SetsAndClearsReference(t *testing.T)
 	require.NoError(t, err)
 	require.False(t, stored.NetworkInterfaces[0].PrimaryV4Nat.Ephemeral)
 	require.Equal(t, reservedAddrID, stored.NetworkInterfaces[0].PrimaryV4Nat.AddressID)
-	// Reserved NAT address got a referrer.
+	// Reserved NAT address: referrer via SetAddressReference (reserved-flag intact),
+	// NOT through MarkAddressEphemeralInUse (we don't flip reserved for user addresses).
 	require.Equal(t, in.Id, vpc.SetRefs[reservedAddrID])
+	require.NotContains(t, vpc.MarkedEphemeral, reservedAddrID)
+	// Ephemeral internal NIC address (compute-created) still goes through Mark.
+	intAddrID := stored.NetworkInterfaces[0].PrimaryV4AddressID
+	require.NotEmpty(t, intAddrID)
+	require.Equal(t, in.Id, vpc.MarkedEphemeral[intAddrID])
 
 	// Delete → reserved address NOT deleted, but its referrer is cleared.
 	op, err = svc.Delete(context.Background(), in.Id)
@@ -428,7 +438,7 @@ func TestInstance_Create_ReservedNatAddress_SetsAndClearsReference(t *testing.T)
 	require.Contains(t, vpc.ClearedRefs, reservedAddrID)
 }
 
-func TestInstance_AddRemoveNAT_SetsAndClearsEphemeralReference(t *testing.T) {
+func TestInstance_AddRemoveNAT_MarksEphemeralInUseAndDeletes(t *testing.T) {
 	vpc := &portmock.VPCClient{SubnetFound: true, SGFound: true, ExternalIP: "198.51.100.77"}
 	svc, repo, _, ops := newInstanceSvcVPC(t, vpc)
 	seedRunningInstance(repo, domain.InstanceStatusRunning)
@@ -438,12 +448,36 @@ func TestInstance_AddRemoveNAT_SetsAndClearsEphemeralReference(t *testing.T) {
 	require.Nil(t, portmock.AwaitOpDone(t, ops, op.ID).Error)
 	require.Len(t, vpc.CreatedAddrIDs, 1)
 	ephAddrID := vpc.CreatedAddrIDs[0]
-	require.Equal(t, "epdvm1", vpc.SetRefs[ephAddrID])
+	// Newly-created ephemeral NAT Address → MarkAddressEphemeralInUse (not SetRefs).
+	require.Equal(t, "epdvm1", vpc.MarkedEphemeral[ephAddrID])
+	require.NotContains(t, vpc.SetRefs, ephAddrID)
 
 	op, err = svc.RemoveOneToOneNat(context.Background(), "epdvm1", "0")
 	require.NoError(t, err)
 	require.Nil(t, portmock.AwaitOpDone(t, ops, op.ID).Error)
 	require.Contains(t, vpc.DeletedAddrIDs, ephAddrID) // ephemeral → deleted (referrer via CASCADE)
+}
+
+func TestInstance_AddNAT_ReservedAddress_SetsReferenceOnly(t *testing.T) {
+	const reservedAddrID = "e9breservedaddr02"
+	vpc := &portmock.VPCClient{SubnetFound: true, SGFound: true, AddrFound: true, ExternalIP: "198.51.100.88"}
+	svc, repo, _, ops := newInstanceSvcVPC(t, vpc)
+	seedRunningInstance(repo, domain.InstanceStatusRunning)
+
+	op, err := svc.AddOneToOneNat(context.Background(), "epdvm1", "0", &NatSpec{AddressID: reservedAddrID})
+	require.NoError(t, err)
+	require.Nil(t, portmock.AwaitOpDone(t, ops, op.ID).Error)
+	// Reserved user address → SetAddressReference (referrer only, reserved intact),
+	// NOT MarkAddressEphemeralInUse.
+	require.Equal(t, "epdvm1", vpc.SetRefs[reservedAddrID])
+	require.NotContains(t, vpc.MarkedEphemeral, reservedAddrID)
+	require.Empty(t, vpc.CreatedAddrIDs) // didn't create a new Address — used reserved one
+
+	op, err = svc.RemoveOneToOneNat(context.Background(), "epdvm1", "0")
+	require.NoError(t, err)
+	require.Nil(t, portmock.AwaitOpDone(t, ops, op.ID).Error)
+	require.NotContains(t, vpc.DeletedAddrIDs, reservedAddrID) // reserved → not deleted
+	require.Contains(t, vpc.ClearedRefs, reservedAddrID)       // referrer cleared
 }
 
 // TestInstance_Create_ZoneFromVPCSource — zone_id валидируется через ZoneRegistry
