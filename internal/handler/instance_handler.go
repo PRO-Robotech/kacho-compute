@@ -41,7 +41,12 @@ func (h *InstanceHandler) Get(ctx context.Context, req *computev1.GetInstanceReq
 	if err := AssertFolderOwnership(ctx, in.FolderID); err != nil {
 		return nil, err
 	}
-	return protoconv.Instance(in), nil
+	p := protoconv.Instance(in)
+	// verbatim YC: GetInstanceRequest.view — metadata возвращается только при view=FULL.
+	if req.View != computev1.InstanceView_FULL {
+		p.Metadata = nil
+	}
+	return p, nil
 }
 
 // List возвращает список ВМ в folder.
@@ -56,7 +61,11 @@ func (h *InstanceHandler) List(ctx context.Context, req *computev1.ListInstances
 	}
 	resp := &computev1.ListInstancesResponse{NextPageToken: nextToken}
 	for _, in := range ins {
-		resp.Instances = append(resp.Instances, protoconv.Instance(in))
+		p := protoconv.Instance(in)
+		// verbatim YC: metadata всегда опускается в List response (в ListInstancesRequest
+		// нет view-параметра — это документировано в instance.proto комментарии к Instance.metadata).
+		p.Metadata = nil
+		resp.Instances = append(resp.Instances, p)
 	}
 	return resp, nil
 }
