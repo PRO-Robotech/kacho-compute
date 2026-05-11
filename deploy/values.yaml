@@ -1,0 +1,17 @@
+name: compute
+replicas: 1
+image: kacho-compute:dev
+imagePullPolicy: IfNotPresent
+ports:
+  grpc: 9090
+  internalGrpc: 9091
+db:
+  host: kacho-umbrella-pg-compute
+  port: "5432"
+  user: compute
+  name: kacho_compute
+  passwordSecretName: kacho-umbrella-pg-compute
+  passwordSecretKey: password
+resourceManagerAddr: "resource-manager.kacho.svc.cluster.local:9090"
+vpcAddr: "vpc.kacho.svc.cluster.local:9090"
+skipPeerValidation: "false"

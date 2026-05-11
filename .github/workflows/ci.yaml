@@ -1,0 +1,86 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+# kacho-compute — polyrepo: go.mod has `replace github.com/PRO-Robotech/kacho-{corelib,proto} => ../...`
+# и Dockerfile COPY ../kacho-corelib и т.п. → CI должен воспроизвести local layout
+# (kacho-workspace/project/{kacho-compute, kacho-corelib, ...}). actions/checkout не пускает
+# path вне $GITHUB_WORKSPACE, поэтому: main-репо в подкаталог `kacho-compute/`, siblings рядом.
+# ПОКА kacho-proto пиннится к feature-ветке (compute-vendored-proto): новые stubs ещё не в main.
+# После merge — убрать `ref:`-строки (или → `ref: main`). См. workspace CLAUDE.md «Кросс-репо…».
+
+defaults:
+  run:
+    working-directory: kacho-compute
+
+jobs:
+  build-vet-test:
+    name: build + vet + test (unit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: kacho-compute }
+      - uses: actions/checkout@v4
+        with: { repository: PRO-Robotech/kacho-corelib, path: kacho-corelib }
+      - uses: actions/checkout@v4
+        with: { repository: PRO-Robotech/kacho-proto, path: kacho-proto }
+      - uses: actions/setup-go@v5
+        with: { go-version-file: kacho-compute/go.mod, cache-dependency-path: kacho-compute/go.sum }
+      - run: go mod download
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test -race -short -count=1 -timeout 5m ./...
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: kacho-compute }
+      - uses: actions/checkout@v4
+        with: { repository: PRO-Robotech/kacho-corelib, path: kacho-corelib }
+      - uses: actions/checkout@v4
+        with: { repository: PRO-Robotech/kacho-proto, path: kacho-proto }
+      - uses: actions/setup-go@v5
+        with: { go-version-file: kacho-compute/go.mod, cache-dependency-path: kacho-compute/go.sum }
+      - uses: golangci/golangci-lint-action@v7
+        with:
+          working-directory: kacho-compute
+          args: --timeout 5m
+
+  govuln:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: kacho-compute }
+      - uses: actions/checkout@v4
+        with: { repository: PRO-Robotech/kacho-corelib, path: kacho-corelib }
+      - uses: actions/checkout@v4
+        with: { repository: PRO-Robotech/kacho-proto, path: kacho-proto }
+      - uses: actions/setup-go@v5
+        with: { go-version-file: kacho-compute/go.mod, cache-dependency-path: kacho-compute/go.sum }
+      - run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          "$(go env GOPATH)/bin/govulncheck" ./...
+        continue-on-error: true
+
+  integration:
+    name: integration (testcontainers Postgres)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: kacho-compute }
+      - uses: actions/checkout@v4
+        with: { repository: PRO-Robotech/kacho-corelib, path: kacho-corelib }
+      - uses: actions/checkout@v4
+        with: { repository: PRO-Robotech/kacho-proto, path: kacho-proto }
+      - uses: actions/setup-go@v5
+        with: { go-version-file: kacho-compute/go.mod, cache-dependency-path: kacho-compute/go.sum }
+      - run: go mod download
+      - run: go test ./internal/repo/... -race -count=1 -timeout 300s

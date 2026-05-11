@@ -1,0 +1,19 @@
+# Go build
+*.exe
+*.test
+*.out
+bin/
+dist/
+coverage.out
+coverage-full.out
+/compute
+
+# Newman snapshots and run logs (audit trail, локально, не commit)
+tests/newman/out/snap*-local-*.json
+tests/newman/out/snap*-local-run.log
+tests/newman/out/baseline-yc-*.json
+
+# IDE
+.idea/
+.vscode/
+.DS_Store

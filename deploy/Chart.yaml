@@ -1,0 +1,5 @@
+apiVersion: v2
+name: compute
+version: 1.0.0
+appVersion: 1.0.0
+description: Kachō Compute (Instance, Disk, Image, Snapshot, DiskType, Zone) — verbatim YC proto + Operations

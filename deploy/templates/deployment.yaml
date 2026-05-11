@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.name }}
+  namespace: kacho
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Values.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.name }}
+    spec:
+      initContainers:
+        - name: migrate
+          image: "{{ .Values.image }}"
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          command: ["/usr/local/bin/kacho-compute", "migrate", "up"]
+          env:
+            - name: KACHO_COMPUTE_DB_HOST
+              value: "{{ .Values.db.host }}"
+            - name: KACHO_COMPUTE_DB_PORT
+              value: "{{ .Values.db.port }}"
+            - name: KACHO_COMPUTE_DB_USER
+              value: "{{ .Values.db.user }}"
+            - name: KACHO_COMPUTE_DB_NAME
+              value: "{{ .Values.db.name }}"
+            - name: KACHO_COMPUTE_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.db.passwordSecretName }}
+                  key: {{ .Values.db.passwordSecretKey }}
+      containers:
+        - name: {{ .Values.name }}
+          image: "{{ .Values.image }}"
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          command: ["/usr/local/bin/kacho-compute", "serve"]
+          ports:
+            - name: grpc
+              containerPort: {{ .Values.ports.grpc }}
+            - name: grpc-internal
+              containerPort: {{ .Values.ports.internalGrpc }}
+          env:
+            - name: KACHO_COMPUTE_DB_HOST
+              value: "{{ .Values.db.host }}"
+            - name: KACHO_COMPUTE_DB_PORT
+              value: "{{ .Values.db.port }}"
+            - name: KACHO_COMPUTE_DB_USER
+              value: "{{ .Values.db.user }}"
+            - name: KACHO_COMPUTE_DB_NAME
+              value: "{{ .Values.db.name }}"
+            - name: KACHO_COMPUTE_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.db.passwordSecretName }}
+                  key: {{ .Values.db.passwordSecretKey }}
+            - name: KACHO_COMPUTE_GRPC_PORT
+              value: "{{ .Values.ports.grpc }}"
+            - name: KACHO_COMPUTE_INTERNAL_PORT
+              value: "{{ .Values.ports.internalGrpc }}"
+            - name: KACHO_COMPUTE_RESOURCE_MANAGER_GRPC_ADDR
+              value: "{{ .Values.resourceManagerAddr }}"
+            - name: KACHO_COMPUTE_VPC_GRPC_ADDR
+              value: "{{ .Values.vpcAddr }}"
+            - name: KACHO_COMPUTE_SKIP_PEER_VALIDATION
+              value: "{{ .Values.skipPeerValidation }}"
+          readinessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 10
+            periodSeconds: 30
