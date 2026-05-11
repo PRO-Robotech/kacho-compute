@@ -75,7 +75,10 @@ func TestDiskHandler_CRUD(t *testing.T) {
 
 func TestCatalogHandler_ReadOnly(t *testing.T) {
 	dtSvc := service.NewDiskTypeService(portmock.NewDiskTypeRepo("network-ssd"))
-	zSvc := service.NewZoneService(portmock.NewZoneRepo())
+	zr := portmock.NewZoneRepo()
+	// skipPeer=false → ZoneService проксирует в kacho-vpc-source; здесь source ==
+	// VPCClient-mock со стандартными зонами ru-central1-{a,b,d}.
+	zSvc := service.NewZoneService(zr, &portmock.VPCClient{}, false)
 	dh := NewDiskTypeHandler(dtSvc)
 	zh := NewZoneHandler(zSvc)
 	ctx := context.Background()

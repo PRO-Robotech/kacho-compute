@@ -64,6 +64,8 @@ spec:
               value: "{{ .Values.resourceManagerAddr }}"
             - name: KACHO_COMPUTE_VPC_GRPC_ADDR
               value: "{{ .Values.vpcAddr }}"
+            - name: KACHO_COMPUTE_VPC_INTERNAL_GRPC_ADDR
+              value: "{{ .Values.vpcInternalAddr }}"
             - name: KACHO_COMPUTE_SKIP_PEER_VALIDATION
               value: "{{ .Values.skipPeerValidation }}"
           readinessProbe:

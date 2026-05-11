@@ -41,6 +41,13 @@ type Config struct {
 	// VPCTLS — TLS для cross-service gRPC к vpc.
 	VPCTLS bool `envconfig:"KACHO_COMPUTE_VPC_TLS" default:"false"`
 
+	// VPCInternalGRPCAddr — адрес internal-порта kacho-vpc (порт 9091:
+	// InternalZoneService — compute берёт справочник зон из VPC-модуля, локальная
+	// таблица `zones` используется только как fallback при SKIP_PEER_VALIDATION).
+	VPCInternalGRPCAddr string `envconfig:"KACHO_COMPUTE_VPC_INTERNAL_GRPC_ADDR" default:"vpc.kacho.svc.cluster.local:9091"`
+	// VPCInternalTLS — TLS для cross-service gRPC к internal-порту vpc.
+	VPCInternalTLS bool `envconfig:"KACHO_COMPUTE_VPC_INTERNAL_TLS" default:"false"`
+
 	// SkipPeerValidation — отключить cross-service existence-check (subnet/SG/address
 	// в VPC, folder в RM) → no-op. Для unit/newman/load-тестов без поднятых peer-сервисов.
 	SkipPeerValidation bool `envconfig:"KACHO_COMPUTE_SKIP_PEER_VALIDATION" default:"false"`

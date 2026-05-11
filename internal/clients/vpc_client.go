@@ -14,6 +14,7 @@ import (
 	operationv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/operation"
 	vpcv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/vpc/v1"
 
+	"github.com/PRO-Robotech/kacho-compute/internal/ports"
 	"github.com/PRO-Robotech/kacho-compute/internal/service"
 )
 
@@ -30,21 +31,29 @@ const (
 // VPCClient реализует service.VPCClient через gRPC к kacho-vpc
 // (SubnetService / SecurityGroupService — валидация NIC-spec;
 // AddressService + OperationService — IPAM-аллокация реальных IPv4 для
-// Instance NIC-ей через создание эфемерных Address-ресурсов).
+// Instance NIC-ей через создание эфемерных Address-ресурсов;
+// InternalZoneService — справочник зон, который compute проксирует как
+// собственный ZoneService и использует для existence-check zone_id).
+//
+// Использует ДВА gRPC-conn: публичный (:9090 — Subnet/SG/Address/Operation) и
+// internal (:9091 — InternalZoneService, не выставлен на external endpoint).
 type VPCClient struct {
-	subnets vpcv1.SubnetServiceClient
-	sgs     vpcv1.SecurityGroupServiceClient
-	addrs   vpcv1.AddressServiceClient
-	ops     operationv1.OperationServiceClient
+	subnets       vpcv1.SubnetServiceClient
+	sgs           vpcv1.SecurityGroupServiceClient
+	addrs         vpcv1.AddressServiceClient
+	ops           operationv1.OperationServiceClient
+	internalZones vpcv1.InternalZoneServiceClient
 }
 
-// NewVPCClient создаёт VPCClient.
-func NewVPCClient(conn *grpc.ClientConn) *VPCClient {
+// NewVPCClient создаёт VPCClient. conn — публичный gRPC-conn kacho-vpc (:9090);
+// internalConn — conn к internal-порту kacho-vpc (:9091, InternalZoneService).
+func NewVPCClient(conn, internalConn *grpc.ClientConn) *VPCClient {
 	return &VPCClient{
-		subnets: vpcv1.NewSubnetServiceClient(conn),
-		sgs:     vpcv1.NewSecurityGroupServiceClient(conn),
-		addrs:   vpcv1.NewAddressServiceClient(conn),
-		ops:     operationv1.NewOperationServiceClient(conn),
+		subnets:       vpcv1.NewSubnetServiceClient(conn),
+		sgs:           vpcv1.NewSecurityGroupServiceClient(conn),
+		addrs:         vpcv1.NewAddressServiceClient(conn),
+		ops:           operationv1.NewOperationServiceClient(conn),
+		internalZones: vpcv1.NewInternalZoneServiceClient(internalConn),
 	}
 }
 
@@ -90,6 +99,55 @@ func (c *VPCClient) SecurityGroupExists(ctx context.Context, sgID string) (bool,
 		return false, err
 	}
 	return found, nil
+}
+
+// GetZone возвращает зону по id из kacho-vpc InternalZoneService. Если зона
+// не существует на стороне VPC → ports.ErrNotFound (service-слой смаппит в
+// нужный gRPC-status). kacho-vpc не трекает zone-status — region берётся as-is.
+func (c *VPCClient) GetZone(ctx context.Context, zoneID string) (service.ZoneInfo, error) {
+	var info service.ZoneInfo
+	err := retry.OnUnavailable(ctx, func(ctx context.Context) error {
+		z, rerr := c.internalZones.Get(ctx, &vpcv1.GetZoneRequest{ZoneId: zoneID})
+		if rerr != nil {
+			if st, ok := status.FromError(rerr); ok && st.Code() == codes.NotFound {
+				return ports.ErrNotFound
+			}
+			return rerr
+		}
+		info = service.ZoneInfo{ID: z.GetId(), RegionID: z.GetRegionId()}
+		return nil
+	})
+	if err != nil {
+		return service.ZoneInfo{}, err
+	}
+	return info, nil
+}
+
+// ListZones возвращает зоны из kacho-vpc InternalZoneService (cursor-пагинация
+// проксируется насквозь: page_token непрозрачен для compute). Region-фильтр VPC
+// не используется (compute показывает все зоны).
+func (c *VPCClient) ListZones(ctx context.Context, pageSize int64, pageToken string) ([]service.ZoneInfo, string, error) {
+	var (
+		zones []service.ZoneInfo
+		next  string
+	)
+	err := retry.OnUnavailable(ctx, func(ctx context.Context) error {
+		resp, rerr := c.internalZones.List(ctx, &vpcv1.ListZonesRequest{PageSize: pageSize, PageToken: pageToken})
+		if rerr != nil {
+			return rerr
+		}
+		out := make([]service.ZoneInfo, 0, len(resp.GetZones()))
+		for _, z := range resp.GetZones() {
+			out = append(out, service.ZoneInfo{ID: z.GetId(), RegionID: z.GetRegionId()})
+		}
+		zones = out
+		next = resp.GetNextPageToken()
+		return nil
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	return zones, next, nil
 }
 
 // CreateInternalAddress создаёт эфемерный internal Address в folder/subnet и
@@ -287,3 +345,22 @@ func (NoopVPCClient) GetExternalAddress(_ context.Context, addressID string) (se
 
 // DeleteAddress — no-op.
 func (NoopVPCClient) DeleteAddress(_ context.Context, _ string) error { return nil }
+
+// GetZone — любой непустой zoneID считается существующим (region "ru-central1").
+// Реально не вызывается: в SKIP_PEER_VALIDATION-режиме compute берёт зоны из
+// локальной таблицы `zones`, а не из этой заглушки — но интерфейс реализуем.
+func (NoopVPCClient) GetZone(_ context.Context, zoneID string) (service.ZoneInfo, error) {
+	if zoneID == "" {
+		return service.ZoneInfo{}, ports.ErrNotFound
+	}
+	return service.ZoneInfo{ID: zoneID, RegionID: "ru-central1"}, nil
+}
+
+// ListZones возвращает три стандартные зоны ru-central1-{a,b,d}.
+func (NoopVPCClient) ListZones(_ context.Context, _ int64, _ string) ([]service.ZoneInfo, string, error) {
+	return []service.ZoneInfo{
+		{ID: "ru-central1-a", RegionID: "ru-central1"},
+		{ID: "ru-central1-b", RegionID: "ru-central1"},
+		{ID: "ru-central1-d", RegionID: "ru-central1"},
+	}, "", nil
+}

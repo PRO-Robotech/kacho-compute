@@ -40,6 +40,25 @@ func mapRepoErr(err error) error {
 	return status.Error(codes.Internal, "internal database error")
 }
 
+// mapZoneRefErr транслирует ошибку existence-check zone_id (через ZoneRegistry —
+// kacho-vpc InternalZoneService либо локальная таблица `zones`) в gRPC-status,
+// сохраняя текущий контракт compute: неизвестная зона → InvalidArgument
+// "Zone <id> not found" (паритет с предыдущей логикой; CLAUDE.md §4.1, §6).
+// Транспортная ошибка к kacho-vpc (Unavailable) пробрасывается как
+// Unavailable "zone check: <err>" (зеркалит folder/subnet-check).
+func mapZoneRefErr(err error, zoneID string) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, ErrNotFound) {
+		return status.Errorf(codes.InvalidArgument, "Zone %s not found", zoneID)
+	}
+	if st, ok := status.FromError(err); ok && st.Code() == codes.NotFound {
+		return status.Errorf(codes.InvalidArgument, "Zone %s not found", zoneID)
+	}
+	return status.Errorf(codes.Unavailable, "zone check: %v", err)
+}
+
 // stripSentinel — извлекает «полезную» часть сообщения (после «sentinel: »),
 // чтобы выдать клиенту verbatim text без internal-обёртки sentinel-ошибки.
 func stripSentinel(err, sentinel error) string {

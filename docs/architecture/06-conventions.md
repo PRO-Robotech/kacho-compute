@@ -60,8 +60,11 @@ Compute-specific правила, error mapping, top-10 gotchas. Workspace-уро
   `(pattern) = "[a-z][a-z0-9-_]{,19}"`. `hostname` — как `name`.
 - `Description` ≤256; `Labels` ≤64 пар (key regex `[a-z][-_./\@0-9a-z]*`, value
   regex `[-_./\@0-9a-z]*`, value ≤63).
-- `zone_id` — required + existence через `ZoneRegistry` (таблица `zones`);
-  неизвестная зона → `InvalidArgument` (probe — YC может давать `NotFound`).
+- `zone_id` — required + existence через `ZoneRegistry`. Авторитетный источник
+  зон — kacho-vpc `InternalZoneService` (compute зон не владеет; см.
+  `07-known-divergences.md` §6.1); при `KACHO_COMPUTE_SKIP_PEER_VALIDATION=true` —
+  fallback на локальную таблицу `zones`. Неизвестная зона → `InvalidArgument
+  "Zone <id> not found"` (probe — YC может давать `NotFound`).
 - Disk `size` — `[4194304 .. 28587302322176]` на Create, `[4194304 ..
   4398046511104]` на Update (из proto `(value)`). `AttachedDiskSpec.DiskSpec.size`
   — `[4194304 .. 4398046511104]`. `block_size` — default 4096, whitelist
@@ -185,14 +188,23 @@ disk <id> is being used"` (FK RESTRICT); иначе DELETE.
 - `folderClient` → `kacho-resource-manager.FolderService.Exists` (worker каждого
   Create/Move).
 - `vpcClient` → `kacho.cloud.vpc.v1.{SubnetService.Get, SecurityGroupService.Get,
-  AddressService.Get}` (для Instance NIC validation).
-- `imageRepo` / `snapshotRepo` / `diskTypeRepo` / `zoneRepo` — **НЕ clients**, а
-  локальные repo (та же БД); existence-check source-ресурсов.
+  AddressService.Get}` на публичном порту kacho-vpc `:9090` (Instance NIC
+  validation + IPAM-аллокация эфемерных Address) **+** `InternalZoneService.{Get,List}`
+  на internal-порту kacho-vpc `:9091` — авторитетный источник справочника зон
+  (compute зон не владеет; см. `07-known-divergences.md` §6.1). Это **два разных
+  gRPC-conn** внутри одного `clients.VPCClient`.
+- `imageRepo` / `snapshotRepo` / `diskTypeRepo` — **НЕ clients**, а локальные repo
+  (та же БД); existence-check source-ресурсов. `zoneRepo` тоже локальный, но
+  используется только как **fallback**-источник зон при `SKIP_PEER_VALIDATION`
+  (через адаптер `repo.ZoneRepoSource` → `service.ZoneSource`/`ZoneRegistry`).
 
 Конфиг адресов: `KACHO_COMPUTE_RESOURCE_MANAGER_GRPC_ADDR`,
-`KACHO_COMPUTE_VPC_GRPC_ADDR` + `*_TLS` флаги. `KACHO_COMPUTE_SKIP_PEER_VALIDATION
-=true` переводит cross-service existence-check в no-op (для unit/newman/load-тестов
-без поднятых peer-сервисов). Retry on `Unavailable` — `kacho-corelib/retry`.
+`KACHO_COMPUTE_VPC_GRPC_ADDR` (`:9090`), `KACHO_COMPUTE_VPC_INTERNAL_GRPC_ADDR`
+(`:9091`, default `vpc.kacho.svc.cluster.local:9091`) + `*_TLS` флаги.
+`KACHO_COMPUTE_SKIP_PEER_VALIDATION=true` переводит cross-service existence-check
+в no-op и заставляет `ZoneService`/zone-validation читать локальную таблицу `zones`
+(для unit/newman/load-тестов без поднятых peer-сервисов). Retry on `Unavailable` —
+`kacho-corelib/retry`.
 
 ## Admin boundary
 

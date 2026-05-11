@@ -376,3 +376,34 @@ func TestInstance_AddRemoveNAT_RealIP(t *testing.T) {
 	require.Nil(t, in.NetworkInterfaces[0].PrimaryV4Address.OneToOneNat)
 	require.ElementsMatch(t, vpc.CreatedAddrIDs, vpc.DeletedAddrIDs) // ephemeral external Address released
 }
+
+// TestInstance_Create_ZoneFromVPCSource — zone_id валидируется через ZoneRegistry
+// (в проде — kacho-vpc InternalZoneService; здесь — VPCClient-mock). Неизвестная
+// VPC-зона → операция падает с InvalidArgument "Zone ... not found".
+func TestInstance_Create_ZoneFromVPCSource(t *testing.T) {
+	diskRepo := portmock.NewDiskRepo()
+	instanceRepo := portmock.NewInstanceRepo().WithDiskRepo(diskRepo)
+	ops := portmock.NewOpsRepo()
+	vpcSource := &portmock.VPCClient{
+		SubnetFound: true, SGFound: true, AddrFound: true,
+		Zones: map[string]string{"ru-central1-a": "ru-central1"},
+	}
+	svc := NewInstanceService(instanceRepo, diskRepo, portmock.NewImageRepo(), portmock.NewSnapshotRepo(),
+		vpcSource, &portmock.FolderClient{OK: true}, vpcSource, ops, false)
+
+	// known vpc zone → success.
+	op, err := svc.Create(context.Background(), baseCreateReq())
+	require.NoError(t, err)
+	done := portmock.AwaitOpDone(t, ops, op.ID)
+	require.Nil(t, done.Error, "create with known vpc zone must succeed")
+
+	// unknown vpc zone → InvalidArgument.
+	bad := baseCreateReq()
+	bad.ZoneID = "no-such-zone"
+	op2, err := svc.Create(context.Background(), bad)
+	require.NoError(t, err)
+	done2 := portmock.AwaitOpDone(t, ops, op2.ID)
+	require.NotNil(t, done2.Error)
+	require.Equal(t, int32(codes.InvalidArgument), done2.Error.Code)
+	require.Contains(t, done2.Error.Message, "no-such-zone")
+}

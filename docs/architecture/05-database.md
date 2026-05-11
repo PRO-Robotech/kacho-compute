@@ -92,8 +92,12 @@ created_at TIMESTAMPTZ  NOT NULL DEFAULT now()
 INDEX zones_region_idx (region_id)
 ```
 
-Используется также как `ZoneRegistry` (`internal/service` порт) для
-existence-check `zone_id` в `Disk.Create` / `Instance.Create`.
+Источник данных для `ZoneService.Get/List` и для `ZoneRegistry` (existence-check
+`zone_id` в `Disk.Create` / `Instance.Create` / `Disk.Relocate`) — **kacho-vpc
+`InternalZoneService`** (`:9091`); compute зон не владеет (см.
+`07-known-divergences.md` §6.1). Эта таблица — **fallback**, читается только при
+`KACHO_COMPUTE_SKIP_PEER_VALIDATION=true` (через адаптер `repo.ZoneRepoSource`).
+Seed `ru-central1-{a,b,d}` (`status = UP`) остаётся в `0001_initial.sql`.
 
 ### `disk_types`
 
@@ -344,7 +348,7 @@ INSERT INTO disk_types (id, description, zone_ids) VALUES
 | `images.source_*` | **НЕ FK** | происхождение для observability |
 | `instances.boot_disk_id` | **не отдельный FK** | boot disk = строка `attached_disks` с `is_boot=true` |
 | `disks.type_id` → `disk_types.id` | **НЕ FK** | resilient к удалению типа; existence-check на `Disk.Create` |
-| `instances.zone_id` / `disks.zone_id` → `zones.id` | **НЕ FK** | existence-check через `ZoneRegistry` на Create |
+| `instances.zone_id` / `disks.zone_id` → `zones.id` | **НЕ FK** | existence-check через `ZoneRegistry` на Create — авторитет kacho-vpc `InternalZoneService`; таблица `zones` — fallback при `SKIP_PEER_VALIDATION` |
 | cross-service: `instance_network_interfaces.subnet_id` → VPC Subnet; `.security_group_ids[]` → VPC SG; NAT `address` → VPC Address; `instances.folder_id` / `disks.folder_id` / ... → RM Folder | **НЕ FK** (другая БД) | валидируются gRPC-вызовом к peer-сервису в worker'е (workspace `CLAUDE.md` §запрет 4: нельзя каскадить через границу сервиса) |
 
 ## Connection / pooling

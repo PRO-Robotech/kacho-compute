@@ -107,7 +107,10 @@ type InstanceService struct {
 	diskRepo     DiskRepo
 	imageRepo    ImageRepo
 	snapshotRepo SnapshotRepo
-	zoneRepo     ZoneRepo
+	// zones — existence-check zone_id. Авторитетный источник — kacho-vpc
+	// InternalZoneService (compute зон не владеет); при SKIP_PEER_VALIDATION —
+	// fallback на локальную таблицу `zones`. Wiring — cmd/compute/main.go.
+	zones        ZoneRegistry
 	folderClient FolderClient
 	vpcClient    VPCClient
 	opsRepo      operations.Repo
@@ -119,10 +122,10 @@ type InstanceService struct {
 // NewInstanceService создаёт InstanceService. skipIPAM=true (зеркалит
 // KACHO_COMPUTE_SKIP_PEER_VALIDATION) → NIC-ам выдаются синтетические IP вместо
 // реальных, выделенных через kacho-vpc IPAM (для unit/newman/load без VPC).
-func NewInstanceService(repo InstanceRepo, diskRepo DiskRepo, imageRepo ImageRepo, snapshotRepo SnapshotRepo, zoneRepo ZoneRepo, folderClient FolderClient, vpcClient VPCClient, opsRepo operations.Repo, skipIPAM bool) *InstanceService {
+func NewInstanceService(repo InstanceRepo, diskRepo DiskRepo, imageRepo ImageRepo, snapshotRepo SnapshotRepo, zones ZoneRegistry, folderClient FolderClient, vpcClient VPCClient, opsRepo operations.Repo, skipIPAM bool) *InstanceService {
 	return &InstanceService{
 		repo: repo, diskRepo: diskRepo, imageRepo: imageRepo, snapshotRepo: snapshotRepo,
-		zoneRepo: zoneRepo, folderClient: folderClient, vpcClient: vpcClient, opsRepo: opsRepo,
+		zones: zones, folderClient: folderClient, vpcClient: vpcClient, opsRepo: opsRepo,
 		skipIPAM: skipIPAM,
 	}
 }
@@ -203,8 +206,8 @@ func (s *InstanceService) doCreate(ctx context.Context, instanceID string, req C
 	if err := s.checkFolder(ctx, req.FolderID); err != nil {
 		return nil, err
 	}
-	if _, err := s.zoneRepo.Get(ctx, req.ZoneID); err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "Zone %s not found", req.ZoneID)
+	if _, err := s.zones.GetZone(ctx, req.ZoneID); err != nil {
+		return nil, mapZoneRefErr(err, req.ZoneID)
 	}
 
 	// NIC cross-service validation + materialization (incl. real IPv4

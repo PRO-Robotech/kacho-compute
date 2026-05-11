@@ -189,7 +189,8 @@ func validateAuthMode(cfg config.Config, logger *slog.Logger) (productionMode bo
 	return productionMode, nil
 }
 
-// dialPeers открывает gRPC-клиенты к peer-сервисам (resource-manager, vpc) либо
+// dialPeers открывает gRPC-клиенты к peer-сервисам (resource-manager, vpc — два
+// conn'а: публичный :9090 и internal :9091 для InternalZoneService) либо
 // возвращает no-op-заглушки при KACHO_COMPUTE_SKIP_PEER_VALIDATION=true.
 func dialPeers(cfg config.Config, logger *slog.Logger) (service.FolderClient, service.VPCClient, []*grpc.ClientConn, error) {
 	if cfg.SkipPeerValidation {
@@ -205,7 +206,13 @@ func dialPeers(cfg config.Config, logger *slog.Logger) (service.FolderClient, se
 		_ = rmConn.Close()
 		return nil, nil, nil, fmt.Errorf("dial vpc: %w", err)
 	}
-	return clients.NewFolderClient(rmConn), clients.NewVPCClient(vpcConn), []*grpc.ClientConn{rmConn, vpcConn}, nil
+	vpcInternalConn, err := dialPeer(cfg.VPCInternalGRPCAddr, cfg.VPCInternalTLS)
+	if err != nil {
+		_ = vpcConn.Close()
+		_ = rmConn.Close()
+		return nil, nil, nil, fmt.Errorf("dial vpc internal: %w", err)
+	}
+	return clients.NewFolderClient(rmConn), clients.NewVPCClient(vpcConn, vpcInternalConn), []*grpc.ClientConn{rmConn, vpcConn, vpcInternalConn}, nil
 }
 
 func dialPeer(addr string, useTLS bool) (*grpc.ClientConn, error) {
@@ -219,9 +226,11 @@ func dialPeer(addr string, useTLS bool) (*grpc.ClientConn, error) {
 }
 
 // buildServices создаёт все repo'ы поверх pool и собирает из них бизнес-сервисы.
-// skipIPAM (== cfg.SkipPeerValidation) → Instance NIC-ам выдаются синтетические
-// IP вместо реальных, выделенных через kacho-vpc IPAM.
-func buildServices(pool *pgxpool.Pool, folderClient service.FolderClient, vpcClient service.VPCClient, opsRepo operations.Repo, skipIPAM bool) *services {
+// skipPeer (== cfg.SkipPeerValidation): true → cross-service existence-check
+// отключён, NIC-ам выдаются синтетические IP, а зоны берутся из локальной
+// таблицы `zones` (fallback); false → зоны (Get/List + existence-check zone_id)
+// берутся из kacho-vpc InternalZoneService (compute зон не владеет).
+func buildServices(pool *pgxpool.Pool, folderClient service.FolderClient, vpcClient service.VPCClient, opsRepo operations.Repo, skipPeer bool) *services {
 	diskRepo := repo.NewDiskRepo(pool)
 	imageRepo := repo.NewImageRepo(pool)
 	snapshotRepo := repo.NewSnapshotRepo(pool)
@@ -229,15 +238,24 @@ func buildServices(pool *pgxpool.Pool, folderClient service.FolderClient, vpcCli
 	diskTypeRepo := repo.NewDiskTypeRepo(pool)
 	zoneRepo := repo.NewZoneRepo(pool)
 
+	// Источник зон: kacho-vpc InternalZoneService (vpcClient) — авторитетный; при
+	// SKIP_PEER_VALIDATION → локальная таблица `zones` (fallback). zoneSource
+	// реализует и ZoneSource (для ZoneService.Get/List), и ZoneRegistry (для
+	// existence-check zone_id в Disk/Instance Create + Disk Relocate).
+	var zoneSource service.ZoneSource = vpcClient
+	if skipPeer {
+		zoneSource = repo.NewZoneRepoSource(zoneRepo)
+	}
+
 	diskTypeSvc := service.NewDiskTypeService(diskTypeRepo)
-	zoneSvc := service.NewZoneService(zoneRepo)
+	zoneSvc := service.NewZoneService(zoneRepo, zoneSource, skipPeer)
 	return &services{
-		disk:     service.NewDiskService(diskRepo, imageRepo, snapshotRepo, diskTypeRepo, zoneRepo, folderClient, opsRepo),
+		disk:     service.NewDiskService(diskRepo, imageRepo, snapshotRepo, diskTypeRepo, zoneSource, folderClient, opsRepo),
 		image:    service.NewImageService(imageRepo, diskRepo, snapshotRepo, folderClient, opsRepo),
 		snapshot: service.NewSnapshotService(snapshotRepo, diskRepo, folderClient, opsRepo),
 		diskType: diskTypeSvc,
 		zone:     zoneSvc,
-		instance: service.NewInstanceService(instanceRepo, diskRepo, imageRepo, snapshotRepo, zoneRepo, folderClient, vpcClient, opsRepo, skipIPAM),
+		instance: service.NewInstanceService(instanceRepo, diskRepo, imageRepo, snapshotRepo, zoneSource, folderClient, vpcClient, opsRepo, skipPeer),
 	}
 }
 

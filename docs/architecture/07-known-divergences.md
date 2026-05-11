@@ -138,6 +138,42 @@ endpoint (advertised для `yc` CLI) эти POST/PATCH/DELETE paths **не до
 `DiskTypeService.Get/List` / `ZoneService.Get/List`. Выравнивать не с чем (в YC
 аналога нет). Proto-комментарии (`internal_catalog_service.proto`) это отражают.
 
+### 6.1. `ZoneService` проксирует kacho-vpc `InternalZoneService` (compute зон не владеет)
+
+На данный момент **авторитетный источник справочника зон — kacho-vpc**
+(`InternalZoneService` на kacho-vpc-внутреннем порту `:9091`), не kacho-compute.
+Решение заказчика: «зону на данный момент бери так же из VPC модуля» — так же, как
+IP-адреса NIC-ей теперь выделяются через kacho-vpc IPAM. Поэтому:
+
+- **Публичный `ZoneService.Get/List`** (`/compute/v1/zones` GET) — проксирует в
+  kacho-vpc `InternalZoneService.Get/List`. `vpcv1.Zone{id, region_id}` →
+  `computev1.Zone{id, region_id, status: UP}` (kacho-vpc не трекает zone-status →
+  compute всегда репортит `UP`; `created_at` у `computev1.Zone` нет — отбрасывается).
+  Page-size валидируется на compute-стороне (`corevalidate.PageSize`) перед делегацией;
+  `page_token` проксируется насквозь (непрозрачен для compute).
+- **Existence-check `zone_id`** в `Disk.Create` / `Instance.Create` / `Disk.Relocate`
+  (`ZoneRegistry`-порт) — тоже бьёт в kacho-vpc `InternalZoneService.Get`. Контракт
+  ошибки сохранён: неизвестная зона → `InvalidArgument "Zone <id> not found"`
+  (как и раньше; см. §4.1, §6 в `06-conventions.md`); транспортная ошибка к
+  kacho-vpc → `Unavailable "zone check: <err>"`.
+- **Локальная таблица `zones`** (`internal/migrations/0001_initial.sql` seed
+  `ru-central1-{a,b,d}`) **остаётся как fallback** — используется только при
+  `KACHO_COMPUTE_SKIP_PEER_VALIDATION=true` (unit / newman / load-тесты без
+  поднятого kacho-vpc). В этом режиме `ZoneService.Get/List` и existence-check
+  читают локальную таблицу, а `clients.NoopVPCClient` отвечает синтетически.
+- **`InternalZoneService` самого compute** (`/compute/v1/zones` POST/PATCH/DELETE,
+  §6 выше) — оставлен без изменений, но при peer-validation **on** он управляет
+  только fallback-таблицей `zones` (которая в этом режиме не читается), а не
+  авторитетным справочником. Авторитетный справочник зон редактируется в kacho-vpc
+  (`/vpc/v1/zones`).
+- **`DiskType` остаётся compute-local** — менять источник не требовалось (в kacho-vpc
+  нет аналога DiskType).
+
+Двойной gRPC-conn к kacho-vpc: публичный `:9090` (Subnet/SG/Address/Operation) +
+internal `:9091` (`InternalZoneService`) — конфигурируется через
+`KACHO_COMPUTE_VPC_INTERNAL_GRPC_ADDR` (default `vpc.kacho.svc.cluster.local:9091`,
+корректен в-кластере) + `KACHO_COMPUTE_VPC_INTERNAL_TLS`.
+
 ## 7. Blocked-on-missing-service — отложено до появления зависимого сервиса
 
 Не расхождение «по решению», а пробел из-за нереализованного peer-сервиса

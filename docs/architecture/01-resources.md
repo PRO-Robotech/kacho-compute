@@ -98,7 +98,7 @@ async `NotFound`, а malformed/wrong-prefix id → sync `InvalidArgument "invali
 | `description` | string | ≤256 |
 | `labels` | map<string,string> | ≤64 пар, key regex `[a-z][-_./\@0-9a-z]*` |
 | `type_id` | string | ссылка на DiskType; пуст → default `network-ssd` |
-| `zone_id` | string | required; existence через `ZoneRegistry` (таблица `zones`) |
+| `zone_id` | string | required; existence через `ZoneRegistry` — авторитетный источник kacho-vpc `InternalZoneService` (см. `07-known-divergences.md` §6.1); таблица `zones` — fallback при `SKIP_PEER_VALIDATION` |
 | `size` | int64 | в байтах; Create `[4194304 .. 28587302322176]`, Update `[4194304 .. 4398046511104]` (из proto `(value)`) |
 | `block_size` | int64 | default 4096; whitelist {4096, ...} (probe YC точный set) |
 | `product_ids` | repeated string | license IDs; в control-plane статичны |
@@ -251,7 +251,7 @@ state-машину статуса. Таблица `instances` + дочерние
 | `folder_id` | string | partial UNIQUE `(folder_id, name) WHERE name <> ''` |
 | `created_at` | Timestamp | truncate до секунд |
 | `name`, `description`, `labels` | | как у Disk |
-| `zone_id` | string | required; existence через `ZoneRegistry`; immutable (меняется через Relocate) |
+| `zone_id` | string | required; existence через `ZoneRegistry` (kacho-vpc `InternalZoneService`; см. `07-known-divergences.md` §6.1); immutable (меняется через Relocate) |
 | `platform_id` | string | required (`standard-v1/v2/v3`, `highfreq-v3`, `gpu-*` — таблица в `internal/service/platforms.go`) |
 | `resources` | Resources{memory, cores, core_fraction, gpus} | в схеме: `cores`, `memory`, `core_fraction`, `gpus`. proto `ResourcesSpec`: `memory ≤ 274877906944`, `cores ∈ {2,4,...,80}`, `core_fraction ∈ {0,5,20,50,100}`, `gpus ∈ {0,1,2,4}` + per-platform валидация |
 | `status` | Instance.Status enum | `STATUS_UNSPECIFIED=0, PROVISIONING=1, RUNNING=2, STOPPING=3, STOPPED=4, STARTING=5, RESTARTING=6, UPDATING=7, ERROR=8, CRASHED=9, DELETING=10`. Подробно — [`03-instance-lifecycle.md`](03-instance-lifecycle.md) |
@@ -394,10 +394,17 @@ Seed (в `0001_initial.sql`): `network-hdd`, `network-ssd`,
 | `Update` | `InternalZoneService` | `:9091` internal | ✅ kacho-only | `PATCH /compute/v1/zones/{zone_id}` body `{region_id, status}` |
 | `Delete` | `InternalZoneService` | `:9091` internal | ✅ kacho-only | `DELETE /compute/v1/zones/{zone_id}` → `DeleteZoneResponse{}` |
 
-Seed (в `0001_initial.sql`): `ru-central1-a`, `ru-central1-b`, `ru-central1-d` —
-все `region_id = ru-central1`, `status = UP`. `ZoneService` также используется
-сервисно как `ZoneRegistry` (`internal/service` порт) для existence-check
-`zone_id` в Create Disk/Instance.
+**Источник данных:** `ZoneService.Get/List` проксирует kacho-vpc
+`InternalZoneService` (`:9091`) — compute зон не владеет (решение «зону бери из
+VPC модуля», аналогично IPAM; см. `07-known-divergences.md` §6.1). Локальная
+таблица `zones` (seed в `0001_initial.sql`: `ru-central1-{a,b,d}`,
+`region_id = ru-central1`, `status = UP`) **остаётся как fallback** —
+используется только при `KACHO_COMPUTE_SKIP_PEER_VALIDATION=true`. Тот же
+источник используется как `ZoneRegistry` для existence-check `zone_id` в
+Create Disk/Instance / Relocate Disk. `InternalZoneService` самого compute
+(`/compute/v1/zones` POST/PATCH/DELETE) при peer-validation **on** управляет
+только fallback-таблицей (которая не читается) — авторитетные зоны редактируются
+в kacho-vpc (`/vpc/v1/zones`).
 
 ## Что не compute-ресурс, но рядом живёт
 

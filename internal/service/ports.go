@@ -37,10 +37,17 @@ type (
 	// FolderClient — port для проверки существования Folder.
 	FolderClient = ports.FolderClient
 	// VPCClient — port для cross-service взаимодействия с kacho-vpc (валидация
-	// NIC-spec + IPAM-аллокация реальных IPv4 + teardown эфемерных Address).
+	// NIC-spec + IPAM-аллокация реальных IPv4 + teardown эфемерных Address +
+	// справочник зон через InternalZoneService).
 	VPCClient = ports.VPCClient
 	// SubnetInfo — минимальные данные о subnet, нужные при материализации NIC.
 	SubnetInfo = ports.SubnetInfo
 	// VPCAddress — выделенный IP-адрес VPC (IP + id Address-ресурса).
 	VPCAddress = ports.VPCAddress
+	// ZoneInfo — минимальные данные о зоне (id + region).
+	ZoneInfo = ports.ZoneInfo
+	// ZoneRegistry — port existence-check zone_id (Disk/Instance Create, Disk Relocate).
+	ZoneRegistry = ports.ZoneRegistry
+	// ZoneSource — port для публичного ZoneService.Get/List.
+	ZoneSource = ports.ZoneSource
 )

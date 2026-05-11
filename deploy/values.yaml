@@ -14,4 +14,7 @@ db:
   passwordSecretKey: password
 resourceManagerAddr: "resource-manager.kacho.svc.cluster.local:9090"
 vpcAddr: "vpc.kacho.svc.cluster.local:9090"
+# vpcInternalAddr — internal-порт kacho-vpc (:9091): InternalZoneService —
+# compute берёт справочник зон из VPC-модуля (см. docs/architecture/07-known-divergences.md §6.1).
+vpcInternalAddr: "vpc.kacho.svc.cluster.local:9091"
 skipPeerValidation: "false"

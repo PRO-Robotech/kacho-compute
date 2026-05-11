@@ -38,8 +38,10 @@ func TestDiskType_AdminCRUD(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(svc.Delete(context.Background(), "network-ssd-io-m3")))
 }
 
-func TestZone_GetListAndAdminCRUD(t *testing.T) {
-	svc := NewZoneService(portmock.NewZoneRepo())
+func TestZone_GetListAndAdminCRUD_LocalFallback(t *testing.T) {
+	// skipPeer=true → Get/List читают локальную таблицу `zones` (fallback).
+	zr := portmock.NewZoneRepo()
+	svc := NewZoneService(zr, zr, true)
 	z, err := svc.Get(context.Background(), "ru-central1-a")
 	require.NoError(t, err)
 	require.Equal(t, domain.ZoneStatusUp, z.Status)
@@ -53,4 +55,36 @@ func TestZone_GetListAndAdminCRUD(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, domain.ZoneStatusDown, updated.Status)
 	require.NoError(t, svc.Delete(context.Background(), "ru-central1-c"))
+}
+
+func TestZone_GetList_FromVPCSource(t *testing.T) {
+	// skipPeer=false → Get/List проксируются в kacho-vpc InternalZoneService (source).
+	// repo (локальная таблица) намеренно содержит ДРУГИЕ зоны — чтобы проверить,
+	// что данные берутся именно из source.
+	localRepo := portmock.NewZoneRepo("local-zone-1")
+	source := &portmock.VPCClient{Zones: map[string]string{
+		"ru-central1-a": "ru-central1",
+		"ru-central1-x": "ru-central1",
+	}}
+	svc := NewZoneService(localRepo, source, false)
+
+	z, err := svc.Get(context.Background(), "ru-central1-x")
+	require.NoError(t, err)
+	require.Equal(t, "ru-central1-x", z.ID)
+	require.Equal(t, "ru-central1", z.RegionID)
+	require.Equal(t, domain.ZoneStatusUp, z.Status)
+
+	// зона из локальной таблицы НЕ видна (источник — vpc).
+	_, err = svc.Get(context.Background(), "local-zone-1")
+	require.Equal(t, codes.NotFound, status.Code(err))
+
+	// неизвестная зона → NotFound "Zone ... not found".
+	_, err = svc.Get(context.Background(), "no-such-zone")
+	require.Equal(t, codes.NotFound, status.Code(err))
+
+	list, _, err := svc.List(context.Background(), Pagination{})
+	require.NoError(t, err)
+	require.Len(t, list, 2)
+	require.Equal(t, "ru-central1-a", list[0].ID)
+	require.Equal(t, "ru-central1-x", list[1].ID)
 }

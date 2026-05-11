@@ -250,6 +250,40 @@ func (r *ZoneRepo) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+// ---- ZoneRepoSource: fallback-адаптер ZoneRepo → service.ZoneSource ----
+
+// ZoneRepoSource адаптирует локальную таблицу `zones` к service.ZoneSource
+// (а значит и к service.ZoneRegistry). Используется как fallback-источник зон
+// для ZoneService.Get/List и для existence-check zone_id в Disk/Instance Create —
+// только при KACHO_COMPUTE_SKIP_PEER_VALIDATION=true. В обычном режиме compute
+// берёт зоны из kacho-vpc InternalZoneService (см. internal/clients/vpc_client.go).
+type ZoneRepoSource struct{ repo *ZoneRepo }
+
+// NewZoneRepoSource создаёт ZoneRepoSource поверх ZoneRepo.
+func NewZoneRepoSource(repo *ZoneRepo) *ZoneRepoSource { return &ZoneRepoSource{repo: repo} }
+
+// GetZone возвращает зону по id (service.ErrNotFound при отсутствии).
+func (s *ZoneRepoSource) GetZone(ctx context.Context, zoneID string) (service.ZoneInfo, error) {
+	z, err := s.repo.Get(ctx, zoneID)
+	if err != nil {
+		return service.ZoneInfo{}, err
+	}
+	return service.ZoneInfo{ID: z.ID, RegionID: z.RegionID}, nil
+}
+
+// ListZones возвращает зоны с cursor-пагинацией (как ZoneRepo.List).
+func (s *ZoneRepoSource) ListZones(ctx context.Context, pageSize int64, pageToken string) ([]service.ZoneInfo, string, error) {
+	zones, next, err := s.repo.List(ctx, service.Pagination{PageSize: pageSize, PageToken: pageToken})
+	if err != nil {
+		return nil, "", err
+	}
+	out := make([]service.ZoneInfo, 0, len(zones))
+	for _, z := range zones {
+		out = append(out, service.ZoneInfo{ID: z.ID, RegionID: z.RegionID})
+	}
+	return out, next, nil
+}
+
 func zoneStatusName(s domain.ZoneStatus) string {
 	switch s {
 	case domain.ZoneStatusUp:

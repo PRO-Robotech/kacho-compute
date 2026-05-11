@@ -129,6 +129,30 @@ type FolderClient interface {
 	Exists(ctx context.Context, folderID string) (bool, error)
 }
 
+// ZoneInfo — минимальные данные о зоне, нужные compute'у: id + region. Зеркалит
+// vpcv1.Zone (у kacho-vpc нет zone-status — compute всегда репортит Zone_UP).
+type ZoneInfo struct {
+	ID       string
+	RegionID string
+}
+
+// ZoneRegistry — port для existence-check zone_id в Disk.Create / Instance.Create
+// (и Disk.Relocate). На данный момент авторитетный источник зон — kacho-vpc
+// InternalZoneService (реализуется VPCClient); локальная таблица `zones`
+// используется как fallback только при KACHO_COMPUTE_SKIP_PEER_VALIDATION=true.
+// GetZone возвращает ErrNotFound, если зона неизвестна.
+type ZoneRegistry interface {
+	GetZone(ctx context.Context, zoneID string) (ZoneInfo, error)
+}
+
+// ZoneSource — port для публичного ZoneService.Get/List. Авторитетный источник —
+// kacho-vpc InternalZoneService (VPCClient); локальная таблица `zones` — fallback
+// при SKIP_PEER_VALIDATION. GetZone → ErrNotFound при неизвестной зоне.
+type ZoneSource interface {
+	ZoneRegistry
+	ListZones(ctx context.Context, pageSize int64, pageToken string) (zones []ZoneInfo, nextPageToken string, err error)
+}
+
 // SubnetInfo — минимальные данные о subnet, нужные compute'у при материализации
 // Instance NIC-spec: zone (для cross-zone-проверки) и v4-CIDR-блоки (для
 // валидации manual primary_v4_address и как контекст в ошибках).
@@ -168,4 +192,7 @@ type VPCClient interface {
 	// DeleteAddress удаляет Address-ресурс (best-effort: поллит Operation;
 	// NotFound трактуется как успех — ресурс уже удалён).
 	DeleteAddress(ctx context.Context, addressID string) error
+	// ZoneSource — kacho-vpc InternalZoneService (на internal-порту :9091) —
+	// авторитетный источник справочника зон для compute (Get/List + existence-check).
+	ZoneSource
 }

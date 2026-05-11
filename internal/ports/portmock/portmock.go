@@ -667,6 +667,29 @@ func (r *ZoneRepo) Delete(_ context.Context, id string) error {
 	return nil
 }
 
+// GetZone — реализация ports.ZoneRegistry: зона по id → ZoneInfo (ErrNotFound при отсутствии).
+func (r *ZoneRepo) GetZone(_ context.Context, zoneID string) (ports.ZoneInfo, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	z, ok := r.data[zoneID]
+	if !ok {
+		return ports.ZoneInfo{}, ports.ErrNotFound
+	}
+	return ports.ZoneInfo{ID: z.ID, RegionID: z.RegionID}, nil
+}
+
+// ListZones — реализация ports.ZoneSource: все зоны как []ZoneInfo (без пагинации в mock'е).
+func (r *ZoneRepo) ListZones(_ context.Context, _ int64, _ string) ([]ports.ZoneInfo, string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]ports.ZoneInfo, 0, len(r.data))
+	for _, z := range r.data {
+		out = append(out, ports.ZoneInfo{ID: z.ID, RegionID: z.RegionID})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, "", nil
+}
+
 // ---- FolderClient / VPCClient ----
 
 // FolderClient — fake FolderClient. OK задаёт результат Exists().
@@ -690,11 +713,47 @@ type VPCClient struct {
 	// CreateExternalAddress (если "" — используются дефолты ниже).
 	InternalIP string
 	ExternalIP string
+	// Zones — справочник зон, проксируемый GetZone/ListZones (имитация
+	// kacho-vpc InternalZoneService). Если nil — используется стандартный
+	// набор ru-central1-{a,b,d}. Ключ — zone id, значение — region id.
+	Zones map[string]string
 
 	mu             sync.Mutex
 	addrSeq        int
 	CreatedAddrIDs []string
 	DeletedAddrIDs []string
+}
+
+// zonesOrDefault — Zones либо стандартный набор ru-central1-{a,b,d}.
+func (c *VPCClient) zonesOrDefault() map[string]string {
+	if c.Zones != nil {
+		return c.Zones
+	}
+	return map[string]string{
+		"ru-central1-a": "ru-central1",
+		"ru-central1-b": "ru-central1",
+		"ru-central1-d": "ru-central1",
+	}
+}
+
+// GetZone — реализация ports.ZoneRegistry: зона по id (ErrNotFound при отсутствии).
+func (c *VPCClient) GetZone(_ context.Context, zoneID string) (ports.ZoneInfo, error) {
+	region, ok := c.zonesOrDefault()[zoneID]
+	if !ok {
+		return ports.ZoneInfo{}, ports.ErrNotFound
+	}
+	return ports.ZoneInfo{ID: zoneID, RegionID: region}, nil
+}
+
+// ListZones — реализация ports.ZoneSource: все зоны как []ZoneInfo (без пагинации в mock'е).
+func (c *VPCClient) ListZones(_ context.Context, _ int64, _ string) ([]ports.ZoneInfo, string, error) {
+	z := c.zonesOrDefault()
+	out := make([]ports.ZoneInfo, 0, len(z))
+	for id, region := range z {
+		out = append(out, ports.ZoneInfo{ID: id, RegionID: region})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, "", nil
 }
 
 // GetSubnet возвращает ({SubnetZone, SubnetCidrBlocks}, SubnetFound, nil).
@@ -902,6 +961,8 @@ var (
 	_ ports.InstanceRepo = (*InstanceRepo)(nil)
 	_ ports.DiskTypeRepo = (*DiskTypeRepo)(nil)
 	_ ports.ZoneRepo     = (*ZoneRepo)(nil)
+	_ ports.ZoneSource   = (*ZoneRepo)(nil)
+	_ ports.ZoneSource   = (*VPCClient)(nil)
 	_ ports.FolderClient = (*FolderClient)(nil)
 	_ ports.VPCClient    = (*VPCClient)(nil)
 	_ operations.Repo    = (*OpsRepo)(nil)

@@ -62,16 +62,19 @@ type DiskService struct {
 	imageRepo    ImageRepo
 	snapshotRepo SnapshotRepo
 	diskTypeRepo DiskTypeRepo
-	zoneRepo     ZoneRepo
+	// zones — existence-check zone_id. Авторитетный источник — kacho-vpc
+	// InternalZoneService (compute зон не владеет); при SKIP_PEER_VALIDATION —
+	// fallback на локальную таблицу `zones`. Wiring — cmd/compute/main.go.
+	zones        ZoneRegistry
 	folderClient FolderClient
 	opsRepo      operations.Repo
 }
 
 // NewDiskService создаёт DiskService.
-func NewDiskService(repo DiskRepo, imageRepo ImageRepo, snapshotRepo SnapshotRepo, diskTypeRepo DiskTypeRepo, zoneRepo ZoneRepo, folderClient FolderClient, opsRepo operations.Repo) *DiskService {
+func NewDiskService(repo DiskRepo, imageRepo ImageRepo, snapshotRepo SnapshotRepo, diskTypeRepo DiskTypeRepo, zones ZoneRegistry, folderClient FolderClient, opsRepo operations.Repo) *DiskService {
 	return &DiskService{
 		repo: repo, imageRepo: imageRepo, snapshotRepo: snapshotRepo,
-		diskTypeRepo: diskTypeRepo, zoneRepo: zoneRepo, folderClient: folderClient, opsRepo: opsRepo,
+		diskTypeRepo: diskTypeRepo, zones: zones, folderClient: folderClient, opsRepo: opsRepo,
 	}
 }
 
@@ -138,8 +141,8 @@ func (s *DiskService) doCreate(ctx context.Context, diskID string, req CreateDis
 	if err := s.checkFolder(ctx, req.FolderID); err != nil {
 		return nil, err
 	}
-	if _, err := s.zoneRepo.Get(ctx, req.ZoneID); err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "Zone %s not found", req.ZoneID)
+	if _, err := s.zones.GetZone(ctx, req.ZoneID); err != nil {
+		return nil, mapZoneRefErr(err, req.ZoneID)
 	}
 	typeID := req.TypeID
 	if typeID == "" {
@@ -361,8 +364,8 @@ func (s *DiskService) Relocate(ctx context.Context, id, destZoneID string) (*ope
 		return nil, err
 	}
 	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		if _, err := s.zoneRepo.Get(ctx, destZoneID); err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "Zone %s not found", destZoneID)
+		if _, err := s.zones.GetZone(ctx, destZoneID); err != nil {
+			return nil, mapZoneRefErr(err, destZoneID)
 		}
 		attached, err := s.repo.IsAttached(ctx, id)
 		if err != nil {
