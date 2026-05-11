@@ -218,23 +218,40 @@ internal `:9091` (`InternalZoneService`) — конфигурируется че
 NIC-ам по-прежнему выдаются синтетические IP (`10.0.0.x` / `203.0.113.x`), VPC не
 дёргается.
 
-**Referrer-tracking (YC-like, с этой фичи):** при аллокации каждого NIC-адреса
-(internal + external NAT, эфемерного ИЛИ reserved) compute вызывает
-`InternalAddressService.SetAddressReference(addressId, "compute_instance",
-instanceId, instanceName)` — best-effort (ошибка → warning, IP уже выделен,
-Instance.Create не валится). В результате `Address.used = true` и адрес виден в
-`GET /vpc/v1/subnets/<id>/addresses` (`SubnetService.ListUsedAddresses`) с
-`references: [{type:"compute_instance", referrerId:"<instanceId>"}]`. На
-`Instance.Delete`/`RemoveOneToOneNat`: эфемерные адреса удаляются (referrer-row
-уходит через FK CASCADE в kacho-vpc), у reserved-адреса referrer снимается явно
-(`ClearAddressReference`) — адрес снова `used=false`. В
-`KACHO_COMPUTE_SKIP_PEER_VALIDATION=true` Set/ClearAddressReference — no-op.
+**Referrer-tracking (YC-like, с этой фичи) и эфемерный-in-use:** аллокация
+адресов в `AddressService.Create` рождает их в состоянии `reserved=true, used=false`
+(как обычные user-reserved-адреса). Compute после успешного `repo.Insert` инстанса
+помечает их фактическим состоянием:
 
-**Расхождение с verbatim YC:** в реальном YC внутренние NIC-адреса инстанса
-**не** материализуются как видимые в `AddressService.List` ресурсы — IPAM
-прозрачен. У нас каждый авто-аллоцированный NIC-IP — это полноценная строка в
-`addresses` (видна в `GET /vpc/v1/addresses?folderId=...`, с `name` вида
-`<instanceId>-nic0` / `<instanceId>-nat0`). Это сознательный trade-off ради
+- **эфемерные адреса, которые compute создал сам** (internal `<vmid>-nicN` и
+  ephemeral external `<vmid>-natN`, если NAT не указывал `address_id`) → вызов
+  `InternalAddressService.MarkAddressEphemeralInUse(addressId, "compute_instance",
+  instanceId, instanceName)` — атомарно (в одной tx на стороне kacho-vpc) ставит
+  `reserved=false, used=true` и upsert-ит referrer. В REST-ответе адрес выглядит
+  как `{"reserved": false, "used": true, "usedBy": [{"referrer":
+  {"type":"compute_instance","id":"<instanceId>"}}, "type":"USED_BY"}]}` —
+  «эфемерный, в работе у инстанса».
+- **reserved user-адреса** (`one_to_one_nat.address_id` указан клиентом)
+  → `SetAddressReference` (только referrer, `reserved=true` не трогаем) — адрес
+  остаётся reserved-by-user, просто получает `used_by` ссылку на инстанс.
+
+Обе операции best-effort: ошибка → warning, IP уже выделен, `Instance.Create`
+не валится. На `Instance.Delete`/`RemoveOneToOneNat`: эфемерные адреса
+удаляются (`DeleteAddress` — referrer-row уходит через FK CASCADE в kacho-vpc),
+у reserved-адреса referrer снимается явно (`ClearAddressReference`) — адрес
+снова `used=false`, остаётся reserved. В `KACHO_COMPUTE_SKIP_PEER_VALIDATION=true`
+все Mark/Set/ClearAddressReference — no-op.
+
+**Что НЕ расхождение:** field-семантика эфемерных адресов теперь корректна
+(`reserved=false, used=true, used_by=[…]`) — никакого «фиктивно reserved» не
+осталось.
+
+**Расхождение с verbatim YC, которое сохраняется:** в реальном YC внутренние
+NIC-адреса инстанса **не** материализуются как видимые в `AddressService.List`
+ресурсы — IPAM прозрачен. У нас каждый авто-аллоцированный NIC-IP — это
+полноценная строка в `addresses` (видна в `GET /vpc/v1/addresses?folderId=...`,
+с `name` вида `<instanceId>-nic0` / `<instanceId>-nat0`, но с правильными
+`reserved=false, used=true, used_by=[…]`). Это сознательный trade-off ради
 переиспользования существующего VPC IPAM без новых cross-service RPC / миграций
 в kacho-vpc; альтернатива (тонкий internal-RPC `AllocateInternalIPInSubnet` /
 `AllocateExternalIPInZone` + лёгкая таблица allocations в kacho-vpc) отложена.

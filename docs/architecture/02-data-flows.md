@@ -241,8 +241,13 @@ sequenceDiagram
     S->>DB: UPDATE operation error
   else success
     S->>DB: UPDATE operation done=true, response=protoconv.Instance(created)  # status RUNNING
-    loop for each NIC address (internal + external NAT; ephemeral or reserved)
-      S->>VPC: InternalAddressService.SetAddressReference(address_id, "compute_instance", instance_id, instance_name) — best-effort (ошибка → warning, не валит)
+    loop for each NIC address
+      alt ephemeral (compute-created: internal <vmid>-nicN OR ephemeral external <vmid>-natN)
+        S->>VPC: InternalAddressService.MarkAddressEphemeralInUse(address_id, "compute_instance", instance_id, instance_name) — atomically sets reserved=false, used=true + upserts referrer
+      else reserved (user-provided one_to_one_nat.address_id)
+        S->>VPC: InternalAddressService.SetAddressReference(address_id, "compute_instance", instance_id, instance_name) — referrer only, reserved=true intact
+      end
+      Note over S,VPC: best-effort (ошибка → warning, не валит инстанс)
     end
   end
   end
@@ -250,10 +255,15 @@ sequenceDiagram
 
 Control-plane имитация: статус переходит `PROVISIONING → RUNNING` синхронно в той
 же TX (без таймеров; см. [`03-instance-lifecycle.md`](03-instance-lifecycle.md)).
-После успешной вставки compute привязывает referrer (`type=compute_instance`,
-`id=instance_id`, `name=instance_name`) к каждому VPC `Address`-ресурсу NIC-ей —
-эти адреса становятся `used=true` и видны в `SubnetService.ListUsedAddresses`
-с `references[]` (YC-like; см. [`07-known-divergences.md`](07-known-divergences.md) §8).
+После успешной вставки compute проставляет referrer (`type=compute_instance`,
+`id=instance_id`, `name=instance_name`) каждому VPC `Address`-ресурсу NIC-ей.
+Эфемерные адреса (которые compute создал сам через `AddressService.Create`) при
+этом флипаются `reserved=true → false` и помечаются `used=true` атомарно — через
+`MarkAddressEphemeralInUse`; у reserved пользовательских адресов
+(`one_to_one_nat.address_id`) `reserved` остаётся `true`, добавляется только
+`used_by[]`. Адреса видны в `AddressService.Get/List` с `used_by=[…]` и в
+`SubnetService.ListUsedAddresses` (YC-like; см.
+[`07-known-divergences.md`](07-known-divergences.md) §8).
 
 ---
 

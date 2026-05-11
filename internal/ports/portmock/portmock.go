@@ -723,9 +723,12 @@ type VPCClient struct {
 	CreatedAddrIDs []string
 	DeletedAddrIDs []string
 	// SetRefs — addressID → referrerID, протоколирует SetAddressReference.
+	// MarkedEphemeral — addressID → referrerID, протоколирует
+	// MarkAddressEphemeralInUse (reserved=false, used=true + referrer).
 	// ClearedRefs — addressID'ы, переданные в ClearAddressReference.
-	SetRefs     map[string]string
-	ClearedRefs []string
+	SetRefs         map[string]string
+	MarkedEphemeral map[string]string
+	ClearedRefs     []string
 }
 
 // zonesOrDefault — Zones либо стандартный набор ru-central1-{a,b,d}.
@@ -823,6 +826,18 @@ func (c *VPCClient) SetAddressReference(_ context.Context, addressID, _, referre
 		c.SetRefs = make(map[string]string)
 	}
 	c.SetRefs[addressID] = referrerID
+	return nil
+}
+
+// MarkAddressEphemeralInUse протоколирует (addressID → referrerID) в
+// MarkedEphemeral и возвращает nil (имитирует reserved=false + used=true + referrer).
+func (c *VPCClient) MarkAddressEphemeralInUse(_ context.Context, addressID, _, referrerID, _ string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.MarkedEphemeral == nil {
+		c.MarkedEphemeral = make(map[string]string)
+	}
+	c.MarkedEphemeral[addressID] = referrerID
 	return nil
 }
 

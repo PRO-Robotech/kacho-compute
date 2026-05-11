@@ -194,9 +194,17 @@ type VPCClient interface {
 	DeleteAddress(ctx context.Context, addressID string) error
 	// SetAddressReference привязывает referrer к Address-ресурсу (кто его
 	// использует — type=compute_instance, id=instance id, name=instance name).
-	// Идемпотентно. Вызывается best-effort из instance.go при аллокации
-	// NIC-адресов (ошибка не валит Instance.Create — IP уже выделен).
+	// Идемпотентно. НЕ меняет reserved-флаг адреса — используется для reserved
+	// пользовательских адресов (one-to-one NAT по address_id). Вызывается
+	// best-effort из instance.go (ошибка не валит Instance.Create — IP уже выделен).
 	SetAddressReference(ctx context.Context, addressID, referrerType, referrerID, referrerName string) error
+	// MarkAddressEphemeralInUse атомарно помечает Address как «эфемерный, в
+	// работе»: reserved=false, used=true + upsert referrer (type=compute_instance,
+	// id/name инстанса). Используется для эфемерных NIC/NAT-адресов, которые
+	// compute создаёт сам через CreateInternal/ExternalAddress (а не для reserved
+	// пользовательских — у тех reserved не трогаем). Best-effort, как и
+	// SetAddressReference.
+	MarkAddressEphemeralInUse(ctx context.Context, addressID, referrerType, referrerID, referrerName string) error
 	// ClearAddressReference снимает referrer с Address-ресурса (best-effort;
 	// NotFound = адрес уже удалён → успех). Вызывается при отвязке
 	// reserved-адреса от ВМ (для эфемерных адресов referrer уходит через FK
