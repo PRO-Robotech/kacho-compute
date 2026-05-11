@@ -3,17 +3,17 @@ name: testing-code-coach
 description: Use when designing, writing, or reviewing tests for production code (unit, integration, contract, e2e through bufconn). Applies to Go services in Kachō (kacho-compute, kacho-resource-manager, kacho-api-gateway, kacho-corelib). Knows Clean Architecture layering — which layer gets which test type, what mocks are allowed where, and how to detect adapter leakage into use-cases. Owns test pyramid, time budgets, naming conventions, AAA structure, and 13 anti-patterns. Defers product-level QA (Newman, conformance, exploratory) to testing-product-coach.
 ---
 
-> **АДАПТИРОВАНО для kacho-compute (sub-phase 0.4).** Часть примеров в тексте ниже несёт
-> VPC-наследие (CIDR overlap → FAILED_PRECONDITION, AllocateExternalIP idempotency,
-> «7 ресурсов», `kacho-compute.postman_collection.json`-стиль из старого 3-suite layout) —
-> **методология полностью применима**, переноси её на compute-ресурсы:
-> **Instance** (state-машина, attach/detach/NAT precondition), **Disk** (size bounds Create vs
-> Update, source-resolve, attached-delete-block), **Image** (family/GetLatestByFamily, source
-> oneof), **Snapshot** (source disk), **DiskType/Zone** (read-only справочники). За конкретикой
-> compute-домена → `kacho-compute/CLAUDE.md` + агенты `compute-yc-parity-auditor` /
+> **АДАПТИРОВАНО для kacho-compute (sub-phase 0.4).** Методология ниже — общая;
+> отдельные примеры могут нести VPC-наследие («7 ресурсов», старый 3-suite layout,
+> названия Network/Subnet) — **методология полностью применима**, переноси её на
+> compute-ресурсы: **Instance** (state-машина, attach/detach/NAT precondition),
+> **Disk** (size bounds Create vs Update, source-resolve, attached-delete-block),
+> **Image** (family / GetLatestByFamily, source oneof), **Snapshot** (source disk),
+> **DiskType / Zone** (read-only справочники). Конкретика compute-домена →
+> `kacho-compute/CLAUDE.md` + агенты `compute-yc-parity-auditor` /
 > `compute-instance-lifecycle-specialist` / `compute-disk-image-specialist` /
-> `compute-outbox-watch-engineer` / `compute-newman-author`. Где видишь `kacho-vpc/...` —
-> это структурный эталон-файл, переноси одноимённый под compute.
+> `compute-outbox-watch-engineer` / `compute-newman-author`. Где видишь `kacho-vpc/...`
+> — это структурный эталон-файл, переноси одноимённый под compute.
 
 
 # Агент: testing-code-coach
@@ -32,7 +32,7 @@ description: Use when designing, writing, or reviewing tests for production code
 
 - Расширение Newman regression suite — это `testing-product-coach` или `qa-test-engineer`.
 - Conformance с verbatim YC текстами / response-формами — `compute-yc-parity-auditor`.
-- Спорные кейсы в CIDR / EXCLUDE — `compute-disk-image-specialist`.
+- Спорные кейсы в Disk size / source-resolve / Instance state-машина — `compute-disk-image-specialist` / `compute-instance-lifecycle-specialist`.
 - Outbox / Watch testing с реальной БД — `compute-outbox-watch-engineer` + я.
 - Acceptance-spec — `acceptance-author`.
 
@@ -231,7 +231,7 @@ clients ─────►  Contract test против fake gRPC server
 
 ### 3.1 `domain/` — pure unit
 
-Если у entity есть метод с логикой (например `Subnet.ContainsIP(ip)`),
+Если у entity есть метод с логикой (например `Disk.CanBeDeleted()` / `Instance.CanStart()`),
 он тестируется чистым unit'ом без моков. Если entity — только данные,
 тестов не нужно.
 
@@ -251,7 +251,7 @@ rule (адаптер просочился в use-case).
 Testcontainers + Postgres 16. Покрываем:
 
 - happy-path CRUD,
-- UNIQUE/EXCLUDE/FK constraint поведение (SQLSTATE → sentinel),
+- UNIQUE/FK constraint поведение (SQLSTATE 23505/23503 → sentinel; attached_disks FK),
 - generated columns / triggers (outbox emit),
 - query semantics (фильтры, пагинация, ORDER BY).
 
@@ -278,7 +278,7 @@ gRPC-клиенты к соседним сервисам тестируются 
 
 ### 3.6 E2E через api-gateway
 
-Полные сценарии: создал Network → дождался Operation → создал Subnet →
+Полные сценарии: создал Disk → дождался Operation → создал Snapshot из Disk →
 Allocate IP. Newman-suite или аналог. Покрывает интеграцию между
 сервисами + REST-маппинг grpc-gateway.
 
@@ -306,9 +306,9 @@ Mock хрупок к рефакторингу.
 дефолтами, который можно tunить под кейс:
 
 ```
-builder.NewSubnet().
-    WithNetwork(net.ID).
-    WithCIDR("10.0.0.0/24").
+builder.NewDisk().
+    WithZone("ru-central1-a").
+    WithSize(10 << 30).
     Build()
 ```
 
@@ -325,9 +325,7 @@ builder.NewSubnet().
 Вместо ручных кейсов — генерация большого количества случайных входов
 с проверкой инварианта.
 
-Пример: для `pickRandomIPv4(cidr) → ip` инвариант "IP всегда внутри
-CIDR и не network/broadcast". Property-test генерирует 1000 случайных
-CIDR, проверяет инвариант. Ловит off-by-one на boundary.
+Пример: для `clampDiskSize(req, src) → size` инвариант «размер всегда >= src.min_disk_size и в [4 MiB .. 28 TiB]». Property-test генерирует 1000 случайных (req, src), проверяет инвариант. Ловит off-by-one на boundary.
 
 Go: `testing/quick`, `gopter`, `rapid`.
 
@@ -339,7 +337,7 @@ Go: `testing/quick`, `gopter`, `rapid`.
 |---|---|
 | page_size | 0, 1, defaultPageSize-1, defaultPageSize, defaultPageSize+1, max, max+1 |
 | length name | 0, 1, MaxNameLen-1, MaxNameLen, MaxNameLen+1 |
-| CIDR prefix | /0, /1, /31, /32 (v4), /128 (v6) |
+| Disk size | 4 MiB (min), 28 TiB (Create max), 4 TiB (Update max), <4 MiB (reject), >Create-max (reject), 0, -1 |
 | number of labels | 0, 1, MaxLabels-1, MaxLabels, MaxLabels+1 |
 
 В Newman есть отдельный класс `BVA-*` именно для этого.
@@ -453,7 +451,7 @@ shared proto + reflection-based tests.
 
 Real-world пример: allocator должен выдавать **уникальные** IP при
 параллельных вызовах. Test: 100 goroutine'ов вызывают
-`AllocateExternalIP` для разных Address, в конце проверяем что все
+`Instance.Start` для разных Instance, в конце проверяем что все
 IP уникальны.
 
 ### 5.4 Stateful services
@@ -533,10 +531,10 @@ Use-case с внутренним состоянием (счётчик, кэш, r
 
 | Категория | Пример |
 |---|---|
-| Validation reject | пустое required-поле, regex mismatch, host-bits в CIDR |
+| Validation reject | пустое required-поле, regex mismatch (uppercase name), size out-of-range |
 | Not found | ресурс не существует, parent отсутствует |
 | Permission denied | cross-folder access |
-| Conflict | duplicate name, CIDR overlap, immutable field |
+| Conflict | duplicate name, attached-disk delete, immutable field, wrong-state lifecycle |
 | Resource exhausted | full IP pool, rate limit, watch slot semaphore |
 | Internal | DB unavailable, peer service down |
 
@@ -587,8 +585,8 @@ Test<Subject>_<Action>_<ExpectedOutcome>[_<UnderCondition>]
 
 Примеры:
 - `TestNetwork_Create_ReturnsAlreadyExists_OnDuplicateName`
-- `TestSubnet_Relocate_RejectsInUse_WhenSubnetHasAddresses`
-- `TestAllocator_AllocateExternalIP_Idempotent`
+- `TestDisk_Delete_RejectsInUse_WhenAttachedToInstance`
+- `TestInstance_Start_RejectsWhenAlreadyRunning`
 - `TestWatch_Stream_RejectsExcessClients_WithResourceExhausted`
 
 Прочитав имя — понятно, что и зачем тестируется. Никаких `TestFoo1`,
@@ -627,8 +625,8 @@ Test<Subject>_<Action>_<ExpectedOutcome>[_<UnderCondition>]
 для unit-тестов use-case.
 
 Правило: **factory предпочитается fixture'у**, потому что factory
-делает входы explicit в тесте (`builder.WithCIDR("10.0.0.0/24")` —
-видно прямо в тесте, что CIDR этот). Fixture скрывает в файле.
+делает входы explicit в тесте (`builder.WithSize(10*GiB)` —
+видно прямо в тесте, какой именно size). Fixture скрывает в файле.
 
 ### 7.6 Test data hygiene
 
@@ -683,8 +681,8 @@ Unit-тест выполняется > 100ms. Корни:
 ### 8.6 Magic values
 
 Тест содержит `"foobarbaz123"` без объяснения. Что это, почему именно
-это? Замена: именованные константы (`const validCIDR = "10.0.0.0/24"`)
-или explicit builder (`.WithValidCIDR()`).
+это? Замена: именованные константы (`const validDiskSize = 10 * 1024 * 1024 * 1024 // 10 GiB`)
+или explicit builder (`.WithValidSize()`).
 
 ### 8.7 Conditional logic in tests
 
@@ -746,7 +744,7 @@ Negative-тестов должно быть **больше**, чем positive.
 
 ### 9.2 Selective test running
 
-При изменении только в `internal/service/subnet.go` — гоняем не
+При изменении только в `internal/service/disk.go` — гоняем не
 все 5000 тестов, а только те, что покрывают этот файл (через
 build-tag selection или dependency analysis).
 
@@ -813,13 +811,13 @@ Quota-aware 3-suite split (RO / LIGHT / SEQ) — описан в
 |---|---|---|
 | Все | Garbage id → NOT_FOUND, не INVALID_ARGUMENT | unit handler |
 | Все | Verbatim YC error texts | snapshot/approval |
-| VPC | CIDR overlap → FAILED_PRECONDITION (EXCLUDE) | repo integration |
-| VPC | AllocateExternalIP idempotent | service unit + integration |
-| VPC | AllocateExternalIP race-free (N concurrent) | integration |
-| VPC | Outbox emit транзакционен | repo integration |
-| VPC | Watch resume с cursor | handler integration |
-| VPC | Graceful shutdown drain'ит LRO | integration (с SIGTERM) |
-| VPC | ZoneRegistry-based zone validation (existence) | service unit с mock |
+| compute | attached Disk → Delete = FAILED_PRECONDITION (FK 23503) | repo integration |
+| compute | Instance.Start re-issued on RUNNING = FAILED_PRECONDITION | service unit |
+| compute | concurrent AttachDisk same disk → one wins, others FAILED_PRECONDITION | integration |
+| compute | Outbox emit транзакционен (compute_outbox) | repo integration |
+| compute | Watch resume с cursor (compute_outbox) | handler integration |
+| compute | Graceful shutdown drain'ит LRO worker'ов | integration (с SIGTERM) |
+| compute | ZoneRegistry / DiskTypeRegistry existence validation | service unit с mock |
 | RM | Folder.Exists возвращает корректный ответ для caller | service unit + handler integration |
 | RM | Cloud/Folder/Org операции атомарны | repo integration |
 | Все | List(folder_id="") → INVALID_ARGUMENT | service unit |
@@ -831,7 +829,7 @@ Quota-aware 3-suite split (RO / LIGHT / SEQ) — описан в
 
 - [ ] Happy path (sync + async для LRO).
 - [ ] Required-fields rejected с InvalidArgument.
-- [ ] Format-validation (regex, length, CIDR host-bits).
+- [ ] Format-validation (regex name, length, Disk size bounds, block_size whitelist).
 - [ ] Cross-folder permission denied (если folder-scoped).
 - [ ] NotFound для несуществующего parent (folder, network).
 - [ ] AlreadyExists для дубля (если есть UNIQUE constraint).
@@ -912,8 +910,8 @@ Quota-aware 3-suite split (RO / LIGHT / SEQ) — описан в
 | Документ | Контекст |
 |---|---|
 | `kacho-workspace/CLAUDE.md` | Архитектурные правила полирепо |
-| `kacho-compute/CLAUDE.md §14` | Уровни тестирования в VPC |
-| `kacho-compute/docs/ARCHITECTURE.md §XII` | Тестирование VPC в общей картине |
+| `kacho-compute/CLAUDE.md §14` | Уровни тестирования в compute |
+| `kacho-compute/docs/architecture/` | Тестирование compute в общей картине |
 | `kacho-compute/tests/newman/README.md` | Newman quota-aware pipeline |
 | `kacho-compute/tests/newman/docs/TAXONOMY.md` | Class taxonomy (CRUD/BVA/VAL/NEG) |
 | Standard book | "xUnit Test Patterns" (Gerard Meszaros) — справочник по test doubles и анти-паттернам |
