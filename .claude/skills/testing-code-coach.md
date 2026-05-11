@@ -1,7 +1,20 @@
 ---
 name: testing-code-coach
-description: Use when designing, writing, or reviewing tests for production code (unit, integration, contract, e2e through bufconn). Applies to Go services in Kachō (kacho-vpc, kacho-resource-manager, kacho-api-gateway, kacho-corelib). Knows Clean Architecture layering — which layer gets which test type, what mocks are allowed where, and how to detect adapter leakage into use-cases. Owns test pyramid, time budgets, naming conventions, AAA structure, and 13 anti-patterns. Defers product-level QA (Newman, conformance, exploratory) to testing-product-coach.
+description: Use when designing, writing, or reviewing tests for production code (unit, integration, contract, e2e through bufconn). Applies to Go services in Kachō (kacho-compute, kacho-resource-manager, kacho-api-gateway, kacho-corelib). Knows Clean Architecture layering — which layer gets which test type, what mocks are allowed where, and how to detect adapter leakage into use-cases. Owns test pyramid, time budgets, naming conventions, AAA structure, and 13 anti-patterns. Defers product-level QA (Newman, conformance, exploratory) to testing-product-coach.
 ---
+
+> **АДАПТИРОВАНО для kacho-compute (sub-phase 0.4).** Часть примеров в тексте ниже несёт
+> VPC-наследие (CIDR overlap → FAILED_PRECONDITION, AllocateExternalIP idempotency,
+> «7 ресурсов», `kacho-compute.postman_collection.json`-стиль из старого 3-suite layout) —
+> **методология полностью применима**, переноси её на compute-ресурсы:
+> **Instance** (state-машина, attach/detach/NAT precondition), **Disk** (size bounds Create vs
+> Update, source-resolve, attached-delete-block), **Image** (family/GetLatestByFamily, source
+> oneof), **Snapshot** (source disk), **DiskType/Zone** (read-only справочники). За конкретикой
+> compute-домена → `kacho-compute/CLAUDE.md` + агенты `compute-yc-parity-auditor` /
+> `compute-instance-lifecycle-specialist` / `compute-disk-image-specialist` /
+> `compute-outbox-watch-engineer` / `compute-newman-author`. Где видишь `kacho-vpc/...` —
+> это структурный эталон-файл, переноси одноимённый под compute.
+
 
 # Агент: testing-code-coach
 
@@ -18,9 +31,9 @@ description: Use when designing, writing, or reviewing tests for production code
 ## 2. Когда меня НЕ вызывать
 
 - Расширение Newman regression suite — это `testing-product-coach` или `qa-test-engineer`.
-- Conformance с verbatim YC текстами / response-формами — `vpc-yc-parity-auditor`.
-- Спорные кейсы в CIDR / EXCLUDE — `vpc-cidr-specialist`.
-- Outbox / Watch testing с реальной БД — `vpc-outbox-watch-engineer` + я.
+- Conformance с verbatim YC текстами / response-формами — `compute-yc-parity-auditor`.
+- Спорные кейсы в CIDR / EXCLUDE — `compute-disk-image-specialist`.
+- Outbox / Watch testing с реальной БД — `compute-outbox-watch-engineer` + я.
 - Acceptance-spec — `acceptance-author`.
 
 ## 3. Что я отдаю на выходе
@@ -785,7 +798,7 @@ CI должен дать обратную связь в течение 10 мин
 ### 10.3 Postman / Newman
 
 Quota-aware 3-suite split (RO / LIGHT / SEQ) — описан в
-`kacho-vpc/CLAUDE.md §14.3` и `kacho-vpc/tests/newman/README.md`. Ключевое:
+`kacho-compute/CLAUDE.md §14.3` и `kacho-compute/tests/newman/README.md`. Ключевое:
 
 - Каждая suite-collection начинается с `00-preflight` и
   заканчивается `99-teardown`.
@@ -899,10 +912,10 @@ Quota-aware 3-suite split (RO / LIGHT / SEQ) — описан в
 | Документ | Контекст |
 |---|---|
 | `kacho-workspace/CLAUDE.md` | Архитектурные правила полирепо |
-| `kacho-vpc/CLAUDE.md §14` | Уровни тестирования в VPC |
-| `kacho-vpc/docs/ARCHITECTURE.md §XII` | Тестирование VPC в общей картине |
-| `kacho-vpc/tests/newman/README.md` | Newman quota-aware pipeline |
-| `kacho-vpc/tests/newman/docs/TAXONOMY.md` | Class taxonomy (CRUD/BVA/VAL/NEG) |
+| `kacho-compute/CLAUDE.md §14` | Уровни тестирования в VPC |
+| `kacho-compute/docs/ARCHITECTURE.md §XII` | Тестирование VPC в общей картине |
+| `kacho-compute/tests/newman/README.md` | Newman quota-aware pipeline |
+| `kacho-compute/tests/newman/docs/TAXONOMY.md` | Class taxonomy (CRUD/BVA/VAL/NEG) |
 | Standard book | "xUnit Test Patterns" (Gerard Meszaros) — справочник по test doubles и анти-паттернам |
 | Standard book | "Growing Object-Oriented Software, Guided by Tests" (Freeman & Pryce) — fake vs mock, state-based vs interaction |
 | Standard book | "Working Effectively with Legacy Code" (Michael Feathers) — seams, testability |

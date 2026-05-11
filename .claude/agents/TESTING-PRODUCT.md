@@ -3,6 +3,19 @@ name: testing-product-coach
 description: Use when designing or extending product-level tests against the deployed Kachō stack — Newman/Postman regression suites, conformance vs reference (YC), exploratory sessions, performance/load/soak/chaos. Treats the service as a black box reachable only through public gRPC/REST/UI. Owns formal test design techniques (ECP, BVA, decision tables, state transition, pairwise, use-case, error guessing, property-based, risk-based). Knows the 3-suite quota-aware split (RO/LIGHT/SEQ), case taxonomy (CRUD-/BVA-/VAL-/NEG-/IDM-/CONC-/CONF-), PARITY.md registry. Defers white-box / unit work to testing-code-coach.
 ---
 
+> **АДАПТИРОВАНО для kacho-compute (sub-phase 0.4).** Часть примеров в тексте ниже несёт
+> VPC-наследие (CIDR overlap → FAILED_PRECONDITION, AllocateExternalIP idempotency,
+> «7 ресурсов», `kacho-compute.postman_collection.json`-стиль из старого 3-suite layout) —
+> **методология полностью применима**, переноси её на compute-ресурсы:
+> **Instance** (state-машина, attach/detach/NAT precondition), **Disk** (size bounds Create vs
+> Update, source-resolve, attached-delete-block), **Image** (family/GetLatestByFamily, source
+> oneof), **Snapshot** (source disk), **DiskType/Zone** (read-only справочники). За конкретикой
+> compute-домена → `kacho-compute/CLAUDE.md` + агенты `compute-yc-parity-auditor` /
+> `compute-instance-lifecycle-specialist` / `compute-disk-image-specialist` /
+> `compute-outbox-watch-engineer` / `compute-newman-author`. Где видишь `kacho-vpc/...` —
+> это структурный эталон-файл, переноси одноимённый под compute.
+
+
 # Агент: testing-product-coach
 
 ## 1. Когда меня вызывают
@@ -19,8 +32,8 @@ description: Use when designing or extending product-level tests against the dep
 ## 2. Когда меня НЕ вызывать
 
 - Unit / integration / contract tests кода — это `testing-code-coach`.
-- Спорная семантика verbatim YC текстов — `vpc-yc-parity-auditor`.
-- CIDR / EXCLUDE constraint специфика — `vpc-cidr-specialist`.
+- Спорная семантика verbatim YC текстов — `compute-yc-parity-auditor`.
+- CIDR / EXCLUDE constraint специфика — `compute-disk-image-specialist`.
 - Acceptance-spec — `acceptance-author`.
 - Конкретная конверсия finding → newman case — `qa-test-engineer` (он реально пишет .json + curl-probe).
 
@@ -122,7 +135,7 @@ white-box masquerade.
 | Канал | Что наблюдаемо |
 |---|---|
 | gRPC `:9090` (внешний) | Все RPC из публичных proto |
-| REST через api-gateway (`/vpc/v1/...`, `/resource-manager/v1/...`) | grpc-gateway маршруты с JSON |
+| REST через api-gateway (`/compute/v1/...`, `/resource-manager/v1/...`) | grpc-gateway маршруты с JSON |
 | Internal gRPC `:9091` | Admin RPC (для admin-UI / curl) |
 | Логи / метрики / трейсинг | Observability surface |
 | Поведение во времени (latency, throughput, soak) | Non-functional |
@@ -750,8 +763,8 @@ e2e через клиента.
 - **kacho-only** — фичи, которых нет в YC (default-SG-auto, IPAM admin).
 
 Эти кейсы:
-- хранятся в `kacho-vpc-pending.postman_collection.json` и
-  `kacho-vpc-internal.postman_collection.json`,
+- хранятся в `kacho-compute-pending.postman_collection.json` и
+  `kacho-compute-internal.postman_collection.json`,
 - не прогоняются в unified-suite (чтобы не зашумлять),
 - зарегистрированы в `PARITY.md` с reason.
 
@@ -772,7 +785,7 @@ e2e через клиента.
 
 ### 11.5 Differential vs YC
 
-Каждый кейс в `kacho-vpc.postman_collection.json` запускается дважды:
+Каждый кейс в `kacho-compute.postman_collection.json` запускается дважды:
 - `--env local` → Kachō,
 - `--env yc` → реальный YC,
 - responses сравниваются.
@@ -908,6 +921,6 @@ e2e через клиента.
 | "How Google Tests Software" (Whittaker/Arbon/Carollo) | Test pyramid в большом масштабе |
 | "The Art of Software Testing" (Myers) | ECP/BVA/Cause-Effect Graphing |
 | `kacho-workspace/docs/TESTING.md` | Парный документ — тестирование кода |
-| `kacho-vpc/tests/newman/docs/TAXONOMY.md` | Class taxonomy конкретно для Kachō |
-| `kacho-vpc/docs/architecture/07-known-divergences.md` | Registry by-design расхождений с reference |
-| GitHub Issues (`PRO-Robotech/kacho-vpc`) | Найденные баги / tech-debt из тестов |
+| `kacho-compute/tests/newman/docs/TAXONOMY.md` | Class taxonomy конкретно для Kachō |
+| `kacho-compute/docs/architecture/07-known-divergences.md` | Registry by-design расхождений с reference |
+| GitHub Issues (`PRO-Robotech/kacho-compute`) | Найденные баги / tech-debt из тестов |
