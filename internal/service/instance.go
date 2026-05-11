@@ -30,8 +30,8 @@ var validCoreFractions = map[int64]struct{}{0: {}, 5: {}, 20: {}, 50: {}, 100: {
 type NICSpec struct {
 	SubnetID         string
 	Index            string
-	PrimaryV4Address string         // manual internal IP ("" = auto)
-	OneToOneNat      *NatSpec       // nil = без NAT
+	PrimaryV4Address string   // manual internal IP ("" = auto)
+	OneToOneNat      *NatSpec // nil = без NAT
 	SecurityGroupIDs []string
 }
 
@@ -57,45 +57,45 @@ type DiskSourceSpec struct {
 
 // CreateInstanceReq — запрос на создание ВМ.
 type CreateInstanceReq struct {
-	FolderID         string
-	Name             string
-	Description       string
-	Labels           map[string]string
-	ZoneID           string
-	PlatformID       string
-	Cores            int64
-	Memory           int64
-	CoreFraction     int64
-	GPUs             int64
-	Metadata         map[string]string
-	MetadataOptions  *computev1.MetadataOptions
-	BootDisk         DiskSourceSpec
-	SecondaryDisks   []DiskSourceSpec
-	NICs             []NICSpec
-	Hostname         string
-	Preemptible      bool
-	ServiceAccountID string
+	FolderID            string
+	Name                string
+	Description         string
+	Labels              map[string]string
+	ZoneID              string
+	PlatformID          string
+	Cores               int64
+	Memory              int64
+	CoreFraction        int64
+	GPUs                int64
+	Metadata            map[string]string
+	MetadataOptions     *computev1.MetadataOptions
+	BootDisk            DiskSourceSpec
+	SecondaryDisks      []DiskSourceSpec
+	NICs                []NICSpec
+	Hostname            string
+	Preemptible         bool
+	ServiceAccountID    string
 	NetworkSettingsType string
-	PlacementPolicy  *computev1.PlacementPolicy
-	HardwareGeneration *computev1.HardwareGeneration
-	Application      *computev1.Application
+	PlacementPolicy     *computev1.PlacementPolicy
+	HardwareGeneration  *computev1.HardwareGeneration
+	Application         *computev1.Application
 }
 
 // UpdateInstanceReq — запрос на обновление ВМ.
 type UpdateInstanceReq struct {
-	InstanceID       string
-	Name             string
-	Description       string
-	Labels           map[string]string
-	ServiceAccountID string
-	Cores            int64
-	Memory           int64
-	CoreFraction     int64
-	GPUs             int64
-	PlatformID       string
-	PlacementPolicy  *computev1.PlacementPolicy
+	InstanceID          string
+	Name                string
+	Description         string
+	Labels              map[string]string
+	ServiceAccountID    string
+	Cores               int64
+	Memory              int64
+	CoreFraction        int64
+	GPUs                int64
+	PlatformID          string
+	PlacementPolicy     *computev1.PlacementPolicy
 	NetworkSettingsType string
-	UpdateMask       []string
+	UpdateMask          []string
 }
 
 // InstanceService — бизнес-логика управления ВМ + state-машина (CLAUDE.md §8).
@@ -273,31 +273,31 @@ func (s *InstanceService) doCreate(ctx context.Context, instanceID string, req C
 	}
 
 	in := &domain.Instance{
-		ID:                  instanceID,
-		FolderID:            req.FolderID,
-		CreatedAt:           time.Now().UTC(),
-		Name:                req.Name,
-		Description:         req.Description,
-		Labels:              req.Labels,
-		ZoneID:              req.ZoneID,
-		PlatformID:          req.PlatformID,
-		Cores:               req.Cores,
-		Memory:              req.Memory,
-		CoreFraction:        defaultCoreFraction(req.CoreFraction),
-		GPUs:                req.GPUs,
-		Status:              domain.InstanceStatusRunning, // control-plane: PROVISIONING→RUNNING instantly
-		Metadata:            req.Metadata,
-		MetadataOptions:     req.MetadataOptions,
-		ServiceAccountID:    req.ServiceAccountID,
-		Hostname:            req.Hostname,
-		FQDN:                fqdn(instanceID, req.Hostname),
-		NetworkSettingsType: orDefault(req.NetworkSettingsType, "STANDARD"),
+		ID:                    instanceID,
+		FolderID:              req.FolderID,
+		CreatedAt:             time.Now().UTC(),
+		Name:                  req.Name,
+		Description:           req.Description,
+		Labels:                req.Labels,
+		ZoneID:                req.ZoneID,
+		PlatformID:            req.PlatformID,
+		Cores:                 req.Cores,
+		Memory:                req.Memory,
+		CoreFraction:          defaultCoreFraction(req.CoreFraction),
+		GPUs:                  req.GPUs,
+		Status:                domain.InstanceStatusRunning, // control-plane: PROVISIONING→RUNNING instantly
+		Metadata:              req.Metadata,
+		MetadataOptions:       req.MetadataOptions,
+		ServiceAccountID:      req.ServiceAccountID,
+		Hostname:              req.Hostname,
+		FQDN:                  fqdn(instanceID, req.Hostname),
+		NetworkSettingsType:   orDefault(req.NetworkSettingsType, "STANDARD"),
 		SchedulingPreemptible: req.Preemptible,
-		PlacementPolicy:     req.PlacementPolicy,
-		HardwareGeneration:  req.HardwareGeneration,
-		Application:         req.Application,
-		NetworkInterfaces:   nics,
-		AttachedDisks:       attached,
+		PlacementPolicy:       req.PlacementPolicy,
+		HardwareGeneration:    req.HardwareGeneration,
+		Application:           req.Application,
+		NetworkInterfaces:     nics,
+		AttachedDisks:         attached,
 	}
 	created, err := s.repo.Insert(ctx, in, inlineDisks)
 	if err != nil {
@@ -899,8 +899,8 @@ func fqdn(id, hostname string) string {
 	return id + ".auto.internal"
 }
 
-func synthInternalIP(i int) string  { return fmt.Sprintf("10.0.0.%d", 10+i) }
-func synthExternalIP(i int) string  { return fmt.Sprintf("203.0.113.%d", 10+i) }
+func synthInternalIP(i int) string { return fmt.Sprintf("10.0.0.%d", 10+i) }
+func synthExternalIP(i int) string { return fmt.Sprintf("203.0.113.%d", 10+i) }
 func orDefault(v, def string) string {
 	if v == "" {
 		return def

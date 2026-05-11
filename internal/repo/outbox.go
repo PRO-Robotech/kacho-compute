@@ -6,8 +6,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/PRO-Robotech/kacho-corelib/outbox"
 	"github.com/PRO-Robotech/kacho-compute/internal/domain"
+	"github.com/PRO-Robotech/kacho-corelib/outbox"
 )
 
 // computeOutboxTable — имя таблицы outbox в kacho_compute DB.
@@ -39,7 +39,7 @@ func domainToMap(v any) map[string]any {
 	return m
 }
 
-func diskPayload(d *domain.Disk) map[string]any         { return domainToMap(d) }
-func imagePayload(i *domain.Image) map[string]any       { return domainToMap(i) }
-func snapshotPayload(s *domain.Snapshot) map[string]any { return domainToMap(s) }
+func diskPayload(d *domain.Disk) map[string]any          { return domainToMap(d) }
+func imagePayload(i *domain.Image) map[string]any        { return domainToMap(i) }
+func snapshotPayload(s *domain.Snapshot) map[string]any  { return domainToMap(s) }
 func instancePayload(in *domain.Instance) map[string]any { return domainToMap(in) }

@@ -20,11 +20,3 @@ func invalidArg(field, desc string) error {
 	}
 	return st.Err()
 }
-
-// requiredString возвращает InvalidArgument "<field> required" если v пуст.
-func requiredString(field, v string) error {
-	if v == "" {
-		return status.Errorf(codes.InvalidArgument, "%s required", field)
-	}
-	return nil
-}

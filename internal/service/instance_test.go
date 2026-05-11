@@ -1,0 +1,274 @@
+package service
+
+import (
+	"context"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	"github.com/PRO-Robotech/kacho-corelib/operations"
+	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
+
+	"github.com/PRO-Robotech/kacho-compute/internal/domain"
+	"github.com/PRO-Robotech/kacho-compute/internal/ports/portmock"
+)
+
+func newInstanceSvc(t *testing.T, folderOK bool) (*InstanceService, *portmock.InstanceRepo, *portmock.DiskRepo, *portmock.ImageRepo, *portmock.OpsRepo) {
+	t.Helper()
+	diskRepo := portmock.NewDiskRepo()
+	imgRepo := portmock.NewImageRepo()
+	snapRepo := portmock.NewSnapshotRepo()
+	instanceRepo := portmock.NewInstanceRepo().WithDiskRepo(diskRepo)
+	ops := portmock.NewOpsRepo()
+	svc := NewInstanceService(instanceRepo, diskRepo, imgRepo, snapRepo, portmock.NewZoneRepo(),
+		&portmock.FolderClient{OK: folderOK}, &portmock.VPCClient{SubnetFound: true, SubnetZone: "", SGFound: true, AddrFound: true}, ops)
+	return svc, instanceRepo, diskRepo, imgRepo, ops
+}
+
+func instanceFromOp(t *testing.T, op *operations.Operation) *computev1.Instance {
+	t.Helper()
+	require.NotNil(t, op.Response, "operation error=%v", op.Error)
+	var in computev1.Instance
+	require.NoError(t, op.Response.UnmarshalTo(&in))
+	return &in
+}
+
+func baseCreateReq() CreateInstanceReq {
+	return CreateInstanceReq{
+		FolderID: "f", Name: "vm-1", ZoneID: "ru-central1-a", PlatformID: "standard-v3",
+		Cores: 2, Memory: 2 << 30, CoreFraction: 100,
+		BootDisk: DiskSourceSpec{NewDiskSizeGiB: diskSizeMin, NewSourceImage: ""},
+		NICs:     []NICSpec{{SubnetID: "e9bsubnet"}},
+	}
+}
+
+func TestInstance_Create_OK(t *testing.T) {
+	svc, repo, diskRepo, _, ops := newInstanceSvc(t, true)
+	op, err := svc.Create(context.Background(), baseCreateReq())
+	require.NoError(t, err)
+	require.Equal(t, "epd", op.ID[:3])
+	done := portmock.AwaitOpDone(t, ops, op.ID)
+	in := instanceFromOp(t, done)
+	require.Equal(t, "vm-1", in.Name)
+	require.Equal(t, computev1.Instance_RUNNING, in.Status)
+	require.NotNil(t, in.BootDisk)
+	require.Len(t, in.NetworkInterfaces, 1)
+	require.Contains(t, in.Fqdn, ".auto.internal")
+	stored, err := repo.Get(context.Background(), in.Id)
+	require.NoError(t, err)
+	require.Len(t, stored.AttachedDisks, 1)
+	// inline disk created and attached.
+	bootDisk := stored.BootDisk()
+	require.NotNil(t, bootDisk)
+	_, err = diskRepo.Get(context.Background(), bootDisk.DiskID)
+	require.NoError(t, err)
+}
+
+func TestInstance_Create_SyncValidation(t *testing.T) {
+	svc, _, _, _, _ := newInstanceSvc(t, true)
+	missing := baseCreateReq()
+	missing.ZoneID = ""
+	_, err := svc.Create(context.Background(), missing)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+
+	noNIC := baseCreateReq()
+	noNIC.NICs = nil
+	_, err = svc.Create(context.Background(), noNIC)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+
+	badCF := baseCreateReq()
+	badCF.CoreFraction = 33
+	_, err = svc.Create(context.Background(), badCF)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+
+	bothBoot := baseCreateReq()
+	bothBoot.BootDisk = DiskSourceSpec{DiskID: "d1", NewDiskSizeGiB: diskSizeMin}
+	_, err = svc.Create(context.Background(), bothBoot)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+func TestInstance_Create_SubnetNotFound(t *testing.T) {
+	diskRepo := portmock.NewDiskRepo()
+	imgRepo := portmock.NewImageRepo()
+	instanceRepo := portmock.NewInstanceRepo().WithDiskRepo(diskRepo)
+	ops := portmock.NewOpsRepo()
+	svc := NewInstanceService(instanceRepo, diskRepo, imgRepo, portmock.NewSnapshotRepo(), portmock.NewZoneRepo(),
+		&portmock.FolderClient{OK: true}, &portmock.VPCClient{SubnetFound: false}, ops)
+	op, err := svc.Create(context.Background(), baseCreateReq())
+	require.NoError(t, err)
+	done := portmock.AwaitOpDone(t, ops, op.ID)
+	require.NotNil(t, done.Error)
+	require.Equal(t, int32(codes.NotFound), done.Error.Code)
+}
+
+func TestInstance_Create_SubnetZoneMismatch(t *testing.T) {
+	diskRepo := portmock.NewDiskRepo()
+	instanceRepo := portmock.NewInstanceRepo().WithDiskRepo(diskRepo)
+	ops := portmock.NewOpsRepo()
+	svc := NewInstanceService(instanceRepo, diskRepo, portmock.NewImageRepo(), portmock.NewSnapshotRepo(), portmock.NewZoneRepo(),
+		&portmock.FolderClient{OK: true}, &portmock.VPCClient{SubnetFound: true, SubnetZone: "ru-central1-b"}, ops)
+	op, err := svc.Create(context.Background(), baseCreateReq())
+	require.NoError(t, err)
+	done := portmock.AwaitOpDone(t, ops, op.ID)
+	require.NotNil(t, done.Error)
+	require.Equal(t, int32(codes.InvalidArgument), done.Error.Code)
+}
+
+func seedRunningInstance(repo *portmock.InstanceRepo, status domain.InstanceStatus) *domain.Instance {
+	in := &domain.Instance{
+		ID: "epdvm1", FolderID: "f", Name: "vm", ZoneID: "ru-central1-a", PlatformID: "standard-v3",
+		Cores: 2, Memory: 2 << 30, CoreFraction: 100, Status: status,
+		NetworkInterfaces: []domain.NetworkInterface{{Index: "0", SubnetID: "e9bsubnet", PrimaryV4Address: "10.0.0.10"}},
+		AttachedDisks:     []domain.AttachedDisk{{DiskID: "epdboot", IsBoot: true}},
+	}
+	repo.Seed(in)
+	return in
+}
+
+func TestInstance_Stop_Start_Restart_StateMachine(t *testing.T) {
+	svc, repo, _, _, ops := newInstanceSvc(t, true)
+	seedRunningInstance(repo, domain.InstanceStatusRunning)
+
+	op, err := svc.Stop(context.Background(), "epdvm1")
+	require.NoError(t, err)
+	in := instanceFromOp(t, portmock.AwaitOpDone(t, ops, op.ID))
+	require.Equal(t, computev1.Instance_STOPPED, in.Status)
+
+	// Stop again → FailedPrecondition.
+	op, err = svc.Stop(context.Background(), "epdvm1")
+	require.NoError(t, err)
+	done := portmock.AwaitOpDone(t, ops, op.ID)
+	require.NotNil(t, done.Error)
+	require.Equal(t, int32(codes.FailedPrecondition), done.Error.Code)
+
+	op, err = svc.Start(context.Background(), "epdvm1")
+	require.NoError(t, err)
+	in = instanceFromOp(t, portmock.AwaitOpDone(t, ops, op.ID))
+	require.Equal(t, computev1.Instance_RUNNING, in.Status)
+
+	op, err = svc.Restart(context.Background(), "epdvm1")
+	require.NoError(t, err)
+	in = instanceFromOp(t, portmock.AwaitOpDone(t, ops, op.ID))
+	require.Equal(t, computev1.Instance_RUNNING, in.Status)
+}
+
+func TestInstance_Update_ResourcesRequiresStopped(t *testing.T) {
+	svc, repo, _, _, ops := newInstanceSvc(t, true)
+	seedRunningInstance(repo, domain.InstanceStatusRunning)
+	op, err := svc.Update(context.Background(), UpdateInstanceReq{InstanceID: "epdvm1", Cores: 4, Memory: 4 << 30, CoreFraction: 100, UpdateMask: []string{"resources_spec"}})
+	require.NoError(t, err)
+	done := portmock.AwaitOpDone(t, ops, op.ID)
+	require.NotNil(t, done.Error)
+	require.Equal(t, int32(codes.FailedPrecondition), done.Error.Code)
+
+	// stop then update should work.
+	seedRunningInstance(repo, domain.InstanceStatusStopped)
+	op, err = svc.Update(context.Background(), UpdateInstanceReq{InstanceID: "epdvm1", Cores: 4, Memory: 4 << 30, CoreFraction: 100, UpdateMask: []string{"resources_spec"}})
+	require.NoError(t, err)
+	in := instanceFromOp(t, portmock.AwaitOpDone(t, ops, op.ID))
+	require.Equal(t, int64(4), in.Resources.Cores)
+}
+
+func TestInstance_Update_NameAnyStatus(t *testing.T) {
+	svc, repo, _, _, ops := newInstanceSvc(t, true)
+	seedRunningInstance(repo, domain.InstanceStatusRunning)
+	op, err := svc.Update(context.Background(), UpdateInstanceReq{InstanceID: "epdvm1", Name: "renamed", UpdateMask: []string{"name"}})
+	require.NoError(t, err)
+	in := instanceFromOp(t, portmock.AwaitOpDone(t, ops, op.ID))
+	require.Equal(t, "renamed", in.Name)
+}
+
+func TestInstance_AttachDetachDisk(t *testing.T) {
+	svc, repo, diskRepo, _, ops := newInstanceSvc(t, true)
+	seedRunningInstance(repo, domain.InstanceStatusRunning)
+	diskRepo.Seed(&domain.Disk{ID: "epdboot", FolderID: "f", ZoneID: "ru-central1-a", Status: domain.DiskStatusReady})
+	diskRepo.Seed(&domain.Disk{ID: "epddata", FolderID: "f", ZoneID: "ru-central1-a", Status: domain.DiskStatusReady})
+
+	op, err := svc.AttachDisk(context.Background(), "epdvm1", DiskSourceSpec{DiskID: "epddata", DeviceName: "data0"})
+	require.NoError(t, err)
+	in := instanceFromOp(t, portmock.AwaitOpDone(t, ops, op.ID))
+	require.Len(t, in.SecondaryDisks, 1)
+	require.Equal(t, "epddata", in.SecondaryDisks[0].DiskId)
+
+	// detach boot → rejected.
+	op, err = svc.DetachDisk(context.Background(), "epdvm1", "epdboot", "")
+	require.NoError(t, err)
+	done := portmock.AwaitOpDone(t, ops, op.ID)
+	require.NotNil(t, done.Error)
+	require.Equal(t, int32(codes.FailedPrecondition), done.Error.Code)
+
+	// detach data disk OK.
+	op, err = svc.DetachDisk(context.Background(), "epdvm1", "epddata", "")
+	require.NoError(t, err)
+	in = instanceFromOp(t, portmock.AwaitOpDone(t, ops, op.ID))
+	require.Empty(t, in.SecondaryDisks)
+}
+
+func TestInstance_AddRemoveNAT(t *testing.T) {
+	svc, repo, _, _, ops := newInstanceSvc(t, true)
+	seedRunningInstance(repo, domain.InstanceStatusRunning)
+
+	op, err := svc.AddOneToOneNat(context.Background(), "epdvm1", "0", nil)
+	require.NoError(t, err)
+	in := instanceFromOp(t, portmock.AwaitOpDone(t, ops, op.ID))
+	require.NotNil(t, in.NetworkInterfaces[0].PrimaryV4Address.OneToOneNat)
+
+	// add again → FailedPrecondition.
+	op, err = svc.AddOneToOneNat(context.Background(), "epdvm1", "0", nil)
+	require.NoError(t, err)
+	done := portmock.AwaitOpDone(t, ops, op.ID)
+	require.NotNil(t, done.Error)
+	require.Equal(t, int32(codes.FailedPrecondition), done.Error.Code)
+
+	op, err = svc.RemoveOneToOneNat(context.Background(), "epdvm1", "0")
+	require.NoError(t, err)
+	in = instanceFromOp(t, portmock.AwaitOpDone(t, ops, op.ID))
+	require.Nil(t, in.NetworkInterfaces[0].PrimaryV4Address.OneToOneNat)
+}
+
+func TestInstance_UpdateMetadata(t *testing.T) {
+	svc, repo, _, _, ops := newInstanceSvc(t, true)
+	in0 := seedRunningInstance(repo, domain.InstanceStatusRunning)
+	in0.Metadata = map[string]string{"a": "1", "b": "2"}
+	op, err := svc.UpdateMetadata(context.Background(), "epdvm1", []string{"a"}, map[string]string{"c": "3"})
+	require.NoError(t, err)
+	in := instanceFromOp(t, portmock.AwaitOpDone(t, ops, op.ID))
+	require.NotContains(t, in.Metadata, "a")
+	require.Equal(t, "2", in.Metadata["b"])
+	require.Equal(t, "3", in.Metadata["c"])
+}
+
+func TestInstance_Move_OK(t *testing.T) {
+	svc, repo, _, _, ops := newInstanceSvc(t, true)
+	seedRunningInstance(repo, domain.InstanceStatusRunning)
+	op, err := svc.Move(context.Background(), "epdvm1", "f2")
+	require.NoError(t, err)
+	in := instanceFromOp(t, portmock.AwaitOpDone(t, ops, op.ID))
+	require.Equal(t, "f2", in.FolderId)
+}
+
+func TestInstance_Delete_AutoDeleteDisk(t *testing.T) {
+	svc, repo, diskRepo, _, ops := newInstanceSvc(t, true)
+	in0 := seedRunningInstance(repo, domain.InstanceStatusRunning)
+	in0.AttachedDisks = []domain.AttachedDisk{{DiskID: "epdboot", IsBoot: true, AutoDelete: true}}
+	diskRepo.Seed(&domain.Disk{ID: "epdboot", FolderID: "f", Status: domain.DiskStatusReady})
+	diskRepo.SetAttached("epdboot", true)
+	op, err := svc.Delete(context.Background(), "epdvm1")
+	require.NoError(t, err)
+	done := portmock.AwaitOpDone(t, ops, op.ID)
+	require.Nil(t, done.Error)
+	_, err = repo.Get(context.Background(), "epdvm1")
+	require.Error(t, err)
+	_, err = diskRepo.Get(context.Background(), "epdboot")
+	require.Error(t, err) // auto-deleted
+}
+
+func TestInstance_GetSerialPortOutput(t *testing.T) {
+	svc, repo, _, _, _ := newInstanceSvc(t, true)
+	seedRunningInstance(repo, domain.InstanceStatusRunning)
+	out, err := svc.GetSerialPortOutput(context.Background(), "epdvm1")
+	require.NoError(t, err)
+	require.Contains(t, out, "epdvm1")
+}

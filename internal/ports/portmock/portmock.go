@@ -16,9 +16,9 @@ import (
 	"google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/PRO-Robotech/kacho-corelib/operations"
 	"github.com/PRO-Robotech/kacho-compute/internal/domain"
 	"github.com/PRO-Robotech/kacho-compute/internal/ports"
+	"github.com/PRO-Robotech/kacho-corelib/operations"
 )
 
 // ---- DiskRepo ----
@@ -325,9 +325,9 @@ func (r *SnapshotRepo) Delete(_ context.Context, id string) error {
 
 // InstanceRepo — in-memory InstanceRepo.
 type InstanceRepo struct {
-	mu        sync.Mutex
-	data      map[string]*domain.Instance
-	diskHook  *DiskRepo // если задан — inlineDisks вставляются туда
+	mu       sync.Mutex
+	data     map[string]*domain.Instance
+	diskHook *DiskRepo // если задан — inlineDisks вставляются туда
 }
 
 // NewInstanceRepo создаёт пустой InstanceRepo.

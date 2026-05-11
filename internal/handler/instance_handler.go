@@ -7,8 +7,8 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/PRO-Robotech/kacho-corelib/operations"
-	operationpb "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/operation"
 	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
+	operationpb "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/operation"
 
 	"github.com/PRO-Robotech/kacho-compute/internal/protoconv"
 	svc "github.com/PRO-Robotech/kacho-compute/internal/service"
@@ -67,19 +67,19 @@ func (h *InstanceHandler) Create(ctx context.Context, req *computev1.CreateInsta
 		return nil, err
 	}
 	cr := svc.CreateInstanceReq{
-		FolderID:            req.FolderId,
-		Name:                req.Name,
-		Description:         req.Description,
-		Labels:              req.Labels,
-		ZoneID:              req.ZoneId,
-		PlatformID:          req.PlatformId,
-		Metadata:            req.Metadata,
-		MetadataOptions:     req.MetadataOptions,
-		BootDisk:            diskSourceFromSpec(req.BootDiskSpec),
-		Hostname:            req.Hostname,
-		ServiceAccountID:    req.ServiceAccountId,
-		PlacementPolicy:     req.PlacementPolicy,
-		Application:         req.Application,
+		FolderID:         req.FolderId,
+		Name:             req.Name,
+		Description:      req.Description,
+		Labels:           req.Labels,
+		ZoneID:           req.ZoneId,
+		PlatformID:       req.PlatformId,
+		Metadata:         req.Metadata,
+		MetadataOptions:  req.MetadataOptions,
+		BootDisk:         diskSourceFromSpec(req.BootDiskSpec),
+		Hostname:         req.Hostname,
+		ServiceAccountID: req.ServiceAccountId,
+		PlacementPolicy:  req.PlacementPolicy,
+		Application:      req.Application,
 	}
 	if rs := req.ResourcesSpec; rs != nil {
 		cr.Cores, cr.Memory, cr.CoreFraction, cr.GPUs = rs.Cores, rs.Memory, rs.CoreFraction, rs.Gpus

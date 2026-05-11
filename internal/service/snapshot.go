@@ -33,7 +33,7 @@ type CreateSnapshotReq struct {
 type UpdateSnapshotReq struct {
 	SnapshotID  string
 	Name        string
-	Description  string
+	Description string
 	Labels      map[string]string
 	UpdateMask  []string
 }

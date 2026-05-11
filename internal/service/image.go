@@ -42,7 +42,7 @@ type CreateImageReq struct {
 type UpdateImageReq struct {
 	ImageID     string
 	Name        string
-	Description  string
+	Description string
 	Labels      map[string]string
 	MinDiskSize int64
 	UpdateMask  []string
