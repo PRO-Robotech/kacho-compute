@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -18,6 +19,25 @@ import (
 	"github.com/PRO-Robotech/kacho-compute/internal/domain"
 	"github.com/PRO-Robotech/kacho-compute/internal/protoconv"
 )
+
+// imageFamilyRe — verbatim YC Image.family pattern: `|[a-z][-a-z0-9]{1,61}[a-z0-9]`
+// (пустая строка ИЛИ lowercase-letter + 1..61×[-a-z0-9] + letter/digit; нет underscore).
+var imageFamilyRe = regexp.MustCompile(`^([a-z][-a-z0-9]{1,61}[a-z0-9])?$`)
+
+// validateImageFamily проверяет family-поле Image (sync).
+func validateImageFamily(family string) error {
+	if !imageFamilyRe.MatchString(family) {
+		return invalidArg("family", `family must match ^([a-z][-a-z0-9]{1,61}[a-z0-9])?$ (lowercase letters, digits, hyphens; 3..63 chars; empty allowed)`)
+	}
+	return nil
+}
+
+func maxInt64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
+}
 
 // CreateImageReq — запрос на создание образа. source = ровно один из
 // {ImageID, DiskID, SnapshotID, URI}.
@@ -105,6 +125,9 @@ func (s *ImageService) Create(ctx context.Context, req CreateImageReq) (*operati
 	if err := corevalidate.Labels("labels", req.Labels); err != nil {
 		return nil, err
 	}
+	if err := validateImageFamily(req.Family); err != nil {
+		return nil, err
+	}
 	srcCount := 0
 	for _, v := range []string{req.ImageID, req.DiskID, req.SnapshotID, req.URI} {
 		if v != "" {
@@ -134,15 +157,25 @@ func (s *ImageService) doCreate(ctx context.Context, imageID string, req CreateI
 	if err := s.checkFolder(ctx, req.FolderID); err != nil {
 		return nil, err
 	}
+	// minDiskSize / storageSize наследуются от источника (verbatim YC: образ,
+	// созданный из disk/snapshot/image, требует диск ≥ размера источника).
+	minDiskSize := req.MinDiskSize
+	storageSize := int64(0)
 	switch {
 	case req.ImageID != "":
-		if _, err := s.repo.Get(ctx, req.ImageID); err != nil {
+		src, err := s.repo.Get(ctx, req.ImageID)
+		if err != nil {
 			return nil, status.Errorf(codes.NotFound, "Image %s not found", req.ImageID)
 		}
+		minDiskSize = maxInt64(minDiskSize, src.MinDiskSize)
+		storageSize = src.StorageSize
 	case req.SnapshotID != "":
-		if _, err := s.snapshotRepo.Get(ctx, req.SnapshotID); err != nil {
+		src, err := s.snapshotRepo.Get(ctx, req.SnapshotID)
+		if err != nil {
 			return nil, status.Errorf(codes.NotFound, "Snapshot %s not found", req.SnapshotID)
 		}
+		minDiskSize = maxInt64(minDiskSize, src.DiskSize)
+		storageSize = src.DiskSize
 	case req.DiskID != "":
 		d, err := s.diskRepo.Get(ctx, req.DiskID)
 		if err != nil {
@@ -151,8 +184,11 @@ func (s *ImageService) doCreate(ctx context.Context, imageID string, req CreateI
 		if d.Status != domain.DiskStatusReady {
 			return nil, status.Errorf(codes.FailedPrecondition, "Disk %s is not READY", req.DiskID)
 		}
+		minDiskSize = maxInt64(minDiskSize, d.Size)
+		storageSize = d.Size
 	case req.URI != "":
 		// control-plane: download via signed URL — мгновенно (status READY).
+		// min_disk_size остаётся как задан в запросе (или 0 — раскроется при создании диска из образа).
 	}
 
 	i := &domain.Image{
@@ -163,9 +199,11 @@ func (s *ImageService) doCreate(ctx context.Context, imageID string, req CreateI
 		Description:        req.Description,
 		Labels:             req.Labels,
 		Family:             req.Family,
-		MinDiskSize:        req.MinDiskSize,
+		MinDiskSize:        minDiskSize,
+		StorageSize:        storageSize,
 		ProductIDs:         req.ProductIDs,
-		Status:             domain.ImageStatusReady, // control-plane only
+		Status:             domain.ImageStatusReady,           // control-plane only
+		OsType:             domain.OsType(computev1.Os_LINUX), // verbatim YC default
 		Pooled:             req.Pooled,
 		HardwareGeneration: req.HardwareGeneration,
 		SourceImageID:      req.ImageID,
@@ -174,7 +212,9 @@ func (s *ImageService) doCreate(ctx context.Context, imageID string, req CreateI
 		SourceURI:          req.URI,
 	}
 	if req.Os != nil {
-		i.OsType = domain.OsType(req.Os.GetType())
+		if req.Os.GetType() != computev1.Os_TYPE_UNSPECIFIED {
+			i.OsType = domain.OsType(req.Os.GetType())
+		}
 		if req.Os.GetNvidia() != nil {
 			i.OsNvidiaDriver = req.Os.GetNvidia().GetDriver()
 		}
