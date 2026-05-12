@@ -153,8 +153,8 @@ func NewZoneRepo(pool *pgxpool.Pool) *ZoneRepo { return &ZoneRepo{pool: pool} }
 func (r *ZoneRepo) Get(ctx context.Context, id string) (*domain.Zone, error) {
 	var z domain.Zone
 	var statusName string
-	err := r.pool.QueryRow(ctx, `SELECT id, region_id, status, created_at FROM zones WHERE id = $1`, id).
-		Scan(&z.ID, &z.RegionID, &statusName, &z.CreatedAt)
+	err := r.pool.QueryRow(ctx, `SELECT id, region_id, name, status, created_at FROM zones WHERE id = $1`, id).
+		Scan(&z.ID, &z.RegionID, &z.Name, &statusName, &z.CreatedAt)
 	if err != nil {
 		return nil, wrapPgErr(err, "Zone", id)
 	}
@@ -179,7 +179,7 @@ func (r *ZoneRepo) List(ctx context.Context, p service.Pagination) ([]*domain.Zo
 		where = "WHERE id > $1"
 		args = append(args, cursorID)
 	}
-	q := fmt.Sprintf(`SELECT id, region_id, status, created_at FROM zones %s ORDER BY id ASC LIMIT $%d`, where, len(args)+1)
+	q := fmt.Sprintf(`SELECT id, region_id, name, status, created_at FROM zones %s ORDER BY id ASC LIMIT $%d`, where, len(args)+1)
 	args = append(args, pageSize+1)
 	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
@@ -190,7 +190,7 @@ func (r *ZoneRepo) List(ctx context.Context, p service.Pagination) ([]*domain.Zo
 	for rows.Next() {
 		var z domain.Zone
 		var statusName string
-		if err := rows.Scan(&z.ID, &z.RegionID, &statusName, &z.CreatedAt); err != nil {
+		if err := rows.Scan(&z.ID, &z.RegionID, &z.Name, &statusName, &z.CreatedAt); err != nil {
 			return nil, "", wrapPgErr(err, "Zone", "")
 		}
 		z.Status = zoneStatusFromName(statusName)
@@ -213,9 +213,9 @@ func (r *ZoneRepo) Insert(ctx context.Context, z *domain.Zone) (*domain.Zone, er
 	var created domain.Zone
 	var statusName string
 	err := r.pool.QueryRow(ctx,
-		`INSERT INTO zones (id, region_id, status, created_at) VALUES ($1,$2,$3,$4) RETURNING id, region_id, status, created_at`,
-		z.ID, z.RegionID, zoneStatusName(z.Status), time.Now().UTC()).
-		Scan(&created.ID, &created.RegionID, &statusName, &created.CreatedAt)
+		`INSERT INTO zones (id, region_id, name, status, created_at) VALUES ($1,$2,$3,$4,$5) RETURNING id, region_id, name, status, created_at`,
+		z.ID, z.RegionID, z.Name, zoneStatusName(z.Status), time.Now().UTC()).
+		Scan(&created.ID, &created.RegionID, &created.Name, &statusName, &created.CreatedAt)
 	if err != nil {
 		return nil, wrapPgErr(err, "Zone", z.ID)
 	}
@@ -228,9 +228,9 @@ func (r *ZoneRepo) Update(ctx context.Context, z *domain.Zone) (*domain.Zone, er
 	var updated domain.Zone
 	var statusName string
 	err := r.pool.QueryRow(ctx,
-		`UPDATE zones SET region_id=$2, status=$3 WHERE id=$1 RETURNING id, region_id, status, created_at`,
-		z.ID, z.RegionID, zoneStatusName(z.Status)).
-		Scan(&updated.ID, &updated.RegionID, &statusName, &updated.CreatedAt)
+		`UPDATE zones SET region_id=$2, name=$3, status=$4 WHERE id=$1 RETURNING id, region_id, name, status, created_at`,
+		z.ID, z.RegionID, z.Name, zoneStatusName(z.Status)).
+		Scan(&updated.ID, &updated.RegionID, &updated.Name, &statusName, &updated.CreatedAt)
 	if err != nil {
 		return nil, wrapPgErr(err, "Zone", z.ID)
 	}
@@ -250,13 +250,125 @@ func (r *ZoneRepo) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// ---- ZoneRepoSource: fallback-адаптер ZoneRepo → service.ZoneSource ----
+// ---- RegionRepo ----
+
+// RegionRepo — реализация service.RegionRepo поверх pgxpool.
+type RegionRepo struct {
+	pool *pgxpool.Pool
+}
+
+// NewRegionRepo создаёт RegionRepo.
+func NewRegionRepo(pool *pgxpool.Pool) *RegionRepo { return &RegionRepo{pool: pool} }
+
+// Get возвращает регион по id.
+func (r *RegionRepo) Get(ctx context.Context, id string) (*domain.Region, error) {
+	var rg domain.Region
+	err := r.pool.QueryRow(ctx, `SELECT id, name, created_at FROM regions WHERE id = $1`, id).
+		Scan(&rg.ID, &rg.Name, &rg.CreatedAt)
+	if err != nil {
+		return nil, wrapPgErr(err, "Region", id)
+	}
+	return &rg, nil
+}
+
+// List возвращает регионы с cursor-пагинацией по id.
+func (r *RegionRepo) List(ctx context.Context, p service.Pagination) ([]*domain.Region, string, error) {
+	pageSize, err := validate.PageSize("page_size", p.PageSize)
+	if err != nil {
+		return nil, "", err
+	}
+	args := []any{}
+	where := ""
+	if p.PageToken != "" {
+		_, cursorID, derr := decodePageToken(p.PageToken)
+		if derr != nil {
+			return nil, "", invalidPageTokenErr(derr)
+		}
+		where = "WHERE id > $1"
+		args = append(args, cursorID)
+	}
+	q := fmt.Sprintf(`SELECT id, name, created_at FROM regions %s ORDER BY id ASC LIMIT $%d`, where, len(args)+1)
+	args = append(args, pageSize+1)
+	rows, err := r.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, "", wrapPgErr(err, "Region", "")
+	}
+	defer rows.Close()
+	var out []*domain.Region
+	for rows.Next() {
+		var rg domain.Region
+		if err := rows.Scan(&rg.ID, &rg.Name, &rg.CreatedAt); err != nil {
+			return nil, "", wrapPgErr(err, "Region", "")
+		}
+		out = append(out, &rg)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, "", wrapPgErr(err, "Region", "")
+	}
+	var next string
+	if int64(len(out)) > pageSize {
+		last := out[pageSize-1]
+		next = encodePageToken(last.CreatedAt, last.ID)
+		out = out[:pageSize]
+	}
+	return out, next, nil
+}
+
+// Insert вставляет регион (admin-only).
+func (r *RegionRepo) Insert(ctx context.Context, rg *domain.Region) (*domain.Region, error) {
+	var created domain.Region
+	err := r.pool.QueryRow(ctx,
+		`INSERT INTO regions (id, name, created_at) VALUES ($1,$2,$3) RETURNING id, name, created_at`,
+		rg.ID, rg.Name, time.Now().UTC()).
+		Scan(&created.ID, &created.Name, &created.CreatedAt)
+	if err != nil {
+		return nil, wrapPgErr(err, "Region", rg.ID)
+	}
+	return &created, nil
+}
+
+// Update обновляет регион (admin-only).
+func (r *RegionRepo) Update(ctx context.Context, rg *domain.Region) (*domain.Region, error) {
+	var updated domain.Region
+	err := r.pool.QueryRow(ctx,
+		`UPDATE regions SET name=$2 WHERE id=$1 RETURNING id, name, created_at`,
+		rg.ID, rg.Name).
+		Scan(&updated.ID, &updated.Name, &updated.CreatedAt)
+	if err != nil {
+		return nil, wrapPgErr(err, "Region", rg.ID)
+	}
+	return &updated, nil
+}
+
+// Delete удаляет регион (admin-only). Если у региона есть зоны — FK RESTRICT
+// (SQLSTATE 23503) → wrapPgErr вернёт service.ErrFailedPrecondition → handler
+// маппит в gRPC FailedPrecondition.
+func (r *RegionRepo) Delete(ctx context.Context, id string) error {
+	tag, err := r.pool.Exec(ctx, `DELETE FROM regions WHERE id = $1`, id)
+	if err != nil {
+		return wrapPgErr(err, "Region", id)
+	}
+	if tag.RowsAffected() == 0 {
+		return service.ErrNotFound
+	}
+	return nil
+}
+
+// CountZones — число зон в регионе.
+func (r *RegionRepo) CountZones(ctx context.Context, regionID string) (int, error) {
+	var n int
+	if err := r.pool.QueryRow(ctx, `SELECT count(*) FROM zones WHERE region_id = $1`, regionID).Scan(&n); err != nil {
+		return 0, wrapPgErr(err, "Region", regionID)
+	}
+	return n, nil
+}
+
+// ---- ZoneRepoSource: адаптер ZoneRepo → service.ZoneSource ----
 
 // ZoneRepoSource адаптирует локальную таблицу `zones` к service.ZoneSource
-// (а значит и к service.ZoneRegistry). Используется как fallback-источник зон
-// для ZoneService.Get/List и для existence-check zone_id в Disk/Instance Create —
-// только при KACHO_COMPUTE_SKIP_PEER_VALIDATION=true. В обычном режиме compute
-// берёт зоны из kacho-vpc InternalZoneService (см. internal/clients/vpc_client.go).
+// (а значит и к service.ZoneRegistry). kacho-compute — owner Geography:
+// это единственный источник зон (для ZoneService.Get/List и для existence-check
+// zone_id в Disk/Instance Create). См. workspace CLAUDE.md §«Кросс-доменные ссылки».
 type ZoneRepoSource struct{ repo *ZoneRepo }
 
 // NewZoneRepoSource создаёт ZoneRepoSource поверх ZoneRepo.

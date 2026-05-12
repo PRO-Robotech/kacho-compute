@@ -33,6 +33,8 @@ type (
 	DiskTypeRepo = ports.DiskTypeRepo
 	// ZoneRepo — port-интерфейс репозитория зон.
 	ZoneRepo = ports.ZoneRepo
+	// RegionRepo — port-интерфейс репозитория регионов.
+	RegionRepo = ports.RegionRepo
 
 	// FolderClient — port для проверки существования Folder.
 	FolderClient = ports.FolderClient

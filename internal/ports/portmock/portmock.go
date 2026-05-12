@@ -690,6 +690,101 @@ func (r *ZoneRepo) ListZones(_ context.Context, _ int64, _ string) ([]ports.Zone
 	return out, "", nil
 }
 
+// ---- RegionRepo ----
+
+// RegionRepo — in-memory RegionRepo. zoneCount — сколько зон ссылаются на регион
+// (для проверки delete-RESTRICT в RegionService.Delete).
+type RegionRepo struct {
+	mu        sync.Mutex
+	data      map[string]*domain.Region
+	zoneCount map[string]int
+}
+
+// NewRegionRepo создаёт RegionRepo с seed-регионом (ru-central1 по умолчанию).
+func NewRegionRepo(ids ...string) *RegionRepo {
+	r := &RegionRepo{data: make(map[string]*domain.Region), zoneCount: make(map[string]int)}
+	if len(ids) == 0 {
+		ids = []string{"ru-central1"}
+	}
+	for _, id := range ids {
+		r.data[id] = &domain.Region{ID: id, Name: id}
+	}
+	return r
+}
+
+// SetZoneCount задаёт число зон региона (тест-helper).
+func (r *RegionRepo) SetZoneCount(regionID string, n int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.zoneCount[regionID] = n
+}
+
+// Get возвращает регион по id.
+func (r *RegionRepo) Get(_ context.Context, id string) (*domain.Region, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rg, ok := r.data[id]
+	if !ok {
+		return nil, ports.ErrNotFound
+	}
+	return rg, nil
+}
+
+// List возвращает все регионы.
+func (r *RegionRepo) List(_ context.Context, _ ports.Pagination) ([]*domain.Region, string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*domain.Region
+	for _, rg := range r.data {
+		out = append(out, rg)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, "", nil
+}
+
+// Insert вставляет регион.
+func (r *RegionRepo) Insert(_ context.Context, rg *domain.Region) (*domain.Region, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.data[rg.ID]; ok {
+		return nil, ports.ErrAlreadyExists
+	}
+	r.data[rg.ID] = rg
+	return rg, nil
+}
+
+// Update обновляет регион.
+func (r *RegionRepo) Update(_ context.Context, rg *domain.Region) (*domain.Region, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.data[rg.ID]; !ok {
+		return nil, ports.ErrNotFound
+	}
+	r.data[rg.ID] = rg
+	return rg, nil
+}
+
+// Delete удаляет регион (ErrFailedPrecondition если есть зоны).
+func (r *RegionRepo) Delete(_ context.Context, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.data[id]; !ok {
+		return ports.ErrNotFound
+	}
+	if r.zoneCount[id] > 0 {
+		return ports.ErrFailedPrecondition
+	}
+	delete(r.data, id)
+	return nil
+}
+
+// CountZones — число зон региона.
+func (r *RegionRepo) CountZones(_ context.Context, regionID string) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.zoneCount[regionID], nil
+}
+
 // ---- FolderClient / VPCClient ----
 
 // FolderClient — fake FolderClient. OK задаёт результат Exists().
@@ -1000,7 +1095,8 @@ var (
 	_ ports.DiskTypeRepo = (*DiskTypeRepo)(nil)
 	_ ports.ZoneRepo     = (*ZoneRepo)(nil)
 	_ ports.ZoneSource   = (*ZoneRepo)(nil)
-	_ ports.ZoneSource   = (*VPCClient)(nil)
+	_ ports.ZoneRegistry = (*VPCClient)(nil)
+	_ ports.RegionRepo   = (*RegionRepo)(nil)
 	_ ports.FolderClient = (*FolderClient)(nil)
 	_ ports.VPCClient    = (*VPCClient)(nil)
 	_ operations.Repo    = (*OpsRepo)(nil)

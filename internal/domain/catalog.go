@@ -12,10 +12,20 @@ const (
 	ZoneStatusDown
 )
 
+// Region — глобальный geography-ресурс (id = "ru-central1"). Домен kacho-compute
+// (перенесено из kacho-vpc, эпик KAC-15).
+type Region struct {
+	ID        string
+	Name      string
+	CreatedAt time.Time
+}
+
 // Zone — availability-зона (глобальный read-only справочник; id = "ru-central1-a").
+// Принадлежит Region (region_id, FK RESTRICT).
 type Zone struct {
 	ID        string
 	RegionID  string
+	Name      string
 	Status    ZoneStatus
 	CreatedAt time.Time
 }

@@ -64,7 +64,7 @@ func NewInternalZoneHandler(s *svc.ZoneService) *InternalZoneHandler {
 
 // Create создаёт зону.
 func (h *InternalZoneHandler) Create(ctx context.Context, req *computev1.CreateZoneRequest) (*computev1.Zone, error) {
-	z, err := h.svc.Create(ctx, req.Id, req.RegionId, domain.ZoneStatus(req.Status))
+	z, err := h.svc.Create(ctx, req.Id, req.RegionId, req.Name, domain.ZoneStatus(req.Status))
 	if err != nil {
 		return nil, internalMapErr("create zone", err)
 	}
@@ -73,7 +73,7 @@ func (h *InternalZoneHandler) Create(ctx context.Context, req *computev1.CreateZ
 
 // Update обновляет зону.
 func (h *InternalZoneHandler) Update(ctx context.Context, req *computev1.UpdateZoneRequest) (*computev1.Zone, error) {
-	z, err := h.svc.Update(ctx, req.ZoneId, req.RegionId, domain.ZoneStatus(req.Status))
+	z, err := h.svc.Update(ctx, req.ZoneId, req.RegionId, req.Name, domain.ZoneStatus(req.Status))
 	if err != nil {
 		return nil, internalMapErr("update zone", err)
 	}
@@ -86,4 +86,41 @@ func (h *InternalZoneHandler) Delete(ctx context.Context, req *computev1.DeleteZ
 		return nil, internalMapErr("delete zone", err)
 	}
 	return &computev1.DeleteZoneResponse{}, nil
+}
+
+// InternalRegionHandler реализует computev1.InternalRegionServiceServer.
+type InternalRegionHandler struct {
+	computev1.UnimplementedInternalRegionServiceServer
+	svc *svc.RegionService
+}
+
+// NewInternalRegionHandler создаёт InternalRegionHandler.
+func NewInternalRegionHandler(s *svc.RegionService) *InternalRegionHandler {
+	return &InternalRegionHandler{svc: s}
+}
+
+// Create создаёт регион.
+func (h *InternalRegionHandler) Create(ctx context.Context, req *computev1.CreateRegionRequest) (*computev1.Region, error) {
+	r, err := h.svc.Create(ctx, req.Id, req.Name)
+	if err != nil {
+		return nil, internalMapErr("create region", err)
+	}
+	return protoconv.Region(r), nil
+}
+
+// Update обновляет регион.
+func (h *InternalRegionHandler) Update(ctx context.Context, req *computev1.UpdateRegionRequest) (*computev1.Region, error) {
+	r, err := h.svc.Update(ctx, req.RegionId, req.Name)
+	if err != nil {
+		return nil, internalMapErr("update region", err)
+	}
+	return protoconv.Region(r), nil
+}
+
+// Delete удаляет регион.
+func (h *InternalRegionHandler) Delete(ctx context.Context, req *computev1.DeleteRegionRequest) (*computev1.DeleteRegionResponse, error) {
+	if err := h.svc.Delete(ctx, req.RegionId); err != nil {
+		return nil, internalMapErr("delete region", err)
+	}
+	return &computev1.DeleteRegionResponse{}, nil
 }

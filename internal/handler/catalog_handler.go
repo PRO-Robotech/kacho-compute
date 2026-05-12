@@ -70,3 +70,34 @@ func (h *ZoneHandler) List(ctx context.Context, req *computev1.ListZonesRequest)
 	}
 	return resp, nil
 }
+
+// RegionHandler реализует computev1.RegionServiceServer (read-only public).
+type RegionHandler struct {
+	computev1.UnimplementedRegionServiceServer
+	svc *svc.RegionService
+}
+
+// NewRegionHandler создаёт RegionHandler.
+func NewRegionHandler(s *svc.RegionService) *RegionHandler { return &RegionHandler{svc: s} }
+
+// Get возвращает Region по id.
+func (h *RegionHandler) Get(ctx context.Context, req *computev1.GetRegionRequest) (*computev1.Region, error) {
+	r, err := h.svc.Get(ctx, req.RegionId)
+	if err != nil {
+		return nil, err
+	}
+	return protoconv.Region(r), nil
+}
+
+// List возвращает все регионы.
+func (h *RegionHandler) List(ctx context.Context, req *computev1.ListRegionsRequest) (*computev1.ListRegionsResponse, error) {
+	regions, nextToken, err := h.svc.List(ctx, svc.Pagination{PageToken: req.PageToken, PageSize: req.PageSize})
+	if err != nil {
+		return nil, err
+	}
+	resp := &computev1.ListRegionsResponse{NextPageToken: nextToken}
+	for _, r := range regions {
+		resp.Regions = append(resp.Regions, protoconv.Region(r))
+	}
+	return resp, nil
+}
