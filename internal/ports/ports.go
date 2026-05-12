@@ -124,6 +124,16 @@ type ZoneRepo interface {
 	Delete(ctx context.Context, id string) error
 }
 
+// HypervisorRepo — port-интерфейс реестра гипервизоров (internal-only ресурс;
+// см. workspace CLAUDE.md §«Инфра-чувствительные данные»).
+type HypervisorRepo interface {
+	Get(ctx context.Context, id string) (*domain.Hypervisor, error)
+	List(ctx context.Context, zoneID string, state domain.HypervisorState, p Pagination) ([]*domain.Hypervisor, string, error)
+	Insert(ctx context.Context, h *domain.Hypervisor) (*domain.Hypervisor, error)
+	Update(ctx context.Context, h *domain.Hypervisor) (*domain.Hypervisor, error)
+	Delete(ctx context.Context, id string) error
+}
+
 // RegionRepo — port-интерфейс репозитория регионов (read + admin CRUD).
 // kacho-compute — owner Geography (Region/Zone); см. workspace CLAUDE.md
 // §«Кросс-доменные ссылки на ресурсы».
