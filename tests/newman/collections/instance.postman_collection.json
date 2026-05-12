@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "baed2d18-af71-499c-abeb-cfbf16ee77cf",
+    "_postman_id": "78ea5e6c-ad2f-4696-ae28-242007364bd4",
     "name": "kacho-compute / newman / instance",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -2382,6 +2382,1161 @@
                   "  const j = pm.response.json();",
                   "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
                   "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "INST-CR-WITH-NICID-OK — Create instance: NIC spec = {nicId: <existing kacho-vpc NIC>} (no subnetId) → poll → Get → instance NIC carries that nicId; Delete → NIC usedBy cleared",
+      "description": "class:CRUD | class:CONF | priority:P0",
+      "item": [
+        {
+          "name": "vpc-cr-net",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vpc/v1/networks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vpc",
+                "v1",
+                "networks"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"nm-nicnet-{{runId}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.networkId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('vpcNetId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "poll-op",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 8) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "vpc-cr-subnet",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vpc/v1/subnets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vpc",
+                "v1",
+                "subnets"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"nm-nicsub-{{runId}}\", \"networkId\": \"{{vpcNetId}}\", \"zoneId\": \"{{existingZoneId}}\", \"v4CidrBlocks\": [\"192.168.222.0/24\"]}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.subnetId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('vpcSubnetId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "poll-op",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 8) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "vpc-cr-nic",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vpc/v1/networkInterfaces",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vpc",
+                "v1",
+                "networkInterfaces"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"nm-nic-{{runId}}\", \"subnetId\": \"{{vpcSubnetId}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.networkInterfaceId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('vpcNicId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "poll-op",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 8) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "create",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/instances",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "instances"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-nicid-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-nicid-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"nicId\": \"{{vpcNicId}}\"}]}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('Operation envelope returned', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.id, 'operation.id').to.match(/^epd[a-z0-9]+$/);",
+                  "  pm.expect(j.metadata, 'operation.metadata').to.be.an('object');",
+                  "});",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.instanceId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('instanceId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "poll-op",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 8) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "assert-op-success",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation succeeded (response, no error)', () => pm.expect(Boolean(j.response) && !j.error, JSON.stringify(j)).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "get",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/instances/{{instanceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "instances",
+                "{{instanceId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('status RUNNING', () => pm.expect(j.status).to.eql('RUNNING'));",
+                  "pm.test('at least 1 NIC', () => pm.expect((j.networkInterfaces || []).length).to.be.at.least(1));",
+                  "pm.test('NIC carries the referenced nicId', () => { const ids = (j.networkInterfaces || []).map(n => n.nicId); pm.expect(ids).to.include(pm.environment.get('vpcNicId')); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "vpc-get-nic-attached",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vpc/v1/networkInterfaces/{{vpcNicId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vpc",
+                "v1",
+                "networkInterfaces",
+                "{{vpcNicId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('usedBy points at instance (if reported)', () => { if (j.usedBy) pm.expect(JSON.stringify(j.usedBy)).to.include(pm.environment.get('instanceId')); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "cleanup-inst",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/instances/{{instanceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "instances",
+                "{{instanceId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "poll-op",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 8) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "vpc-get-nic-freed",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vpc/v1/networkInterfaces/{{vpcNicId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vpc",
+                "v1",
+                "networkInterfaces",
+                "{{vpcNicId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('usedBy cleared after instance delete (if observable)', () => { if (j.usedBy && Object.keys(j.usedBy).length) pm.expect(JSON.stringify(j.usedBy)).to.not.include(pm.environment.get('instanceId')); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "vpc-del-nic",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vpc/v1/networkInterfaces/{{vpcNicId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vpc",
+                "v1",
+                "networkInterfaces",
+                "{{vpcNicId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "poll-op",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 8) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "vpc-del-subnet",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vpc/v1/subnets/{{vpcSubnetId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vpc",
+                "v1",
+                "subnets",
+                "{{vpcSubnetId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "poll-op",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 8) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "vpc-del-net",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vpc/v1/networks/{{vpcNetId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vpc",
+                "v1",
+                "networks",
+                "{{vpcNetId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "poll-op",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 8) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "INST-CR-INLINE-NIC-OK — Create instance: inline NIC = {subnetId, primaryV4AddressSpec:{}} (default mode) → poll → Get → NIC has subnetId, no nicId reference; minimal boot disk (size only, no image_id)",
+      "description": "class:CRUD | class:CONF | priority:P0",
+      "item": [
+        {
+          "name": "create",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/instances",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "instances"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-inlnic-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-inlnic-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('Operation envelope returned', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.id, 'operation.id').to.match(/^epd[a-z0-9]+$/);",
+                  "  pm.expect(j.metadata, 'operation.metadata').to.be.an('object');",
+                  "});",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.instanceId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('instanceId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "poll-op",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 8) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "assert-op-success",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation succeeded (response, no error)', () => pm.expect(Boolean(j.response) && !j.error, JSON.stringify(j)).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "get",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/instances/{{instanceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "instances",
+                "{{instanceId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('status RUNNING', () => pm.expect(j.status).to.eql('RUNNING'));",
+                  "pm.test('boot disk present (size-only spec, no image)', () => pm.expect(j.bootDisk && j.bootDisk.diskId).to.be.a('string').and.length.greaterThan(0));",
+                  "pm.test('NIC has subnetId == existingSubnetId', () => { pm.expect((j.networkInterfaces || []).length).to.be.at.least(1); pm.expect(j.networkInterfaces[0].subnetId).to.eql(pm.environment.get('existingSubnetId')); });",
+                  "pm.test('inline NIC also exposes a nicId (kacho-vpc NetworkInterface backing it)', () => pm.expect(j.networkInterfaces[0].nicId === undefined || typeof j.networkInterfaces[0].nicId === 'string').to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "cleanup-inst",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/instances/{{instanceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "instances",
+                "{{instanceId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "poll-op",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 8) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
               }
             }

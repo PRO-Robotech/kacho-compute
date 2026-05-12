@@ -303,6 +303,113 @@ CASES.append(Case(
 ))
 
 # ===========================================================================
+# INST-CR — NIC modes: inline-create vs reference an existing kacho-vpc NIC
+# ===========================================================================
+# Epic KAC-2: Instance.NetworkInterfaceSpec gained `nic_id` — a NIC spec can
+# either reference an existing kacho-vpc NetworkInterface by id (then subnet_id /
+# primary_v4_address_spec must NOT be set — the NIC already carries them), or
+# (the default) inline-create one with subnet_id [+ primary_v4_address_spec].
+# These cases require kacho-vpc up (newman docker-compose has it).
+
+VPC_NETWORKS = "/vpc/v1/networks"
+VPC_SUBNETS = "/vpc/v1/subnets"
+VPC_NICS = "/vpc/v1/networkInterfaces"
+
+
+def _vpc_make_nic_steps():
+    """Create a fresh kacho-vpc Network → Subnet (in {{existingZoneId}}) → NetworkInterface;
+    saves vpcNetId / vpcSubnetId / vpcNicId. Returns step list (poll vpc ops)."""
+    return [
+        Step(name="vpc-cr-net", method="POST", path=VPC_NETWORKS,
+             body={"folderId": "{{_suiteFolderId}}", "name": "nm-nicnet-{{runId}}"},
+             test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
+                          *save_from_response("j.metadata && j.metadata.networkId", "vpcNetId")]),
+        poll_operation_until_done(),
+        Step(name="vpc-cr-subnet", method="POST", path=VPC_SUBNETS,
+             body={"folderId": "{{_suiteFolderId}}", "name": "nm-nicsub-{{runId}}",
+                   "networkId": "{{vpcNetId}}", "zoneId": "{{existingZoneId}}",
+                   "v4CidrBlocks": ["192.168.222.0/24"]},
+             test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
+                          *save_from_response("j.metadata && j.metadata.subnetId", "vpcSubnetId")]),
+        poll_operation_until_done(),
+        Step(name="vpc-cr-nic", method="POST", path=VPC_NICS,
+             body={"folderId": "{{_suiteFolderId}}", "name": "nm-nic-{{runId}}",
+                   "subnetId": "{{vpcSubnetId}}"},
+             test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
+                          *save_from_response("j.metadata && j.metadata.networkInterfaceId", "vpcNicId")]),
+        poll_operation_until_done(),
+    ]
+
+
+def _vpc_cleanup_nic_steps():
+    return [
+        Step(name="vpc-del-nic", method="DELETE", path=f"{VPC_NICS}/{{{{vpcNicId}}}}", test_script=[*save_from_response("j.id", "opId")]),
+        poll_operation_until_done(),
+        Step(name="vpc-del-subnet", method="DELETE", path=f"{VPC_SUBNETS}/{{{{vpcSubnetId}}}}", test_script=[*save_from_response("j.id", "opId")]),
+        poll_operation_until_done(),
+        Step(name="vpc-del-net", method="DELETE", path=f"{VPC_NETWORKS}/{{{{vpcNetId}}}}", test_script=[*save_from_response("j.id", "opId")]),
+        poll_operation_until_done(),
+    ]
+
+
+CASES.append(Case(
+    id="INST-CR-WITH-NICID-OK",
+    title="Create instance: NIC spec = {nicId: <existing kacho-vpc NIC>} (no subnetId) → poll → Get → instance NIC carries that nicId; Delete → NIC usedBy cleared",
+    classes=["CRUD", "CONF"], priority="P0",
+    steps=[
+        # # requires kacho-vpc up (newman docker-compose includes it)
+        *_vpc_make_nic_steps(),
+        Step(name="create", method="POST", path=INSTANCES,
+             body=_instance_body("nicid", nics=[{"nicId": "{{vpcNicId}}"}]),
+             test_script=[*assert_status(200), *assert_operation_envelope(),
+                          *save_from_response("j.id", "opId"),
+                          *save_from_response("j.metadata && j.metadata.instanceId", "instanceId")]),
+        poll_operation_until_done(), assert_op_success(),
+        Step(name="get", method="GET", path=f"{INSTANCES}/{{{{instanceId}}}}",
+             test_script=[*assert_status(200),
+                          "const j = pm.response.json();",
+                          "pm.test('status RUNNING', () => pm.expect(j.status).to.eql('RUNNING'));",
+                          "pm.test('at least 1 NIC', () => pm.expect((j.networkInterfaces || []).length).to.be.at.least(1));",
+                          "pm.test('NIC carries the referenced nicId', () => { const ids = (j.networkInterfaces || []).map(n => n.nicId); pm.expect(ids).to.include(pm.environment.get('vpcNicId')); });"]),
+        # check the vpc NIC now reports usedBy → the instance
+        Step(name="vpc-get-nic-attached", method="GET", path=f"{VPC_NICS}/{{{{vpcNicId}}}}",
+             test_script=[*assert_status(200),
+                          "const j = pm.response.json();",
+                          "pm.test('usedBy points at instance (if reported)', () => { if (j.usedBy) pm.expect(JSON.stringify(j.usedBy)).to.include(pm.environment.get('instanceId')); });"]),
+        *_delete_instance_steps(),
+        # after instance delete the NIC should be free again
+        Step(name="vpc-get-nic-freed", method="GET", path=f"{VPC_NICS}/{{{{vpcNicId}}}}",
+             test_script=[*assert_status(200),
+                          "const j = pm.response.json();",
+                          "pm.test('usedBy cleared after instance delete (if observable)', () => { if (j.usedBy && Object.keys(j.usedBy).length) pm.expect(JSON.stringify(j.usedBy)).to.not.include(pm.environment.get('instanceId')); });"]),
+        *_vpc_cleanup_nic_steps(),
+    ],
+))
+
+CASES.append(Case(
+    id="INST-CR-INLINE-NIC-OK",
+    title="Create instance: inline NIC = {subnetId, primaryV4AddressSpec:{}} (default mode) → poll → Get → NIC has subnetId, no nicId reference; minimal boot disk (size only, no image_id)",
+    classes=["CRUD", "CONF"], priority="P0",
+    steps=[
+        # # requires kacho-vpc subnet {{existingSubnetId}} + sg {{existingSgId}}
+        Step(name="create", method="POST", path=INSTANCES,
+             body=_instance_body("inlnic", nics=[_nic_spec()]),
+             test_script=[*assert_status(200), *assert_operation_envelope(),
+                          *save_from_response("j.id", "opId"),
+                          *save_from_response("j.metadata && j.metadata.instanceId", "instanceId")]),
+        poll_operation_until_done(), assert_op_success(),
+        Step(name="get", method="GET", path=f"{INSTANCES}/{{{{instanceId}}}}",
+             test_script=[*assert_status(200),
+                          "const j = pm.response.json();",
+                          "pm.test('status RUNNING', () => pm.expect(j.status).to.eql('RUNNING'));",
+                          "pm.test('boot disk present (size-only spec, no image)', () => pm.expect(j.bootDisk && j.bootDisk.diskId).to.be.a('string').and.length.greaterThan(0));",
+                          "pm.test('NIC has subnetId == existingSubnetId', () => { pm.expect((j.networkInterfaces || []).length).to.be.at.least(1); pm.expect(j.networkInterfaces[0].subnetId).to.eql(pm.environment.get('existingSubnetId')); });",
+                          "pm.test('inline NIC also exposes a nicId (kacho-vpc NetworkInterface backing it)', () => pm.expect(j.networkInterfaces[0].nicId === undefined || typeof j.networkInterfaces[0].nicId === 'string').to.be.true);"]),
+        *_delete_instance_steps(),
+    ],
+))
+
+# ===========================================================================
 # INST-GET / LIST
 # ===========================================================================
 

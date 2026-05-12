@@ -37,7 +37,7 @@ const PROGRESS = path.join(OUT, 'progress.tsv');
 const SUMMARY = path.join(OUT, 'summary.txt');
 const CLEANUP_EVERY = parseInt(process.env.CLEANUP_EVERY || '25', 10);
 const DELAY_REQUEST = parseInt(process.env.DELAY_REQUEST || '30', 10);
-const ALL_RESOURCES_DEFAULT = ['disk', 'image', 'snapshot', 'instance', 'disk-type', 'zone', 'operation'];
+const ALL_RESOURCES_DEFAULT = ['disk', 'image', 'snapshot', 'instance', 'disk-type', 'zone', 'region-zone', 'hypervisor', 'operation'];
 const ALL_RESOURCES = process.env.SERVICES ? process.env.SERVICES.split(/[\s,]+/).filter(Boolean) : ALL_RESOURCES_DEFAULT;
 
 const args = process.argv.slice(2);
