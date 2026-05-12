@@ -206,6 +206,7 @@ func attachedDisk(ad *domain.AttachedDisk) *computev1.AttachedDisk {
 func networkInterface(nic *domain.NetworkInterface) *computev1.NetworkInterface {
 	out := &computev1.NetworkInterface{
 		Index:            nic.Index,
+		NicId:            nic.NICID,
 		MacAddress:       nic.MACAddress,
 		SubnetId:         nic.SubnetID,
 		SecurityGroupIds: nic.SecurityGroupIDs,

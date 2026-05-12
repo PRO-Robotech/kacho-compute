@@ -187,6 +187,32 @@ type VPCAddress struct {
 	AddressID string
 }
 
+// CreateNICReq — параметры создания kacho-vpc NetworkInterface-ресурса
+// (vpc/v1.NetworkInterfaceService.Create) при Instance.Create. Адреса
+// передаются ссылками на уже созданные Address-ресурсы (V4AddressIDs).
+type CreateNICReq struct {
+	FolderID         string
+	Name             string
+	SubnetID         string
+	SecurityGroupIDs []string
+	V4AddressIDs     []string
+	InstanceID       string
+	Index            string
+}
+
+// NICInfo — denormalised mirror NIC-ресурса kacho-vpc (source of truth =
+// vpc.NetworkInterface): то, что compute показывает рядом с embedded NIC.
+type NICInfo struct {
+	ID               string
+	SubnetID         string
+	NetworkID        string
+	V4AddressIDs     []string
+	SecurityGroupIDs []string
+	InstanceID       string
+	Index            string
+	Status           string
+}
+
 // VPCClient — port для cross-service взаимодействия с kacho-vpc: валидация
 // NIC-spec (subnet / security group), IPAM-аллокация реальных IPv4 (создание
 // эфемерных Address-ресурсов через AddressService.Create, который inline
@@ -229,4 +255,19 @@ type VPCClient interface {
 	// reserved-адреса от ВМ (для эфемерных адресов referrer уходит через FK
 	// CASCADE при DeleteAddress).
 	ClearAddressReference(ctx context.Context, addressID string) error
+
+	// CreateNetworkInterface создаёт kacho-vpc NetworkInterface-ресурс
+	// (vpc/v1.NetworkInterfaceService.Create), поллит Operation и возвращает
+	// id созданного NIC (из Operation metadata `network_interface_id`).
+	CreateNetworkInterface(ctx context.Context, req CreateNICReq) (nicID string, err error)
+	// GetNetworkInterface возвращает (info, found, error) для существующего NIC.
+	GetNetworkInterface(ctx context.Context, nicID string) (info NICInfo, found bool, err error)
+	// AttachNetworkInterface привязывает существующий NIC к инстансу
+	// (vpc/v1.NetworkInterfaceService.AttachToInstance), поллит Operation.
+	AttachNetworkInterface(ctx context.Context, nicID, instanceID, index string) error
+	// DetachNetworkInterface отвязывает NIC от инстанса (best-effort, поллит Operation).
+	DetachNetworkInterface(ctx context.Context, nicID string) error
+	// DeleteNetworkInterface удаляет NIC-ресурс (best-effort: поллит Operation;
+	// NotFound = успех). При удалении NIC kacho-vpc освобождает его Address-ресурсы.
+	DeleteNetworkInterface(ctx context.Context, nicID string) error
 }

@@ -68,8 +68,14 @@ type OneToOneNat struct {
 // "" если IP задан клиентом вручную (тогда Address-ресурс не создаётся) либо
 // если IP синтетический (SKIP_PEER_VALIDATION). Непустой PrimaryV4AddressID
 // означает «эфемерный» Address — compute удалит его при teardown.
+// NICID — id связанного kacho-vpc NetworkInterface-ресурса (vpc.NetworkInterface;
+// эпик KAC-2). Пусто для legacy-NIC, созданных до KAC-9, и в SKIP_PEER_VALIDATION
+// (синтетический NIC без vpc-ресурса). Поля SubnetID/PrimaryV4Address/
+// SecurityGroupIDs становятся read-only denormalised mirror NIC-ресурса (source of
+// truth = kacho-vpc) когда NICID непуст.
 type NetworkInterface struct {
 	Index              string
+	NICID              string
 	MACAddress         string
 	SubnetID           string
 	PrimaryV4Address   string

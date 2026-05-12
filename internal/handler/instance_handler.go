@@ -412,6 +412,7 @@ func diskSourceFromSpec(s *computev1.AttachedDiskSpec) svc.DiskSourceSpec {
 func nicSpecFromProto(n *computev1.NetworkInterfaceSpec) svc.NICSpec {
 	out := svc.NICSpec{
 		SubnetID:         n.GetSubnetId(),
+		NicID:            n.GetNicId(),
 		Index:            n.GetIndex(),
 		SecurityGroupIDs: n.GetSecurityGroupIds(),
 	}

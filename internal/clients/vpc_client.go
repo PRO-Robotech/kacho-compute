@@ -44,6 +44,7 @@ type VPCClient struct {
 	subnets       vpcv1.SubnetServiceClient
 	sgs           vpcv1.SecurityGroupServiceClient
 	addrs         vpcv1.AddressServiceClient
+	nics          vpcv1.NetworkInterfaceServiceClient
 	ops           operationv1.OperationServiceClient
 	internalAddrs vpcv1.InternalAddressServiceClient
 }
@@ -55,6 +56,7 @@ func NewVPCClient(conn, internalConn *grpc.ClientConn) *VPCClient {
 		subnets:       vpcv1.NewSubnetServiceClient(conn),
 		sgs:           vpcv1.NewSecurityGroupServiceClient(conn),
 		addrs:         vpcv1.NewAddressServiceClient(conn),
+		nics:          vpcv1.NewNetworkInterfaceServiceClient(conn),
 		ops:           operationv1.NewOperationServiceClient(conn),
 		internalAddrs: vpcv1.NewInternalAddressServiceClient(internalConn),
 	}
@@ -258,6 +260,149 @@ func (c *VPCClient) MarkAddressEphemeralInUse(ctx context.Context, addressID, re
 	})
 }
 
+// CreateNetworkInterface создаёт kacho-vpc NetworkInterface-ресурс
+// (NetworkInterfaceService.Create), поллит Operation и возвращает id созданного
+// NIC (из Operation metadata `network_interface_id`).
+func (c *VPCClient) CreateNetworkInterface(ctx context.Context, req service.CreateNICReq) (string, error) {
+	var op *operationv1.Operation
+	if err := retry.OnUnavailable(ctx, func(ctx context.Context) error {
+		var rerr error
+		op, rerr = c.nics.Create(ctx, &vpcv1.CreateNetworkInterfaceRequest{
+			FolderId:         req.FolderID,
+			Name:             req.Name,
+			SubnetId:         req.SubnetID,
+			SecurityGroupIds: req.SecurityGroupIDs,
+			V4AddressIds:     req.V4AddressIDs,
+			InstanceId:       req.InstanceID,
+			Index:            req.Index,
+		})
+		return rerr
+	}); err != nil {
+		return "", err
+	}
+	// The created NIC id is in the operation metadata (CreateNetworkInterfaceMetadata).
+	nicID := networkInterfaceIDFromMetadata(op.GetMetadata())
+	if _, err := c.waitOperation(ctx, op); err != nil {
+		return "", err
+	}
+	if nicID == "" {
+		return "", fmt.Errorf("vpc create network interface operation %s returned no network_interface_id", op.GetId())
+	}
+	return nicID, nil
+}
+
+// GetNetworkInterface возвращает (info, found, error) для существующего NIC.
+func (c *VPCClient) GetNetworkInterface(ctx context.Context, nicID string) (service.NICInfo, bool, error) {
+	var info service.NICInfo
+	var found bool
+	err := retry.OnUnavailable(ctx, func(ctx context.Context) error {
+		ni, rerr := c.nics.Get(ctx, &vpcv1.GetNetworkInterfaceRequest{NetworkInterfaceId: nicID})
+		if rerr != nil {
+			if st, ok := status.FromError(rerr); ok && st.Code() == codes.NotFound {
+				found = false
+				return nil
+			}
+			return rerr
+		}
+		found = true
+		info = service.NICInfo{
+			ID:               ni.GetId(),
+			SubnetID:         ni.GetSubnetId(),
+			NetworkID:        ni.GetNetworkId(),
+			V4AddressIDs:     ni.GetV4AddressIds(),
+			SecurityGroupIDs: ni.GetSecurityGroupIds(),
+			InstanceID:       ni.GetInstanceId(),
+			Index:            ni.GetIndex(),
+			Status:           ni.GetStatus().String(),
+		}
+		return nil
+	})
+	if err != nil {
+		return service.NICInfo{}, false, err
+	}
+	return info, found, nil
+}
+
+// AttachNetworkInterface привязывает NIC к инстансу (поллит Operation).
+func (c *VPCClient) AttachNetworkInterface(ctx context.Context, nicID, instanceID, index string) error {
+	return c.runNICOp(ctx, func(ctx context.Context) (*operationv1.Operation, error) {
+		return c.nics.AttachToInstance(ctx, &vpcv1.AttachNetworkInterfaceRequest{
+			NetworkInterfaceId: nicID, InstanceId: instanceID, Index: index,
+		})
+	})
+}
+
+// DetachNetworkInterface отвязывает NIC от инстанса (best-effort; NotFound = успех).
+func (c *VPCClient) DetachNetworkInterface(ctx context.Context, nicID string) error {
+	return c.runNICOpTolerant(ctx, func(ctx context.Context) (*operationv1.Operation, error) {
+		return c.nics.DetachFromInstance(ctx, &vpcv1.DetachNetworkInterfaceRequest{NetworkInterfaceId: nicID})
+	})
+}
+
+// DeleteNetworkInterface удаляет NIC-ресурс (best-effort; NotFound = успех).
+func (c *VPCClient) DeleteNetworkInterface(ctx context.Context, nicID string) error {
+	return c.runNICOpTolerant(ctx, func(ctx context.Context) (*operationv1.Operation, error) {
+		return c.nics.Delete(ctx, &vpcv1.DeleteNetworkInterfaceRequest{NetworkInterfaceId: nicID})
+	})
+}
+
+// runNICOp вызывает NIC-RPC, поллит Operation. NotFound на вызове — ошибка.
+func (c *VPCClient) runNICOp(ctx context.Context, call func(context.Context) (*operationv1.Operation, error)) error {
+	var op *operationv1.Operation
+	if err := retry.OnUnavailable(ctx, func(ctx context.Context) error {
+		var rerr error
+		op, rerr = call(ctx)
+		return rerr
+	}); err != nil {
+		return err
+	}
+	_, err := c.waitOperation(ctx, op)
+	return err
+}
+
+// runNICOpTolerant — как runNICOp, но NotFound (на вызове или при ожидании
+// Operation) трактуется как успех (ресурс уже отвязан/удалён).
+func (c *VPCClient) runNICOpTolerant(ctx context.Context, call func(context.Context) (*operationv1.Operation, error)) error {
+	var op *operationv1.Operation
+	if err := retry.OnUnavailable(ctx, func(ctx context.Context) error {
+		var rerr error
+		op, rerr = call(ctx)
+		if rerr != nil {
+			if st, ok := status.FromError(rerr); ok && st.Code() == codes.NotFound {
+				op = nil
+				return nil
+			}
+			return rerr
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if op == nil {
+		return nil
+	}
+	if _, err := c.waitOperation(ctx, op); err != nil {
+		if st, ok := status.FromError(err); ok && st.Code() == codes.NotFound {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+// networkInterfaceIDFromMetadata извлекает network_interface_id из
+// CreateNetworkInterfaceMetadata (Operation.metadata). "" если не получилось.
+func networkInterfaceIDFromMetadata(meta *anypb.Any) string {
+	if meta == nil {
+		return ""
+	}
+	m := &vpcv1.CreateNetworkInterfaceMetadata{}
+	if err := meta.UnmarshalTo(m); err != nil {
+		return ""
+	}
+	return m.GetNetworkInterfaceId()
+}
+
 // createAddressAndWait вызывает AddressService.Create, поллит Operation до
 // завершения и читает созданный Address (Operation.response — Address).
 func (c *VPCClient) createAddressAndWait(ctx context.Context, req *vpcv1.CreateAddressRequest) (*vpcv1.Address, error) {
@@ -367,3 +512,23 @@ func (NoopVPCClient) ClearAddressReference(_ context.Context, _ string) error { 
 func (NoopVPCClient) MarkAddressEphemeralInUse(_ context.Context, _, _, _, _ string) error {
 	return nil
 }
+
+// CreateNetworkInterface возвращает ошибку — в SKIP_PEER_VALIDATION-режиме
+// instance.go не создаёт kacho-vpc NIC (синтетический NIC без vpc-ресурса).
+func (NoopVPCClient) CreateNetworkInterface(_ context.Context, _ service.CreateNICReq) (string, error) {
+	return "", fmt.Errorf("vpc network interface management disabled (SKIP_PEER_VALIDATION)")
+}
+
+// GetNetworkInterface возвращает (zero, true, nil) — NIC считается существующим.
+func (NoopVPCClient) GetNetworkInterface(_ context.Context, nicID string) (service.NICInfo, bool, error) {
+	return service.NICInfo{ID: nicID}, true, nil
+}
+
+// AttachNetworkInterface — no-op.
+func (NoopVPCClient) AttachNetworkInterface(_ context.Context, _, _, _ string) error { return nil }
+
+// DetachNetworkInterface — no-op.
+func (NoopVPCClient) DetachNetworkInterface(_ context.Context, _ string) error { return nil }
+
+// DeleteNetworkInterface — no-op.
+func (NoopVPCClient) DeleteNetworkInterface(_ context.Context, _ string) error { return nil }

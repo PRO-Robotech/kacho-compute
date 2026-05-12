@@ -813,10 +813,24 @@ type VPCClient struct {
 	// набор ru-central1-{a,b,d}. Ключ — zone id, значение — region id.
 	Zones map[string]string
 
+	// NICInstanceID — InstanceId, который вернёт GetNetworkInterface (имитация
+	// «NIC уже приаттачен к этому инстансу»); "" = detached. NICFound — found
+	// для GetNetworkInterface (по умолчанию false; задаётся явно в тестах).
+	NICFound      bool
+	NICInstanceID string
+	NICSubnetID   string
+
 	mu             sync.Mutex
 	addrSeq        int
+	nicSeq         int
 	CreatedAddrIDs []string
 	DeletedAddrIDs []string
+	// CreatedNICIDs / AttachedNICIDs / DetachedNICIDs / DeletedNICIDs —
+	// протоколируют вызовы NIC-management методов для проверки в тестах.
+	CreatedNICIDs  []string
+	AttachedNICIDs []string
+	DetachedNICIDs []string
+	DeletedNICIDs  []string
 	// SetRefs — addressID → referrerID, протоколирует SetAddressReference.
 	// MarkedEphemeral — addressID → referrerID, протоколирует
 	// MarkAddressEphemeralInUse (reserved=false, used=true + referrer).
@@ -941,6 +955,45 @@ func (c *VPCClient) ClearAddressReference(_ context.Context, addressID string) e
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.ClearedRefs = append(c.ClearedRefs, addressID)
+	return nil
+}
+
+// CreateNetworkInterface возвращает синтетический NIC id и протоколирует его.
+func (c *VPCClient) CreateNetworkInterface(_ context.Context, _ ports.CreateNICReq) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.nicSeq++
+	id := fmt.Sprintf("enpfakenic%08d", c.nicSeq)
+	c.CreatedNICIDs = append(c.CreatedNICIDs, id)
+	return id, nil
+}
+
+// GetNetworkInterface возвращает ({nicID, NICSubnetID, NICInstanceID}, NICFound, nil).
+func (c *VPCClient) GetNetworkInterface(_ context.Context, nicID string) (ports.NICInfo, bool, error) {
+	return ports.NICInfo{ID: nicID, SubnetID: c.NICSubnetID, InstanceID: c.NICInstanceID}, c.NICFound, nil
+}
+
+// AttachNetworkInterface протоколирует nicID и возвращает nil.
+func (c *VPCClient) AttachNetworkInterface(_ context.Context, nicID, _, _ string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.AttachedNICIDs = append(c.AttachedNICIDs, nicID)
+	return nil
+}
+
+// DetachNetworkInterface протоколирует nicID и возвращает nil.
+func (c *VPCClient) DetachNetworkInterface(_ context.Context, nicID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.DetachedNICIDs = append(c.DetachedNICIDs, nicID)
+	return nil
+}
+
+// DeleteNetworkInterface протоколирует nicID и возвращает nil.
+func (c *VPCClient) DeleteNetworkInterface(_ context.Context, nicID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.DeletedNICIDs = append(c.DeletedNICIDs, nicID)
 	return nil
 }
 

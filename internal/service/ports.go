@@ -48,6 +48,10 @@ type (
 	SubnetInfo = ports.SubnetInfo
 	// VPCAddress — выделенный IP-адрес VPC (IP + id Address-ресурса).
 	VPCAddress = ports.VPCAddress
+	// CreateNICReq — параметры создания kacho-vpc NetworkInterface-ресурса.
+	CreateNICReq = ports.CreateNICReq
+	// NICInfo — denorm mirror NIC-ресурса kacho-vpc (source of truth = vpc.NetworkInterface).
+	NICInfo = ports.NICInfo
 	// ZoneInfo — минимальные данные о зоне (id + region).
 	ZoneInfo = ports.ZoneInfo
 	// ZoneRegistry — port existence-check zone_id (Disk/Instance Create, Disk Relocate).
