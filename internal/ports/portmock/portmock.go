@@ -1086,18 +1086,111 @@ func AwaitAllOpsDone(t TestingT, r *OpsRepo) {
 	}
 }
 
+// ---- HypervisorRepo ----
+
+// HypervisorRepo — in-memory HypervisorRepo. nextIdx — следующий node_index;
+// freed — возвращённые во free-list.
+type HypervisorRepo struct {
+	mu      sync.Mutex
+	data    map[string]*domain.Hypervisor
+	nextIdx uint32
+	freed   []uint32
+}
+
+// NewHypervisorRepo создаёт пустой HypervisorRepo (node_index с 0).
+func NewHypervisorRepo() *HypervisorRepo {
+	return &HypervisorRepo{data: make(map[string]*domain.Hypervisor)}
+}
+
+func (r *HypervisorRepo) allocIdx() uint32 {
+	if n := len(r.freed); n > 0 {
+		idx := r.freed[0]
+		r.freed = r.freed[1:]
+		return idx
+	}
+	idx := r.nextIdx
+	r.nextIdx++
+	return idx
+}
+
+// Get возвращает хост по id.
+func (r *HypervisorRepo) Get(_ context.Context, id string) (*domain.Hypervisor, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	h, ok := r.data[id]
+	if !ok {
+		return nil, ports.ErrNotFound
+	}
+	return h, nil
+}
+
+// List возвращает хосты (опц. фильтр по зоне/состоянию; без пагинации в mock'е).
+func (r *HypervisorRepo) List(_ context.Context, zoneID string, state domain.HypervisorState, _ ports.Pagination) ([]*domain.Hypervisor, string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*domain.Hypervisor
+	for _, h := range r.data {
+		if zoneID != "" && h.ZoneID != zoneID {
+			continue
+		}
+		if state != domain.HypervisorStateUnspecified && h.State != state {
+			continue
+		}
+		out = append(out, h)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, "", nil
+}
+
+// Insert вставляет хост, присваивая node_index.
+func (r *HypervisorRepo) Insert(_ context.Context, h *domain.Hypervisor) (*domain.Hypervisor, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.data[h.ID]; ok {
+		return nil, ports.ErrAlreadyExists
+	}
+	h.NodeIndex = r.allocIdx()
+	r.data[h.ID] = h
+	return h, nil
+}
+
+// Update обновляет state/capacity хоста.
+func (r *HypervisorRepo) Update(_ context.Context, h *domain.Hypervisor) (*domain.Hypervisor, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.data[h.ID]; !ok {
+		return nil, ports.ErrNotFound
+	}
+	r.data[h.ID] = h
+	return h, nil
+}
+
+// Delete снимает хост с регистрации, возвращает node_index во free-list.
+func (r *HypervisorRepo) Delete(_ context.Context, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	h, ok := r.data[id]
+	if !ok {
+		return ports.ErrNotFound
+	}
+	r.freed = append(r.freed, h.NodeIndex)
+	delete(r.data, id)
+	return nil
+}
+
 // Compile-time проверки соответствия port-интерфейсам.
 var (
-	_ ports.DiskRepo     = (*DiskRepo)(nil)
-	_ ports.ImageRepo    = (*ImageRepo)(nil)
-	_ ports.SnapshotRepo = (*SnapshotRepo)(nil)
-	_ ports.InstanceRepo = (*InstanceRepo)(nil)
-	_ ports.DiskTypeRepo = (*DiskTypeRepo)(nil)
-	_ ports.ZoneRepo     = (*ZoneRepo)(nil)
-	_ ports.ZoneSource   = (*ZoneRepo)(nil)
-	_ ports.ZoneRegistry = (*VPCClient)(nil)
-	_ ports.RegionRepo   = (*RegionRepo)(nil)
-	_ ports.FolderClient = (*FolderClient)(nil)
-	_ ports.VPCClient    = (*VPCClient)(nil)
-	_ operations.Repo    = (*OpsRepo)(nil)
+	_ ports.DiskRepo       = (*DiskRepo)(nil)
+	_ ports.ImageRepo      = (*ImageRepo)(nil)
+	_ ports.SnapshotRepo   = (*SnapshotRepo)(nil)
+	_ ports.InstanceRepo   = (*InstanceRepo)(nil)
+	_ ports.DiskTypeRepo   = (*DiskTypeRepo)(nil)
+	_ ports.ZoneRepo       = (*ZoneRepo)(nil)
+	_ ports.ZoneSource     = (*ZoneRepo)(nil)
+	_ ports.ZoneRegistry   = (*VPCClient)(nil)
+	_ ports.RegionRepo     = (*RegionRepo)(nil)
+	_ ports.HypervisorRepo = (*HypervisorRepo)(nil)
+	_ ports.FolderClient   = (*FolderClient)(nil)
+	_ ports.VPCClient      = (*VPCClient)(nil)
+	_ operations.Repo      = (*OpsRepo)(nil)
 )
