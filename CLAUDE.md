@@ -75,8 +75,18 @@ timestamp precision, regex'ы, behavioural semantics, state-машина Instanc
   (VPC: subnet_id / security_group_id / address; resource-manager: folder_id).
 - **DiskType** — Get / List (read-only справочник; seed: `network-hdd`,
   `network-ssd`, `network-ssd-nonreplicated`, `network-ssd-io-m3`).
-- **Zone** — Get / List (read-only; seed зеркалит kacho-vpc zones:
-  `ru-central1-a`, `ru-central1-b`, `ru-central1-d`).
+- **Region / Zone** — Get / List (read-only публичный справочник). ⚠️ **kacho-compute —
+  owner Geography** (эпик `KAC-15`: перенесено из kacho-vpc; см. workspace CLAUDE.md
+  §«Кросс-доменные ссылки на ресурсы» / §«Карта владельцев доменов»). Схема `kacho_compute`
+  держит таблицы `regions`(`id,name,created_at`) и `zones`(`id,region_id,name,status,created_at`),
+  seed (`ru-central1` + `ru-central1-{a,b,d}`) — в миграции. **Никакого proxy в kacho-vpc** и
+  `skipPeer`-fallback больше нет — compute читает зоны из своей таблицы; `disk_types.zone_ids`,
+  `Disk.zone_id`, `Instance.zone_id` валидируются локально. Другие сервисы (kacho-vpc — `Subnet.zone_id`,
+  `AddressPool.zone_id`, `Address.zone_id`) валидируют `zone_id` вызовом нашего `ZoneService.Get`.
+  Admin-CRUD — `InternalRegionService`/`InternalZoneService` (порт 9091, `/compute/v1/regions`,
+  `/compute/v1/zones`). `Region.Delete` блокируется (FK RESTRICT) если есть `zones`; `Zone.Delete`
+  проверяет своих dependents (instances/disks/disk_types); кросс-сервисных dependents (vpc-подсети) НЕ
+  проверяет — admin-ответственность. (До merge'а KAC-15 — старое: seed-mirror `zones`, proxy в vpc.)
 - **OperationService** — Get / Cancel (per-сервисная таблица `operations`,
   prefix `epd`).
 - Internal endpoints (порт 9091, не выставляется на external TLS endpoint):
