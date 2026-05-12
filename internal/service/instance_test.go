@@ -438,6 +438,68 @@ func TestInstance_Create_ReservedNatAddress_SetsAndClearsReference(t *testing.T)
 	require.Contains(t, vpc.ClearedRefs, reservedAddrID)
 }
 
+func TestInstance_Create_CreatesVPCNetworkInterface(t *testing.T) {
+	vpc := &portmock.VPCClient{SubnetFound: true, SubnetCidrBlocks: []string{"10.123.0.0/24"}, SGFound: true, InternalIP: "10.123.0.7"}
+	svc, repo, _, ops := newInstanceSvcVPC(t, vpc)
+	req := baseCreateReq()
+	req.NICs = []NICSpec{{SubnetID: "e9bsubnet"}}
+	op, err := svc.Create(context.Background(), req)
+	require.NoError(t, err)
+	in := instanceFromOp(t, portmock.AwaitOpDone(t, ops, op.ID))
+	require.Len(t, in.NetworkInterfaces, 1)
+	require.NotEmpty(t, in.NetworkInterfaces[0].NicId)
+	require.Len(t, vpc.CreatedNICIDs, 1)
+	require.Equal(t, vpc.CreatedNICIDs[0], in.NetworkInterfaces[0].NicId)
+	stored, err := repo.Get(context.Background(), in.Id)
+	require.NoError(t, err)
+	require.Equal(t, vpc.CreatedNICIDs[0], stored.NetworkInterfaces[0].NICID)
+
+	// Delete → the kacho-vpc NIC is detached + deleted.
+	op, err = svc.Delete(context.Background(), in.Id)
+	require.NoError(t, err)
+	require.Nil(t, portmock.AwaitOpDone(t, ops, op.ID).Error)
+	require.Contains(t, vpc.DetachedNICIDs, vpc.CreatedNICIDs[0])
+	require.Contains(t, vpc.DeletedNICIDs, vpc.CreatedNICIDs[0])
+}
+
+func TestInstance_Create_AttachesExistingNICByID(t *testing.T) {
+	vpc := &portmock.VPCClient{SubnetFound: true, SGFound: true, NICFound: true, NICSubnetID: "e9bsubnet"}
+	svc, repo, _, ops := newInstanceSvcVPC(t, vpc)
+	req := baseCreateReq()
+	req.NICs = []NICSpec{{NicID: "enpexistingnic01"}}
+	op, err := svc.Create(context.Background(), req)
+	require.NoError(t, err)
+	in := instanceFromOp(t, portmock.AwaitOpDone(t, ops, op.ID))
+	require.Equal(t, "enpexistingnic01", in.NetworkInterfaces[0].NicId)
+	require.Equal(t, "e9bsubnet", in.NetworkInterfaces[0].SubnetId) // denorm mirror
+	require.Contains(t, vpc.AttachedNICIDs, "enpexistingnic01")
+	require.Empty(t, vpc.CreatedNICIDs) // attached an existing one, not created
+	stored, err := repo.Get(context.Background(), in.Id)
+	require.NoError(t, err)
+	require.Equal(t, "enpexistingnic01", stored.NetworkInterfaces[0].NICID)
+}
+
+func TestInstance_Create_AttachExistingNIC_NotFound(t *testing.T) {
+	vpc := &portmock.VPCClient{SubnetFound: true, SGFound: true, NICFound: false}
+	svc, _, _, ops := newInstanceSvcVPC(t, vpc)
+	req := baseCreateReq()
+	req.NICs = []NICSpec{{NicID: "enpmissingnic01"}}
+	op, err := svc.Create(context.Background(), req)
+	require.NoError(t, err)
+	done := portmock.AwaitOpDone(t, ops, op.ID)
+	require.NotNil(t, done.Error)
+	require.Equal(t, int32(codes.NotFound), done.Error.Code)
+}
+
+func TestInstance_Create_NicSpec_BothSubnetAndNicID(t *testing.T) {
+	svc, _, _, _, _ := newInstanceSvc(t, true)
+	req := baseCreateReq()
+	req.NICs = []NICSpec{{SubnetID: "e9bsubnet", NicID: "enpnic01"}}
+	_, err := svc.Create(context.Background(), req)
+	require.Error(t, err)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
 func TestInstance_AddRemoveNAT_MarksEphemeralInUseAndDeletes(t *testing.T) {
 	vpc := &portmock.VPCClient{SubnetFound: true, SGFound: true, ExternalIP: "198.51.100.77"}
 	svc, repo, _, ops := newInstanceSvcVPC(t, vpc)
