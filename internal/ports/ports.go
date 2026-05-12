@@ -124,30 +124,39 @@ type ZoneRepo interface {
 	Delete(ctx context.Context, id string) error
 }
 
+// RegionRepo — port-интерфейс репозитория регионов (read + admin CRUD).
+// kacho-compute — owner Geography (Region/Zone); см. workspace CLAUDE.md
+// §«Кросс-доменные ссылки на ресурсы».
+type RegionRepo interface {
+	Get(ctx context.Context, id string) (*domain.Region, error)
+	List(ctx context.Context, p Pagination) ([]*domain.Region, string, error)
+	Insert(ctx context.Context, r *domain.Region) (*domain.Region, error)
+	Update(ctx context.Context, r *domain.Region) (*domain.Region, error)
+	Delete(ctx context.Context, id string) error
+	// CountZones — сколько зон ссылаются на этот регион (для delete-RESTRICT).
+	CountZones(ctx context.Context, regionID string) (int, error)
+}
+
 // FolderClient — port для проверки существования Folder в kacho-resource-manager.
 type FolderClient interface {
 	Exists(ctx context.Context, folderID string) (bool, error)
 }
 
-// ZoneInfo — минимальные данные о зоне, нужные compute'у: id + region. Зеркалит
-// vpcv1.Zone (у kacho-vpc нет zone-status — compute всегда репортит Zone_UP).
+// ZoneInfo — минимальные данные о зоне, нужные compute'у: id + region.
 type ZoneInfo struct {
 	ID       string
 	RegionID string
 }
 
 // ZoneRegistry — port для existence-check zone_id в Disk.Create / Instance.Create
-// (и Disk.Relocate). На данный момент авторитетный источник зон — kacho-vpc
-// InternalZoneService (реализуется VPCClient); локальная таблица `zones`
-// используется как fallback только при KACHO_COMPUTE_SKIP_PEER_VALIDATION=true.
-// GetZone возвращает ErrNotFound, если зона неизвестна.
+// (и Disk.Relocate). Реализуется поверх локальной таблицы `zones` (kacho-compute
+// — owner Geography). GetZone возвращает ErrNotFound, если зона неизвестна.
 type ZoneRegistry interface {
 	GetZone(ctx context.Context, zoneID string) (ZoneInfo, error)
 }
 
-// ZoneSource — port для публичного ZoneService.Get/List. Авторитетный источник —
-// kacho-vpc InternalZoneService (VPCClient); локальная таблица `zones` — fallback
-// при SKIP_PEER_VALIDATION. GetZone → ErrNotFound при неизвестной зоне.
+// ZoneSource — port для публичного ZoneService.Get/List. Реализуется поверх
+// локальной таблицы `zones`. GetZone → ErrNotFound при неизвестной зоне.
 type ZoneSource interface {
 	ZoneRegistry
 	ListZones(ctx context.Context, pageSize int64, pageToken string) (zones []ZoneInfo, nextPageToken string, err error)
@@ -210,7 +219,4 @@ type VPCClient interface {
 	// reserved-адреса от ВМ (для эфемерных адресов referrer уходит через FK
 	// CASCADE при DeleteAddress).
 	ClearAddressReference(ctx context.Context, addressID string) error
-	// ZoneSource — kacho-vpc InternalZoneService (на internal-порту :9091) —
-	// авторитетный источник справочника зон для compute (Get/List + existence-check).
-	ZoneSource
 }

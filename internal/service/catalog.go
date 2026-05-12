@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -82,80 +81,44 @@ func (s *DiskTypeService) Delete(ctx context.Context, id string) error {
 
 // ---- ZoneService (read-only public + admin CRUD через Internal* handler) ----
 
-// ZoneService — read-доступ к справочнику зон (Get/List). На данный момент
-// авторитетный источник зон — kacho-vpc InternalZoneService (compute зон не
-// владеет): Get/List проксируются туда через `source` (ZoneSource). Локальная
-// таблица `zones` (`repo`) — fallback, используется только при
-// KACHO_COMPUTE_SKIP_PEER_VALIDATION=true (unit/newman без поднятого kacho-vpc).
-// Admin-CRUD (`Create/Update/Delete` ниже, через InternalZoneService-handler)
-// всегда работает с локальной таблицей `zones` — т.е. с fallback'ом.
+// ZoneService — доступ к справочнику зон. kacho-compute — owner Geography
+// (Region/Zone), поэтому Get/List/Create/Update/Delete работают напрямую с
+// локальной таблицей `zones` (никакого proxy в kacho-vpc). Другие сервисы
+// валидируют zone_id вызовом ZoneService.Get. См. workspace CLAUDE.md
+// §«Кросс-доменные ссылки на ресурсы».
 type ZoneService struct {
-	repo     ZoneRepo
-	source   ZoneSource
-	skipPeer bool
+	repo ZoneRepo
 }
 
-// NewZoneService создаёт ZoneService. repo — локальная таблица `zones`
-// (fallback); source — kacho-vpc InternalZoneService (VPCClient); skipPeer ==
-// cfg.SkipPeerValidation: true → Get/List читают из `repo`, иначе → из `source`.
-func NewZoneService(repo ZoneRepo, source ZoneSource, skipPeer bool) *ZoneService {
-	return &ZoneService{repo: repo, source: source, skipPeer: skipPeer}
-}
+// NewZoneService создаёт ZoneService поверх локальной таблицы `zones`.
+func NewZoneService(repo ZoneRepo) *ZoneService { return &ZoneService{repo: repo} }
 
-// Get возвращает Zone по id (из kacho-vpc, либо из локальной таблицы при skipPeer).
+// Get возвращает Zone по id.
 func (s *ZoneService) Get(ctx context.Context, id string) (*domain.Zone, error) {
 	if id == "" {
 		return nil, status.Error(codes.InvalidArgument, "zone_id required")
 	}
-	if s.skipPeer {
-		z, err := s.repo.Get(ctx, id)
-		if err != nil {
-			return nil, mapRepoErr(err)
-		}
-		return z, nil
-	}
-	info, err := s.source.GetZone(ctx, id)
+	z, err := s.repo.Get(ctx, id)
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return nil, status.Errorf(codes.NotFound, "Zone %s not found", id)
-		}
 		return nil, mapRepoErr(err)
 	}
-	return zoneFromInfo(info), nil
+	return z, nil
 }
 
-// List возвращает зоны (из kacho-vpc, либо из локальной таблицы при skipPeer).
+// List возвращает зоны.
 func (s *ZoneService) List(ctx context.Context, p Pagination) ([]*domain.Zone, string, error) {
-	pageSize, err := corevalidate.PageSize("page_size", p.PageSize)
-	if err != nil {
+	if _, err := corevalidate.PageSize("page_size", p.PageSize); err != nil {
 		return nil, "", err
 	}
-	if s.skipPeer {
-		return s.repo.List(ctx, p)
-	}
-	infos, next, err := s.source.ListZones(ctx, pageSize, p.PageToken)
-	if err != nil {
-		return nil, "", mapRepoErr(err)
-	}
-	out := make([]*domain.Zone, 0, len(infos))
-	for _, info := range infos {
-		out = append(out, zoneFromInfo(info))
-	}
-	return out, next, nil
-}
-
-// zoneFromInfo строит domain.Zone из ZoneInfo. kacho-vpc не трекает zone-status
-// → compute всегда репортит ZoneStatusUp (== computev1.Zone_UP).
-func zoneFromInfo(info ZoneInfo) *domain.Zone {
-	return &domain.Zone{ID: info.ID, RegionID: info.RegionID, Status: domain.ZoneStatusUp}
+	return s.repo.List(ctx, p)
 }
 
 // Create создаёт зону (admin-only).
-func (s *ZoneService) Create(ctx context.Context, id, regionID string, st domain.ZoneStatus) (*domain.Zone, error) {
+func (s *ZoneService) Create(ctx context.Context, id, regionID, name string, st domain.ZoneStatus) (*domain.Zone, error) {
 	if id == "" {
 		return nil, status.Error(codes.InvalidArgument, "id required")
 	}
-	z, err := s.repo.Insert(ctx, &domain.Zone{ID: id, RegionID: regionID, Status: st})
+	z, err := s.repo.Insert(ctx, &domain.Zone{ID: id, RegionID: regionID, Name: name, Status: st})
 	if err != nil {
 		return nil, mapRepoErr(err)
 	}
@@ -163,7 +126,7 @@ func (s *ZoneService) Create(ctx context.Context, id, regionID string, st domain
 }
 
 // Update обновляет зону (admin-only).
-func (s *ZoneService) Update(ctx context.Context, id, regionID string, st domain.ZoneStatus) (*domain.Zone, error) {
+func (s *ZoneService) Update(ctx context.Context, id, regionID, name string, st domain.ZoneStatus) (*domain.Zone, error) {
 	if id == "" {
 		return nil, status.Error(codes.InvalidArgument, "zone_id required")
 	}
@@ -173,6 +136,9 @@ func (s *ZoneService) Update(ctx context.Context, id, regionID string, st domain
 	}
 	if regionID != "" {
 		z.RegionID = regionID
+	}
+	if name != "" {
+		z.Name = name
 	}
 	z.Status = st
 	updated, err := s.repo.Update(ctx, z)
@@ -186,6 +152,82 @@ func (s *ZoneService) Update(ctx context.Context, id, regionID string, st domain
 func (s *ZoneService) Delete(ctx context.Context, id string) error {
 	if id == "" {
 		return status.Error(codes.InvalidArgument, "zone_id required")
+	}
+	if err := s.repo.Delete(ctx, id); err != nil {
+		return mapRepoErr(err)
+	}
+	return nil
+}
+
+// ---- RegionService (read-only public + admin CRUD через Internal* handler) ----
+
+// RegionService — доступ к справочнику регионов. kacho-compute — owner Geography.
+type RegionService struct {
+	repo RegionRepo
+}
+
+// NewRegionService создаёт RegionService поверх локальной таблицы `regions`.
+func NewRegionService(repo RegionRepo) *RegionService { return &RegionService{repo: repo} }
+
+// Get возвращает Region по id.
+func (s *RegionService) Get(ctx context.Context, id string) (*domain.Region, error) {
+	if id == "" {
+		return nil, status.Error(codes.InvalidArgument, "region_id required")
+	}
+	r, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return nil, mapRepoErr(err)
+	}
+	return r, nil
+}
+
+// List возвращает регионы.
+func (s *RegionService) List(ctx context.Context, p Pagination) ([]*domain.Region, string, error) {
+	if _, err := corevalidate.PageSize("page_size", p.PageSize); err != nil {
+		return nil, "", err
+	}
+	return s.repo.List(ctx, p)
+}
+
+// Create создаёт регион (admin-only).
+func (s *RegionService) Create(ctx context.Context, id, name string) (*domain.Region, error) {
+	if id == "" {
+		return nil, status.Error(codes.InvalidArgument, "id required")
+	}
+	r, err := s.repo.Insert(ctx, &domain.Region{ID: id, Name: name})
+	if err != nil {
+		return nil, mapRepoErr(err)
+	}
+	return r, nil
+}
+
+// Update обновляет регион (admin-only).
+func (s *RegionService) Update(ctx context.Context, id, name string) (*domain.Region, error) {
+	if id == "" {
+		return nil, status.Error(codes.InvalidArgument, "region_id required")
+	}
+	r, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return nil, mapRepoErr(err)
+	}
+	if name != "" {
+		r.Name = name
+	}
+	updated, err := s.repo.Update(ctx, r)
+	if err != nil {
+		return nil, mapRepoErr(err)
+	}
+	return updated, nil
+}
+
+// Delete удаляет регион (admin-only). Блокируется, если у региона есть зоны
+// (FailedPrecondition; на уровне БД защищено FK RESTRICT zones→regions).
+func (s *RegionService) Delete(ctx context.Context, id string) error {
+	if id == "" {
+		return status.Error(codes.InvalidArgument, "region_id required")
+	}
+	if n, err := s.repo.CountZones(ctx, id); err == nil && n > 0 {
+		return status.Errorf(codes.FailedPrecondition, "region %s has %d zone(s); delete the zones first", id, n)
 	}
 	if err := s.repo.Delete(ctx, id); err != nil {
 		return mapRepoErr(err)

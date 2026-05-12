@@ -38,53 +38,48 @@ func TestDiskType_AdminCRUD(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(svc.Delete(context.Background(), "network-ssd-io-m3")))
 }
 
-func TestZone_GetListAndAdminCRUD_LocalFallback(t *testing.T) {
-	// skipPeer=true → Get/List читают локальную таблицу `zones` (fallback).
+func TestZone_GetListAndAdminCRUD(t *testing.T) {
+	// kacho-compute — owner Geography: Get/List/CRUD работают с локальной таблицей.
 	zr := portmock.NewZoneRepo()
-	svc := NewZoneService(zr, zr, true)
+	svc := NewZoneService(zr)
 	z, err := svc.Get(context.Background(), "ru-central1-a")
 	require.NoError(t, err)
 	require.Equal(t, domain.ZoneStatusUp, z.Status)
+	_, err = svc.Get(context.Background(), "no-such-zone")
+	require.Equal(t, codes.NotFound, status.Code(err))
 	list, _, err := svc.List(context.Background(), Pagination{})
 	require.NoError(t, err)
 	require.Len(t, list, 3)
-	created, err := svc.Create(context.Background(), "ru-central1-c", "ru-central1", domain.ZoneStatusUp)
+	created, err := svc.Create(context.Background(), "ru-central1-c", "ru-central1", "Russia Central 1 C", domain.ZoneStatusUp)
 	require.NoError(t, err)
 	require.Equal(t, "ru-central1-c", created.ID)
-	updated, err := svc.Update(context.Background(), "ru-central1-c", "", domain.ZoneStatusDown)
+	require.Equal(t, "Russia Central 1 C", created.Name)
+	updated, err := svc.Update(context.Background(), "ru-central1-c", "", "", domain.ZoneStatusDown)
 	require.NoError(t, err)
 	require.Equal(t, domain.ZoneStatusDown, updated.Status)
 	require.NoError(t, svc.Delete(context.Background(), "ru-central1-c"))
 }
 
-func TestZone_GetList_FromVPCSource(t *testing.T) {
-	// skipPeer=false → Get/List проксируются в kacho-vpc InternalZoneService (source).
-	// repo (локальная таблица) намеренно содержит ДРУГИЕ зоны — чтобы проверить,
-	// что данные берутся именно из source.
-	localRepo := portmock.NewZoneRepo("local-zone-1")
-	source := &portmock.VPCClient{Zones: map[string]string{
-		"ru-central1-a": "ru-central1",
-		"ru-central1-x": "ru-central1",
-	}}
-	svc := NewZoneService(localRepo, source, false)
-
-	z, err := svc.Get(context.Background(), "ru-central1-x")
+func TestRegion_GetListAndAdminCRUD(t *testing.T) {
+	rr := portmock.NewRegionRepo()
+	svc := NewRegionService(rr)
+	r, err := svc.Get(context.Background(), "ru-central1")
 	require.NoError(t, err)
-	require.Equal(t, "ru-central1-x", z.ID)
-	require.Equal(t, "ru-central1", z.RegionID)
-	require.Equal(t, domain.ZoneStatusUp, z.Status)
-
-	// зона из локальной таблицы НЕ видна (источник — vpc).
-	_, err = svc.Get(context.Background(), "local-zone-1")
+	require.Equal(t, "ru-central1", r.ID)
+	_, err = svc.Get(context.Background(), "no-such-region")
 	require.Equal(t, codes.NotFound, status.Code(err))
-
-	// неизвестная зона → NotFound "Zone ... not found".
-	_, err = svc.Get(context.Background(), "no-such-zone")
-	require.Equal(t, codes.NotFound, status.Code(err))
-
-	list, _, err := svc.List(context.Background(), Pagination{})
+	created, err := svc.Create(context.Background(), "eu-west1", "EU West 1")
 	require.NoError(t, err)
-	require.Len(t, list, 2)
-	require.Equal(t, "ru-central1-a", list[0].ID)
-	require.Equal(t, "ru-central1-x", list[1].ID)
+	require.Equal(t, "EU West 1", created.Name)
+	_, err = svc.Create(context.Background(), "eu-west1", "dup")
+	require.Equal(t, codes.AlreadyExists, status.Code(err))
+	updated, err := svc.Update(context.Background(), "eu-west1", "EU West One")
+	require.NoError(t, err)
+	require.Equal(t, "EU West One", updated.Name)
+	// region with zones → FailedPrecondition.
+	rr.SetZoneCount("eu-west1", 2)
+	require.Equal(t, codes.FailedPrecondition, status.Code(svc.Delete(context.Background(), "eu-west1")))
+	rr.SetZoneCount("eu-west1", 0)
+	require.NoError(t, svc.Delete(context.Background(), "eu-west1"))
+	require.Equal(t, codes.NotFound, status.Code(svc.Delete(context.Background(), "eu-west1")))
 }

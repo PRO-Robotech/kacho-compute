@@ -70,6 +70,7 @@ type services struct {
 	snapshot *service.SnapshotService
 	diskType *service.DiskTypeService
 	zone     *service.ZoneService
+	region   *service.RegionService
 	instance *service.InstanceService
 }
 
@@ -226,10 +227,10 @@ func dialPeer(addr string, useTLS bool) (*grpc.ClientConn, error) {
 }
 
 // buildServices создаёт все repo'ы поверх pool и собирает из них бизнес-сервисы.
-// skipPeer (== cfg.SkipPeerValidation): true → cross-service existence-check
-// отключён, NIC-ам выдаются синтетические IP, а зоны берутся из локальной
-// таблицы `zones` (fallback); false → зоны (Get/List + existence-check zone_id)
-// берутся из kacho-vpc InternalZoneService (compute зон не владеет).
+// kacho-compute — owner Geography (Region/Zone): зоны/регионы всегда читаются из
+// локальных таблиц `zones`/`regions`, никакого proxy в kacho-vpc (эпик KAC-15).
+// skipPeer (== cfg.SkipPeerValidation) теперь влияет только на VPC NIC-IPAM/SG
+// existence-check (folder/subnet/sg), но не на geography.
 func buildServices(pool *pgxpool.Pool, folderClient service.FolderClient, vpcClient service.VPCClient, opsRepo operations.Repo, skipPeer bool) *services {
 	diskRepo := repo.NewDiskRepo(pool)
 	imageRepo := repo.NewImageRepo(pool)
@@ -237,25 +238,21 @@ func buildServices(pool *pgxpool.Pool, folderClient service.FolderClient, vpcCli
 	instanceRepo := repo.NewInstanceRepo(pool)
 	diskTypeRepo := repo.NewDiskTypeRepo(pool)
 	zoneRepo := repo.NewZoneRepo(pool)
+	regionRepo := repo.NewRegionRepo(pool)
 
-	// Источник зон: kacho-vpc InternalZoneService (vpcClient) — авторитетный; при
-	// SKIP_PEER_VALIDATION → локальная таблица `zones` (fallback). zoneSource
-	// реализует и ZoneSource (для ZoneService.Get/List), и ZoneRegistry (для
-	// existence-check zone_id в Disk/Instance Create + Disk Relocate).
-	var zoneSource service.ZoneSource = vpcClient
-	if skipPeer {
-		zoneSource = repo.NewZoneRepoSource(zoneRepo)
-	}
+	// Источник зон для existence-check zone_id (Disk/Instance Create, Disk Relocate)
+	// — локальная таблица `zones` (compute — owner Geography).
+	zoneRegistry := repo.NewZoneRepoSource(zoneRepo)
 
 	diskTypeSvc := service.NewDiskTypeService(diskTypeRepo)
-	zoneSvc := service.NewZoneService(zoneRepo, zoneSource, skipPeer)
 	return &services{
-		disk:     service.NewDiskService(diskRepo, imageRepo, snapshotRepo, diskTypeRepo, zoneSource, folderClient, opsRepo),
+		disk:     service.NewDiskService(diskRepo, imageRepo, snapshotRepo, diskTypeRepo, zoneRegistry, folderClient, opsRepo),
 		image:    service.NewImageService(imageRepo, diskRepo, snapshotRepo, folderClient, opsRepo),
 		snapshot: service.NewSnapshotService(snapshotRepo, diskRepo, folderClient, opsRepo),
 		diskType: diskTypeSvc,
-		zone:     zoneSvc,
-		instance: service.NewInstanceService(instanceRepo, diskRepo, imageRepo, snapshotRepo, zoneSource, folderClient, vpcClient, opsRepo, skipPeer),
+		zone:     service.NewZoneService(zoneRepo),
+		region:   service.NewRegionService(regionRepo),
+		instance: service.NewInstanceService(instanceRepo, diskRepo, imageRepo, snapshotRepo, zoneRegistry, folderClient, vpcClient, opsRepo, skipPeer),
 	}
 }
 
@@ -267,6 +264,7 @@ func registerPublicServices(srv *grpc.Server, svcs *services, opsRepo operations
 	computev1.RegisterSnapshotServiceServer(srv, handler.NewSnapshotHandler(svcs.snapshot))
 	computev1.RegisterDiskTypeServiceServer(srv, handler.NewDiskTypeHandler(svcs.diskType))
 	computev1.RegisterZoneServiceServer(srv, handler.NewZoneHandler(svcs.zone))
+	computev1.RegisterRegionServiceServer(srv, handler.NewRegionHandler(svcs.region))
 	computev1.RegisterInstanceServiceServer(srv, handler.NewInstanceHandler(svcs.instance))
 	operationpb.RegisterOperationServiceServer(srv, handler.NewOperationHandler(opsRepo))
 }
@@ -277,6 +275,7 @@ func registerInternalServices(srv *grpc.Server, svcs *services, pool *pgxpool.Po
 	computev1.RegisterInternalWatchServiceServer(srv, handler.NewInternalWatchHandler(pool, dsn, logger.With("component", "internal-watch"), watchMaxStreams))
 	computev1.RegisterInternalDiskTypeServiceServer(srv, handler.NewInternalDiskTypeHandler(svcs.diskType))
 	computev1.RegisterInternalZoneServiceServer(srv, handler.NewInternalZoneHandler(svcs.zone))
+	computev1.RegisterInternalRegionServiceServer(srv, handler.NewInternalRegionHandler(svcs.region))
 }
 
 func runMigrate(cfg config.Config, direction string) {
