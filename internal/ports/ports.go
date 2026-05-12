@@ -202,14 +202,14 @@ type CreateNICReq struct {
 
 // NICInfo — denormalised mirror NIC-ресурса kacho-vpc (source of truth =
 // vpc.NetworkInterface): то, что compute показывает рядом с embedded NIC.
+// InstanceID резолвится из vpc.NetworkInterface.used_by (referrer.id) — этот
+// денорм kacho-vpc выставляет сам на AttachToInstance.
 type NICInfo struct {
 	ID               string
 	SubnetID         string
-	NetworkID        string
 	V4AddressIDs     []string
 	SecurityGroupIDs []string
 	InstanceID       string
-	Index            string
 	Status           string
 }
 

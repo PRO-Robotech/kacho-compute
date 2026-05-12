@@ -21,7 +21,9 @@ type HypervisorService struct {
 }
 
 // NewHypervisorService создаёт HypervisorService.
-func NewHypervisorService(repo HypervisorRepo) *HypervisorService { return &HypervisorService{repo: repo} }
+func NewHypervisorService(repo HypervisorRepo) *HypervisorService {
+	return &HypervisorService{repo: repo}
+}
 
 // Register регистрирует новый хост и присваивает ему node_index (next-free из
 // sequence/free-list). Идемпотентно по явному id: повторный вызов с уже

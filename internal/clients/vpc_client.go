@@ -308,12 +308,12 @@ func (c *VPCClient) GetNetworkInterface(ctx context.Context, nicID string) (serv
 		info = service.NICInfo{
 			ID:               ni.GetId(),
 			SubnetID:         ni.GetSubnetId(),
-			NetworkID:        ni.GetNetworkId(),
 			V4AddressIDs:     ni.GetV4AddressIds(),
 			SecurityGroupIDs: ni.GetSecurityGroupIds(),
-			InstanceID:       ni.GetInstanceId(),
-			Index:            ni.GetIndex(),
-			Status:           ni.GetStatus().String(),
+			// InstanceID — из used_by (referrer.id), который kacho-vpc выставляет
+			// на AttachToInstance (raw NIC-ресурс больше не несёт instance_id).
+			InstanceID: ni.GetUsedBy().GetReferrer().GetId(),
+			Status:     ni.GetStatus().String(),
 		}
 		return nil
 	})
