@@ -536,12 +536,12 @@ def main(argv: List[str]) -> int:
             continue
         mod = load_cases_module(f)
         cases = getattr(mod, "CASES", [])
-        # детект дублей case-id
+        # детект дублей case-id — HARD-FAIL (case-id обязан быть уникален)
         ids = [c.id for c in cases]
         dups = {x for x in ids if ids.count(x) > 1}
         if dups:
-            print(f"[{res}] WARNING duplicate case ids: {sorted(dups)}")
-            rc = 1
+            sys.stderr.write(f"[{res}] FAIL — duplicate case-id (должен быть уникален): {sorted(dups)}\n")
+            return 1
         col = build_collection(res, cases)
         out = OUT_DIR / f"{res}.postman_collection.json"
         out.write_text(json.dumps(col, indent=2, ensure_ascii=False))
