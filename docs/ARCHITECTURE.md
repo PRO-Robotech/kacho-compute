@@ -16,10 +16,14 @@ API → операционные аспекты → тестирование →
 `kacho-compute` — control-plane сервис управления вычислительными ресурсами
 платформы Kachō. Владеет жизненным циклом четырёх публичных folder-scoped
 ресурсов — **Instance** (виртуальные машины), **Disk** (тома), **Image**
-(образы), **Snapshot** (снимки дисков) — и двух read-only глобальных
-справочников — **DiskType**, **Zone**. Сервис **не** управляет реальным
-data plane: он только хранит конфигурацию, валидирует её, имитирует жизненный
-цикл (детерминированная state-машина Instance), эмитит события об изменениях.
+(образы), **Snapshot** (снимки дисков) — read-only справочников **DiskType**,
+**Region**, **Zone** (Geography — owner kacho-compute с эпика `KAC-15`) — и
+internal-only инфра-реестра **Hypervisor** (физические хосты; placement / HW
+инвентарь — на публичной поверхности не появляется). Compute-NIC бэкуется
+ресурсом kacho-vpc `NetworkInterface` (`nic_id`, эпик `KAC-9`). Сервис **не**
+управляет реальным data plane: он только хранит конфигурацию, валидирует её,
+имитирует жизненный цикл (детерминированная state-машина Instance), эмитит
+события об изменениях.
 Внешний контракт повторяет Yandex Cloud Compute API (`kacho.cloud.compute.v1`
 == зеркало `yandex.cloud.compute.v1`) по форме и семантике.
 
@@ -48,12 +52,13 @@ Postgres-БД, шаринг через прямой SQL запрещён.
 
 | Сосед | Канал | Что делает |
 |---|---|---|
-| `kacho-api-gateway` | gRPC `:9090` → REST `/compute/v1/...` + opsproxy `/operations/{id}` | Маршрутизирует публичные RPC, преобразует ошибки в HTTP; internal mux на cluster-internal listener для `/compute/v1/diskTypes`,`/compute/v1/zones` (`Internal*` admin) |
+| `kacho-api-gateway` | gRPC `:9090` → REST `/compute/v1/...` + opsproxy `/operations/{id}` | Маршрутизирует публичные RPC, преобразует ошибки в HTTP; internal mux на cluster-internal listener для `/compute/v1/diskTypes`,`/compute/v1/regions`,`/compute/v1/zones`,`/compute/v1/hypervisors` (`Internal*` admin/infra-registry) — НЕ на external TLS endpoint |
 | `kacho-resource-manager` | gRPC client | `folderClient.Exists(folderID)` — existence-check в Create/Move |
-| `kacho-vpc` | gRPC client | `vpcClient.{GetSubnet, GetSecurityGroup, GetAddress}` — валидация Instance `network_interface_spec` |
+| `kacho-vpc` | gRPC client | `vpcClient.{GetSubnet, GetSecurityGroup, GetAddress, NetworkInterfaceService.*, InternalAddressService}` — валидация Instance `network_interface_spec` + создание/attach/detach/delete kacho-vpc `NetworkInterface` для Instance-NIC'ов + IPAM эфемерных Address (эпик `KAC-9`) |
+| `kacho-vpc-implement` | gRPC client (читает у нас) | читает `InternalHypervisorService.GetHypervisor` → `Hypervisor.node_index` → выводит SRv6 `/48`-локатор хоста (runtime-edge `kacho-vpc-implement → kacho-compute`, эпик `KAC-2`) |
 | Postgres (`kacho_compute`) | pgx + LISTEN/NOTIFY | Источник истины |
 | Внутренние подписчики на изменения | gRPC server-stream `:9091` | `InternalWatchService.Watch` — events из `compute_outbox` |
-| Admin-инструменты (UI / curl на api-gateway internal mux) | gRPC `:9091` через internal listener | `InternalDiskTypeService` / `InternalZoneService` — seed справочников |
+| Admin-инструменты (UI / curl на api-gateway internal mux) | gRPC `:9091` через internal listener | `InternalDiskTypeService` / `InternalRegionService` / `InternalZoneService` — seed справочников; `InternalHypervisorService` — register/list/state/dereg гипервизоров (синхронные RPC) |
 
 **Внешний контракт.** Все мутации (`Create/Update/Delete/Start/Stop/Restart/
 Move/Relocate/AttachDisk/DetachDisk/AddOneToOneNat/RemoveOneToOneNat/
@@ -90,8 +95,8 @@ download (uri-source) мгновенный (см. [07-known-divergences.md](arch
 
 | Порт | Сервисы | Кто использует |
 |---|---|---|
-| `:9090` | `InstanceService`, `DiskService`, `ImageService`, `SnapshotService`, `DiskTypeService`, `ZoneService`, `OperationService` | api-gateway (external + UI) |
-| `:9091` | `InternalWatchService`, `InternalDiskTypeService`, `InternalZoneService` | admin-tooling / UI (через api-gateway internal mux) — **НЕ** на external TLS endpoint (`api.kacho.local:443`) |
+| `:9090` | `InstanceService`, `DiskService`, `ImageService`, `SnapshotService`, `DiskTypeService`, `RegionService`, `ZoneService`, `OperationService` | api-gateway (external + UI). Geography (Region/Zone) — owner kacho-compute (эпик `KAC-15`) |
+| `:9091` | `InternalWatchService`, `InternalDiskTypeService`, `InternalRegionService`, `InternalZoneService`, `InternalHypervisorService` | admin-tooling / UI (через api-gateway internal mux) — **НЕ** на external TLS endpoint (`api.kacho.local:443`). `InternalHypervisorService` — синхронные RPC, инфра-реестр (placement/HW — инфра-чувствительное; `GET /compute/v1/hypervisors` на external → 404) |
 
 **Хранилище.** `kacho_compute` (`pg-compute` StatefulSet в helm umbrella).
 Database-per-service. Подробно — [05-database.md](architecture/05-database.md).
@@ -112,21 +117,27 @@ Database-per-service. Подробно — [05-database.md](architecture/05-data
 `internal/`:
 
 - **`domain/`** — pure Go-структуры (импортируют только stdlib и kacho-proto):
-  Disk, Image, Snapshot, Instance, NetworkInterface, AttachedDisk, DiskType, Zone.
+  Disk, Image, Snapshot, Instance, NetworkInterface (`nic_id`), AttachedDisk,
+  DiskType, Region, Zone, Hypervisor.
 - **`service/`** — use-cases (бизнес-логика): `DiskService`, `ImageService`,
-  `SnapshotService`, `InstanceService`, `DiskTypeService`, `ZoneService` + internal
+  `SnapshotService`, `InstanceService`, `DiskTypeService`, `RegionService`,
+  `ZoneService`, `HypervisorService` (internal, синхронный — register/get/list/
+  state/dereg + аллокация `node_index` next-free seq/free-list) + internal
   service-логика. Port-интерфейсы: `DiskRepo`, `ImageRepo`, `SnapshotRepo`,
-  `InstanceRepo`, `DiskTypeRepo`, `ZoneRepo`(=`ZoneRegistry`), `OperationsRepo`,
-  `FolderClient`, `VPCClient`. `platforms.go` — per-platform валидация resources.
-  `maperr.go` — `mapRepoErr` / `stripSentinel`.
+  `InstanceRepo`, `DiskTypeRepo`, `ZoneRepo`(=`ZoneRegistry`), `RegionRepo`,
+  `HypervisorRepo`, `OperationsRepo`, `FolderClient`, `VPCClient`. `platforms.go`
+  — per-platform валидация resources. `maperr.go` — `mapRepoErr` / `stripSentinel`.
 - **`ports/`** — leaf-пакет: sentinel-ошибки (`ErrNotFound` / `ErrAlreadyExists` /
   `ErrFailedPrecondition` / `ErrInvalidArg` / `ErrInternal`) + `portmock` (моки
   без import-cycle).
 - **`repo/`** — pgx-adapter: реализует port-интерфейсы из service + outbox emit
-  (в той же TX, что domain-write). По файлу на ресурс.
+  (в той же TX, что domain-write). По файлу на ресурс (`hypervisor.go` —
+  node_index seq/free-list).
 - **`clients/`** — gRPC-adapter: `folderClient` (resource-manager.FolderService),
-  `vpcClient` (vpc.{Subnet,SecurityGroup,Address}Service.Get). Retry on
-  `Unavailable` через `kacho-corelib/retry`; `SkipPeerValidation` → no-op.
+  `vpcClient` (vpc.{Subnet,SecurityGroup,Address}Service.Get + `NetworkInterfaceService`
+  create/attach/detach/delete + `InternalAddressService` IPAM — эпик `KAC-9`). Retry
+  on `Unavailable` через `kacho-corelib/retry`; `SkipPeerValidation` → no-op /
+  синтетический NIC (`nic_id=''`).
 - **`handler/`** — тонкий transport: parse-request → service.Foo() →
   format-response. Public-handlers (`:9090`) и Internal-handlers (`:9091`) —
   отдельные файлы. `internal_watch_handler.go` — структурно копия kacho-vpc.
@@ -157,7 +168,8 @@ Status`. Delete/Stop/Restart/SimulateMaintenanceEvent → response
 **ID format.** 3-char prefix + 17-char crockford-base32. Instance/Disk → `epd`;
 Image/Snapshot → `fd8`; Operation (Compute) → `epd` (`PrefixOperationCompute ==
 PrefixInstance` — api-gateway opsproxy роутит по первым 3 символам, все
-compute-операции в один backend). DiskType/Zone — литералы. id-колонки — `TEXT`.
+compute-операции в один backend). DiskType/Region/Zone — литералы; Hypervisor —
+`hyp` + 17-char base32 (либо явный id от admin). id-колонки — `TEXT`.
 **Не валидировать id-формат sync** (`(length) = "<=50"` — max-длина, не format) —
 расхождение с реальным YC, см. [07-known-divergences.md](architecture/07-known-divergences.md) §1.
 
@@ -209,50 +221,58 @@ internal-обёртку.
 Instance (1) ──┬─ boot_disk / secondary_disks (через attached_disks, M:N) ──→ Disk (N)
    │           │                                                                │
    │           └─ network_interfaces[] (через instance_network_interfaces, N):   │ source = image|snapshot
-   │              {subnet_id, primary_v4_address{one_to_one_nat{address}},        ▼
-   │               security_group_ids[]} ──→ VPC Subnet/SG/Address (cross-svc)  Snapshot (N)
+   │              {nic_id ──→ kacho-vpc NetworkInterface (source of truth);       ▼
+   │               subnet_id/primary_v4_address/security_group_ids — denorm}    Snapshot (N)
    │           └─ filesystem_specs[] → blocked:kacho-filesystem                  source_disk_id
    └─ status: state-машина
 
 Image (folder-level): family (GetLatestByFamily); source = image|snapshot|disk|uri
 Disk  (zone-level): type_id → DiskType; source = image|snapshot; instance_ids derived
-DiskType / Zone — глобальные read-only справочники (id — литерал)
+DiskType — read-only справочник (id — литерал)
+Region / Zone — публичный read-only справочник Geography (owner kacho-compute, эпик KAC-15)
+Hypervisor — INTERNAL-ONLY: физ. хост (placement/HW); node_index (0-based) → SRv6-локатор в kacho-vpc-implement
 ```
 
 Все мутируемые ресурсы — folder-level (`folder_id` в Create). Все таблицы flat
 (без K8s envelope). `cloud_id`/`organization_id` отсутствуют — фильтрация только
 по `folder_id`. Cross-resource links: boot/secondary disk → `attached_disks` →
 `disks` (FK `disk_id` RESTRICT, `instance_id` CASCADE); `boot_disk` = строка
-`attached_disks` с `is_boot=true`; NIC subnet/SG/NAT-address → VPC (НЕ FK); disk
-source / snapshot source / image source → локальные ресурсы (НЕ FK,
-existence-check на Create). Подробно — [01-resources.md](architecture/01-resources.md).
+`attached_disks` с `is_boot=true`; NIC `nic_id` → kacho-vpc `NetworkInterface`
+(НЕ FK; на `Instance.Create` — attach/inline-create, на `Instance.Delete` —
+detach+delete; эпик `KAC-9`), NIC subnet/SG/NAT-address → VPC (НЕ FK, denorm);
+disk source / snapshot source / image source → локальные ресурсы (НЕ FK,
+existence-check на Create); `zones.region_id` → `regions.id` (FK RESTRICT, same-DB).
+Подробно — [01-resources.md](architecture/01-resources.md).
 
 ---
 
 ## Часть VI. БД-схема
 
-`kacho_compute`, миграции — `internal/migrations/0001_initial.sql` (squashed
-baseline). Таблицы: `operations` (схема как у corelib), `zones`, `disk_types`,
-`disks`, `images`, `snapshots`, `instances`, `instance_network_interfaces`,
-`attached_disks`, `compute_outbox`, `compute_watch_cursors`. Особенности: flat
+`kacho_compute`. Миграции (`internal/migrations/`): `0001_initial.sql` (squashed
+baseline: `operations`/`zones`/`disk_types`/`disks`/`images`/`snapshots`/`instances`/
+`instance_network_interfaces`/`attached_disks`/`compute_outbox`/`compute_watch_cursors`,
+seed `disk_types`); `0002_nic_ephemeral_address.sql`; `0003_geography_owner.sql`
+(kacho-compute становится owner Geography — таблица `regions`, колонка `zones.name`,
+FK `zones.region_id → regions.id` RESTRICT, seed `ru-central1` + `ru-central1-{a,b,d}`
+здесь; эпик `KAC-15`); `0004_hypervisors.sql` (`hypervisors` — internal-only ресурс,
++ `hypervisor_node_index_seq` MINVALUE 0 + `hypervisor_node_index_free` для аллокации
+0-based `node_index`); `0005_instance_nic_id.sql` (`instance_network_interfaces.nic_id`
+— id бэкующего kacho-vpc `NetworkInterface`, эпик `KAC-9`). Особенности: flat
 resources; TEXT id-колонки; hard-delete; partial UNIQUE `(folder_id, name) WHERE
 name <> ''` (disks/images/snapshots/instances); FK `attached_disks.disk_id` →
 disks RESTRICT, `.instance_id` → instances CASCADE; FK
 `instance_network_interfaces.instance_id` → instances CASCADE; partial UNIQUE
-`attached_disks_boot_uniq (instance_id) WHERE is_boot` и `attached_disks_device_uniq
-(instance_id, device_name) WHERE device_name <> ''`; outbox trigger
-`compute_outbox_notify_trg`; индекс `images_family_idx (folder_id, family,
-created_at DESC)` для GetLatestByFamily; `xmin::text` OCC для UpdateNetworkInterface;
-seed `zones` (`ru-central1-{a,b,d}`) + `disk_types` (`network-hdd`/`network-ssd`/
-`network-ssd-nonreplicated`/`network-ssd-io-m3`). Запрет: не редактировать
-применённые миграции; новая = новый файл (`0002_*`). Подробно —
+`attached_disks_boot_uniq` / `attached_disks_device_uniq`; outbox trigger
+`compute_outbox_notify_trg`; индекс `images_family_idx` для GetLatestByFamily;
+`xmin::text` OCC для UpdateNetworkInterface. Запрет: не редактировать
+применённые миграции; новая = новый файл (`0006_*`). Подробно —
 [05-database.md](architecture/05-database.md).
 
 ---
 
 ## Часть VII. API-поверхность
 
-~60 публичных RPC в 6 verbatim-YC сервисах (`InstanceService` — крупнейший:
+~60 публичных RPC в 7 публичных сервисах (`InstanceService` — крупнейший:
 Get/List/Create/Update/Delete/UpdateMetadata/GetSerialPortOutput/Stop/Start/
 Restart/AttachDisk/DetachDisk/AttachNetworkInterface/DetachNetworkInterface/
 AddOneToOneNat/RemoveOneToOneNat/UpdateNetworkInterface/ListOperations/Move/
@@ -260,13 +280,19 @@ Relocate(blocked)/SimulateMaintenanceEvent(no-op)/access-bindings(no-op);
 `DiskService` — CRUD/ListOperations/Move/Relocate(частично)/ListSnapshotSchedules
 (blocked)/access-bindings; `ImageService` — CRUD/GetLatestByFamily/ListOperations/
 access-bindings; `SnapshotService` — CRUD/ListOperations/access-bindings;
-`DiskTypeService`/`ZoneService` — Get/List) + `OperationService` (Get/Cancel,
-`/operations/{id}` через opsproxy). REST-пути — кальки YC API surface (camelCase
-top-level, `:`-методы, `.../operations` child-list, `/updateMetadata`/
-`/addOneToOneNat`-сегменты) — нормализовать нельзя. Internal (`:9091`, НЕ на
-external TLS): `InternalWatchService.Watch` (outbox stream),
-`InternalDiskTypeService` / `InternalZoneService` (admin CRUD справочников,
-kacho-only — в verbatim YC только Get/List). Подробно —
+`DiskTypeService`/`RegionService`/`ZoneService` — Get/List) + `OperationService`
+(Get/Cancel, `/operations/{id}` через opsproxy). Geography (Region/Zone) — owner
+kacho-compute (эпик `KAC-15`: перенесено из kacho-vpc; компьют читает зоны/регионы
+из своих таблиц, нет proxy / `skipPeer`-fallback; другие сервисы валидируют
+`zone_id` вызовом `ZoneService.Get`). `Instance.Create` NIC spec — exactly one of
+{`subnet_id`, `nic_id`} (эпик `KAC-9`; `subnet_id` больше не безусловно `(required)`).
+Internal (`:9091`, НЕ на external TLS): `InternalWatchService.Watch` (outbox stream);
+`InternalDiskTypeService` / `InternalRegionService` / `InternalZoneService` (admin
+CRUD справочников) → `/compute/v1/diskTypes`,`/compute/v1/regions`,`/compute/v1/zones`;
+`InternalHypervisorService` (синхронные RPC — RegisterHypervisor/GetHypervisor/
+ListHypervisors/UpdateHypervisorState/DeregisterHypervisor) → `/compute/v1/hypervisors...`,
+`:updateState` — **полностью** kacho-only (placement/HW инвентарь — инфра-чувствительное;
+на external endpoint `GET /compute/v1/hypervisors` → 404). Подробно —
 [04-api-surface.md](architecture/04-api-surface.md).
 
 ---
@@ -312,8 +338,12 @@ dev; production — `verify-full`), `KACHO_COMPUTE_*_TLS` для cross-service g
 `KACHO_COMPUTE_AUTH_MODE` (`dev`/`production`/`production-strict`) — fail-closed
 гейт перед IAM merge. `Internal*` сервисы — только cluster-internal listener
 `:9091`, **не** на external TLS endpoint (workspace `CLAUDE.md` §запрет 6); список
-admin paths для будущего TLS-фильтра — `/compute/v1/diskTypes` (POST/PATCH/DELETE),
-`/compute/v1/zones` (POST/PATCH/DELETE). **Gap** (как у VPC): полноценный IAM
+admin/infra paths для будущего TLS-фильтра — `/compute/v1/diskTypes`,
+`/compute/v1/regions`, `/compute/v1/zones` (POST/PATCH/DELETE — GET публичен),
+`/compute/v1/hypervisors` (GET/POST/`/{id}` GET/DELETE/`:updateState` — **полностью**
+kacho-only; placement/HW инвентарь — инфра-чувствительное, см. workspace `CLAUDE.md`
+§«Инфра-чувствительные данные»; на external endpoint `GET /compute/v1/hypervisors`
+→ 404). **Gap** (как у VPC): полноценный IAM
 (claims-extraction / folder-membership через RM), mTLS на `:9091`, NetworkPolicy
 для internal-port — scope.
 
@@ -331,8 +361,11 @@ Repo CRUD, partial UNIQUE `(folder_id, name)`, FK `attached_disks` (attach/detac
 LISTEN/NOTIFY, Instance NIC cascade delete, xmin OCC); **e2e/newman**
 (`tests/newman/` — black-box через api-gateway `localhost:18080`; декларативные
 `cases/*.py` (`disk.py`/`image.py`/`snapshot.py`/`instance.py`/`disk-type.py`/
-`zone.py`/`operation.py`) → `gen.py` → Postman-коллекции по сервису; case-id
-`<DOMAIN>-<ACTION>-<DETAIL>`, напр. `DISK-CR-CRUD-OK`, `INST-START-NEG-NOT-STOPPED`;
+`region.py`/`zone.py`/`hypervisor.py`/`operation.py`) → `gen.py` → Postman-коллекции
+по сервису; новые кейсы: Region/Zone (list/get/admin-CRUD/del-restrict/not-in-vpc),
+Hypervisor (register/get/list/state/dereg/bad-zone/no-public-path), Instance с
+`nic_id`. case-id `<DOMAIN>-<ACTION>-<DETAIL>`, напр. `DISK-CR-CRUD-OK`,
+`INST-START-NEG-NOT-STOPPED`;
 каждый case в своём `runId` внутри pre-allocated `existingFolderId`). **Критерий
 приёмки:** любой newman-кейс должен зеленеть и против реального YC Compute API.
 Найденные баги → GitHub Issues; by-design расхождения → [07-known-divergences.md](architecture/07-known-divergences.md).
@@ -369,9 +402,11 @@ Unavailable), `shutdown` (graceful), `migrations/common` (`0001_operations.sql`,
    каждую функциональность (unit + integration + newman).
 4. **`kacho-api-gateway`** — регистрация публичных RPC (public mux:
    `InstanceService`/`DiskService`/`ImageService`/`SnapshotService`/`DiskTypeService`/
-   `ZoneService`/`OperationService`) + internal mux (`computeInternalAddr` блок:
-   `InternalDiskTypeService`/`InternalZoneService` → `/compute/v1/diskTypes`,
-   `/compute/v1/zones` — только cluster-internal listener).
+   `RegionService`/`ZoneService`/`OperationService`) + internal mux
+   (`computeInternalAddr` блок: `InternalDiskTypeService`/`InternalRegionService`/
+   `InternalZoneService`/`InternalHypervisorService` → `/compute/v1/diskTypes`,
+   `/compute/v1/regions`, `/compute/v1/zones`, `/compute/v1/hypervisors` (+`:updateState`)
+   — только cluster-internal listener, НЕ на external TLS endpoint).
 5. **`kacho-deploy`** — helm chart для `pg-compute` + `kacho-compute` deployment
    (init-container `migrate up`, env-vars).
 6. **`kacho-ui`** — compute-views (`src/pages/compute/{instances,disks,images,

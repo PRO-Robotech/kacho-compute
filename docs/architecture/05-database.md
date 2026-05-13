@@ -40,15 +40,19 @@ VPC FINDING-007); pgxpool — `cfg.DSN()` (с `pool_max_conns` если
 | # | Файл | Что |
 |---|---|---|
 | 0001 | `0001_initial.sql` | **squashed baseline** — `operations` (схема как у corelib `0001_operations.sql`), `zones`, `disk_types`, `disks`, `images`, `snapshots`, `instances`, `instance_network_interfaces`, `attached_disks`, `compute_outbox`, `compute_watch_cursors`; индексы; partial UNIQUE `(folder_id, name) WHERE name <> ''`; FK `attached_disks.disk_id` → disks RESTRICT, `.instance_id` → instances CASCADE; FK `instance_network_interfaces.instance_id` → instances CASCADE; outbox trigger `compute_outbox_notify_trg`; seed `disk_types` + `zones`. Id-колонки — `TEXT` |
+| 0002 | `0002_nic_ephemeral_address.sql` | поддержка эфемерных Address-аллокаций для NIC |
+| 0003 | `0003_geography_owner.sql` | **kacho-compute становится owner Geography** (эпик `KAC-15`): таблица `regions`(`id,name,created_at`), колонка `zones.name`, FK `zones.region_id → regions.id` RESTRICT, seed `ru-central1` + `ru-central1-{a,b,d}` здесь (больше не зеркалится из kacho-vpc) |
+| 0004 | `0004_hypervisors.sql` | таблица `hypervisors` (internal-only ресурс — placement/HW инвентарь) + `hypervisor_node_index_seq` (`MINVALUE 0`, 0-based) + `hypervisor_node_index_free` (free-list возвращённых `node_index`) |
+| 0005 | `0005_instance_nic_id.sql` | `ALTER TABLE instance_network_interfaces ADD COLUMN nic_id TEXT NOT NULL DEFAULT ''` — id бэкующего kacho-vpc `NetworkInterface` (эпик `KAC-9`); `''` = legacy NIC / `SKIP_PEER_VALIDATION` синтетика |
 
 `migrations/` (корень репо) — staging для `make sync-migrations` (только
 `0001_operations.sql` от corelib; в `0001_initial.sql` схема `operations` уже
 включена). Source of truth — `internal/migrations/`.
 
 ⚠️ Запреты (workspace `CLAUDE.md` §5):
-- НЕ редактировать применённую миграцию (`0001_initial.sql`). Только новая.
+- НЕ редактировать применённую миграцию. Только новая.
 - НЕ модифицировать `0001_operations.sql` (staging-копия corelib).
-- Новая миграция = новый файл с инкрементным номером (следующий — `0002_*`).
+- Новая миграция = новый файл с инкрементным номером (следующий — `0006_*`).
 
 ## Таблицы
 
@@ -79,25 +83,39 @@ INDEX operations_done_idx       (done)
 INDEX operations_created_at_idx (created_at)
 ```
 
+### `regions`
+
+Read-only справочник регионов (admin CRUD через `InternalRegionService`).
+PK — литерал. Добавлена в `0003_geography_owner.sql` (эпик `KAC-15`).
+
+```
+id         TEXT         PRIMARY KEY          -- "ru-central1"
+name       TEXT         NOT NULL DEFAULT ''
+created_at TIMESTAMPTZ  NOT NULL DEFAULT now()
+```
+
 ### `zones`
 
 Read-only справочник зон (admin CRUD через `InternalZoneService`). PK — литерал.
+`zones.name` + FK `zones.region_id → regions.id` RESTRICT добавлены в
+`0003_geography_owner.sql`.
 
 ```
 id         TEXT         PRIMARY KEY          -- "ru-central1-a"
-region_id  TEXT         NOT NULL             -- "ru-central1"
+region_id  TEXT         NOT NULL REFERENCES regions(id) ON DELETE RESTRICT   -- "ru-central1"
+name       TEXT         NOT NULL DEFAULT ''
 status     TEXT         NOT NULL DEFAULT 'UP'  -- UP | DOWN | STATUS_UNSPECIFIED (имя enum-значения Zone.Status)
 created_at TIMESTAMPTZ  NOT NULL DEFAULT now()
 
 INDEX zones_region_idx (region_id)
 ```
 
-Источник данных для `ZoneService.Get/List` и для `ZoneRegistry` (existence-check
-`zone_id` в `Disk.Create` / `Instance.Create` / `Disk.Relocate`) — **kacho-vpc
-`InternalZoneService`** (`:9091`); compute зон не владеет (см.
-`07-known-divergences.md` §6.1). Эта таблица — **fallback**, читается только при
-`KACHO_COMPUTE_SKIP_PEER_VALIDATION=true` (через адаптер `repo.ZoneRepoSource`).
-Seed `ru-central1-{a,b,d}` (`status = UP`) остаётся в `0001_initial.sql`.
+Источник данных для `ZoneService.Get/List` / `RegionService.Get/List` и для
+`ZoneRegistry` (existence-check `zone_id` в `Disk.Create` / `Instance.Create` /
+`Disk.Relocate`, и `disk_types.zone_ids`) — **эти таблицы** (kacho-compute owns
+Geography, эпик `KAC-15`). Больше нет proxy в kacho-vpc и `skipPeer`-fallback.
+Другие сервисы (kacho-vpc) валидируют `zone_id` вызовом нашего `ZoneService.Get`.
+Seed `ru-central1` + `ru-central1-{a,b,d}` (`status = UP`) — в `0003_geography_owner.sql`.
 
 ### `disk_types`
 
@@ -243,19 +261,26 @@ Same-table children of Instance (cascade). PK `(instance_id, idx)`.
 ```
 instance_id           TEXT         NOT NULL REFERENCES instances(id) ON DELETE CASCADE
 idx                   TEXT         NOT NULL                  -- "0", "1", ... (NetworkInterface.index)
+nic_id                TEXT         NOT NULL DEFAULT ''        -- id бэкующего kacho-vpc NetworkInterface (эпик KAC-9, миграция 0005); '' = legacy NIC / SKIP_PEER_VALIDATION синтетика. Остальные колонки ниже — denorm-зеркало kacho-vpc NIC
 mac_address           TEXT         NOT NULL DEFAULT ''
-subnet_id             TEXT         NOT NULL DEFAULT ''        -- VPC subnet ref (НЕ FK — cross-service)
+subnet_id             TEXT         NOT NULL DEFAULT ''        -- VPC subnet ref (НЕ FK — cross-service; denorm-зеркало)
 primary_v4_address    TEXT         NOT NULL DEFAULT ''
 primary_v4_nat        JSONB                                  -- OneToOneNat {address, ip_version, dns_records} | null
 primary_v4_dns_records JSONB       NOT NULL DEFAULT '[]'::jsonb
 primary_v6_address    TEXT         NOT NULL DEFAULT ''
 primary_v6_nat        JSONB
 primary_v6_dns_records JSONB       NOT NULL DEFAULT '[]'::jsonb
-security_group_ids    JSONB        NOT NULL DEFAULT '[]'::jsonb  -- []string VPC SG refs (НЕ FK)
+security_group_ids    JSONB        NOT NULL DEFAULT '[]'::jsonb  -- []string VPC SG refs (НЕ FK; denorm-зеркало)
 PRIMARY KEY (instance_id, idx)
 
 INDEX instance_nic_subnet_idx (subnet_id) WHERE subnet_id <> ''
 ```
+
+На `Instance.Create` compute создаёт (или attach'ит существующий) kacho-vpc
+`NetworkInterface` на каждый NIC spec и кладёт его id в `nic_id`; на
+`Instance.Delete` detach'ит + удаляет этот NIC (что освобождает его Address-ресурсы).
+`subnet_id` / `primary_v4_address` / `security_group_ids` — read-only denorm
+от kacho-vpc NIC, source of truth — kacho-vpc.
 
 ### `attached_disks`
 
@@ -281,6 +306,36 @@ UNIQUE INDEX attached_disks_device_uniq (instance_id, device_name) WHERE device_
 
 `instances.boot_disk_id` — НЕ отдельный FK; boot disk = строка `attached_disks`
 с `is_boot=true`. `Disk.instance_ids` — derived из `attached_disks` (output-only).
+
+### `hypervisors` (internal-only)
+
+Реестр физических хостов (placement / HW инвентарь — **internal-only ресурс**;
+не появляется на публичной поверхности, см. workspace `CLAUDE.md`
+§«Инфра-чувствительные данные»). Миграция `0004_hypervisors.sql`.
+
+```
+id                    TEXT        PRIMARY KEY                 -- "hyp..." (или явный id от admin)
+zone_id               TEXT        NOT NULL                    -- зона, где стоит хост
+node_index            INTEGER     NOT NULL UNIQUE             -- 0-based стабильный индекс узла; основа /48-SRv6-локатора в kacho-vpc-implement
+fqdn                  TEXT        NOT NULL DEFAULT ''
+state                 TEXT        NOT NULL DEFAULT 'READY'    -- READY | CORDONED | DRAINING | DOWN (имя Hypervisor.State)
+capacity_vcpus        BIGINT      NOT NULL DEFAULT 0
+capacity_memory_bytes BIGINT      NOT NULL DEFAULT 0
+capacity_instances    BIGINT      NOT NULL DEFAULT 0
+created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+
+INDEX hypervisors_zone_idx (zone_id)
+```
+
+Аллокация `node_index`: `SEQUENCE hypervisor_node_index_seq` (`MINVALUE 0 START
+WITH 0 MAXVALUE 65535`) + `TABLE hypervisor_node_index_free (id INTEGER PRIMARY
+KEY)` — при `RegisterHypervisor` берётся минимальный из free-list (если есть),
+иначе `nextval`; при `DeregisterHypervisor` `node_index` возвращается во
+free-list. `DeregisterHypervisor` fails (`FailedPrecondition`), если на хосте ещё
+размещены инстансы. Управляется только через `InternalHypervisorService`
+(синхронные RPC, не Operation). Потребители — kacho-compute reconciler (placement),
+kacho-vpc-implement (читает `node_index`), admin-UI/tooling.
 
 ### `compute_outbox`
 
@@ -318,14 +373,11 @@ updated_at       TIMESTAMPTZ  NOT NULL DEFAULT now()
 `InternalWatchService.Watch` принимает `from_sequence_no` от клиента — таблица не
 обязательна для текущей фазы.
 
-## Seed data (в `0001_initial.sql`)
+## Seed data
+
+`disk_types` seed — в `0001_initial.sql`:
 
 ```sql
-INSERT INTO zones (id, region_id, status) VALUES
-  ('ru-central1-a', 'ru-central1', 'UP'),
-  ('ru-central1-b', 'ru-central1', 'UP'),
-  ('ru-central1-d', 'ru-central1', 'UP');
-
 INSERT INTO disk_types (id, description, zone_ids) VALUES
   ('network-hdd',               'Standard network HDD',                '["ru-central1-a","ru-central1-b","ru-central1-d"]'),
   ('network-ssd',               'Fast network SSD (replicated)',       '["ru-central1-a","ru-central1-b","ru-central1-d"]'),
@@ -333,8 +385,16 @@ INSERT INTO disk_types (id, description, zone_ids) VALUES
   ('network-ssd-io-m3',         'Ultra high-performance SSD (io-m3)',  '["ru-central1-a","ru-central1-b","ru-central1-d"]');
 ```
 
-Зеркалит kacho-vpc geography seed (те же три зоны региона `ru-central1`). Seed
-делается в этой же миграции (как VPC seed'ит regions/zones).
+Geography seed (`regions` + `zones`) — в `0003_geography_owner.sql` (kacho-compute
+owns Geography, эпик `KAC-15`; больше не зеркало kacho-vpc):
+
+```sql
+INSERT INTO regions (id, name) VALUES ('ru-central1', 'Russia Central 1') ON CONFLICT DO NOTHING;
+INSERT INTO zones (id, region_id, status, name) VALUES
+  ('ru-central1-a', 'ru-central1', 'UP', 'Russia Central 1 A'),
+  ('ru-central1-b', 'ru-central1', 'UP', 'Russia Central 1 B'),
+  ('ru-central1-d', 'ru-central1', 'UP', 'Russia Central 1 D');
+```
 
 ## FK contract (резюме)
 
@@ -348,7 +408,9 @@ INSERT INTO disk_types (id, description, zone_ids) VALUES
 | `images.source_*` | **НЕ FK** | происхождение для observability |
 | `instances.boot_disk_id` | **не отдельный FK** | boot disk = строка `attached_disks` с `is_boot=true` |
 | `disks.type_id` → `disk_types.id` | **НЕ FK** | resilient к удалению типа; existence-check на `Disk.Create` |
-| `instances.zone_id` / `disks.zone_id` → `zones.id` | **НЕ FK** | existence-check через `ZoneRegistry` на Create — авторитет kacho-vpc `InternalZoneService`; таблица `zones` — fallback при `SKIP_PEER_VALIDATION` |
+| `zones.region_id` → `regions.id` | **FK RESTRICT** (same-DB; эпик `KAC-15`) | нельзя удалить регион пока есть зоны |
+| `instances.zone_id` / `disks.zone_id` → `zones.id` | **НЕ FK** | existence-check через `ZoneRegistry` на Create — локальная таблица `zones` (kacho-compute owns Geography, эпик `KAC-15`) |
+| `instance_network_interfaces.nic_id` → VPC `NetworkInterface` | **НЕ FK** (другая БД) | source of truth для интерфейса; на `Instance.Create` — attach/inline-create kacho-vpc NIC, на `Instance.Delete` — detach+delete (best-effort vpcClient) |
 | cross-service: `instance_network_interfaces.subnet_id` → VPC Subnet; `.security_group_ids[]` → VPC SG; NAT `address` → VPC Address; `instances.folder_id` / `disks.folder_id` / ... → RM Folder | **НЕ FK** (другая БД) | валидируются gRPC-вызовом к peer-сервису в worker'е (workspace `CLAUDE.md` §запрет 4: нельзя каскадить через границу сервиса) |
 
 ## Connection / pooling

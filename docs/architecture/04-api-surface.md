@@ -9,9 +9,10 @@ Operation metadata/response (из `(kacho.cloud.api.operation)` options).
 | Категория | Сервисов | RPC (примерно) | Listener | REST exposed |
 |---|---:|---:|---|---|
 | Public verbatim-YC мутируемые | 4 (`InstanceService`, `DiskService`, `ImageService`, `SnapshotService`) | ~60 | `:9090` public gRPC | ✅ через api-gateway (public mux), на обоих listener'ах |
-| Public verbatim-YC read-only справочники | 2 (`DiskTypeService`, `ZoneService`) | 4 | `:9090` public gRPC | ✅ через api-gateway |
+| Public read-only справочники | 3 (`DiskTypeService`, `RegionService`, `ZoneService`) | 6 | `:9090` public gRPC | ✅ через api-gateway. Geography (Region/Zone) — owner kacho-compute (эпик `KAC-15`) |
 | Operations | 1 (`OperationService`) | 2 (`Get`, `Cancel`) | `:9090` public gRPC | ✅ `/operations/{id}` (через api-gateway opsproxy) |
-| Internal admin (kacho-only) | 2 (`InternalDiskTypeService`, `InternalZoneService`) | 6 | `:9091` internal gRPC | ✅ выборочно (`/compute/v1/diskTypes`, `/compute/v1/zones`) — только cluster-internal listener |
+| Internal admin (kacho-only) | 3 (`InternalDiskTypeService`, `InternalRegionService`, `InternalZoneService`) | 9 | `:9091` internal gRPC | ✅ выборочно (`/compute/v1/diskTypes`, `/compute/v1/regions`, `/compute/v1/zones`) — только cluster-internal listener |
+| Internal infra-registry (kacho-only) | 1 (`InternalHypervisorService`) | 5 (синхронные, не Operation) | `:9091` internal gRPC | ✅ `/compute/v1/hypervisors...`, `:updateState` — **только cluster-internal listener**; на external TLS endpoint `GET /compute/v1/hypervisors` → 404 (placement/инвентарь железа — инфра-чувствительное) |
 | Outbox stream | 1 (`InternalWatchService`) | 1 (`Watch`) | `:9091` internal gRPC | ❌ только server-to-server |
 
 > ⚠️ REST-пути неоднородны (кальки YC API surface, proto-decided): top-level
@@ -70,9 +71,9 @@ Operation metadata/response (из `(kacho.cloud.api.operation)` options).
 |---|---|---|---|---|
 | `Get` | `GET /compute/v1/instances/{instance_id}?view=` | sync | → `Instance` (FULL включает metadata) | ✅ |
 | `List` | `GET /compute/v1/instances?folderId=&...` | sync | → `ListInstancesResponse` (metadata всегда омитится) | ✅ |
-| `Create` | `POST /compute/v1/instances` body `*` | async | `CreateInstanceMetadata{instance_id}` / `Instance` | ✅ (`filesystem_specs[]`→`blocked:kacho-filesystem`) |
+| `Create` | `POST /compute/v1/instances` body `*` | async | `CreateInstanceMetadata{instance_id}` / `Instance` | ✅ (`filesystem_specs[]`→`blocked:kacho-filesystem`. NIC spec: exactly one of {`subnet_id` → inline-create Address+kacho-vpc NIC+attach; `nic_id` → attach existing kacho-vpc NIC}; `subnet_id` no longer unconditionally `(required)`) |
 | `Update` | `PATCH /compute/v1/instances/{instance_id}` body `*` | async | `UpdateInstanceMetadata` / `Instance` | ✅ (`resources_spec`/`platform_id` требуют STOPPED) |
-| `Delete` | `DELETE /compute/v1/instances/{instance_id}` | async | `DeleteInstanceMetadata` / `google.protobuf.Empty` | ✅ |
+| `Delete` | `DELETE /compute/v1/instances/{instance_id}` | async | `DeleteInstanceMetadata` / `google.protobuf.Empty` | ✅ (для каждого NIC с непустым `nic_id` — detach + delete kacho-vpc `NetworkInterface`) |
 | `UpdateMetadata` | `POST /compute/v1/instances/{instance_id}/updateMetadata` body `*` | async | `UpdateInstanceMetadataMetadata` / `Instance` | ✅ |
 | `GetSerialPortOutput` | `GET /compute/v1/instances/{instance_id}:serialPortOutput?port=` | **sync** | → `GetInstanceSerialPortOutputResponse{contents}` | ✅ (синтетика, не операция) |
 | `Stop` | `POST /compute/v1/instances/{instance_id}:stop` | async | `StopInstanceMetadata` / `google.protobuf.Empty` | ✅ |
@@ -104,12 +105,23 @@ Operation metadata/response (из `(kacho.cloud.api.operation)` options).
 | `Get` | `GET /compute/v1/diskTypes/{disk_type_id}` | sync | → `DiskType` | ✅ |
 | `List` | `GET /compute/v1/diskTypes?pageSize=&pageToken=` | sync | → `ListDiskTypesResponse` | ✅ |
 
-## ZoneService (`zone_service.proto`, `:9090`)
+## RegionService (`region_service.proto`, `:9090`) — Geography, owner kacho-compute (эпик KAC-15)
+
+| RPC | REST | sync/async | response | статус |
+|---|---|---|---|---|
+| `Get` | `GET /compute/v1/regions/{region_id}` | sync | → `Region` | ✅ |
+| `List` | `GET /compute/v1/regions?pageSize=&pageToken=` | sync | → `ListRegionsResponse` | ✅ |
+
+## ZoneService (`zone_service.proto`, `:9090`) — Geography, owner kacho-compute (эпик KAC-15)
 
 | RPC | REST | sync/async | response | статус |
 |---|---|---|---|---|
 | `Get` | `GET /compute/v1/zones/{zone_id}` | sync | → `Zone` | ✅ |
 | `List` | `GET /compute/v1/zones?pageSize=&pageToken=` | sync | → `ListZonesResponse` | ✅ |
+
+> Geography (Region/Zone) перенесена в kacho-compute из kacho-vpc (эпик `KAC-15`):
+> compute читает зоны/регионы из своих таблиц (нет proxy / `skipPeer`-fallback);
+> другие сервисы (kacho-vpc) валидируют `zone_id` вызовом `ZoneService.Get`.
 
 ## OperationService (`:9090`)
 
@@ -128,13 +140,41 @@ Operation metadata/response (из `(kacho.cloud.api.operation)` options).
 | `Update` | `PATCH /compute/v1/diskTypes/{disk_type_id}` body `{description, zone_ids}` | → `DiskType` | |
 | `Delete` | `DELETE /compute/v1/diskTypes/{disk_type_id}` | → `DeleteDiskTypeResponse{}` | |
 
+### InternalRegionService (`internal_catalog_service.proto`) — kacho-only (эпик KAC-15)
+
+| RPC | REST (api-gateway internal mux) | response | примечание |
+|---|---|---|---|
+| `Create` | `POST /compute/v1/regions` body `{id, name}` | → `Region` | admin задаёт `id` явно (PK, immutable) |
+| `Update` | `PATCH /compute/v1/regions/{region_id}` body `{name}` | → `Region` | |
+| `Delete` | `DELETE /compute/v1/regions/{region_id}` | → `DeleteRegionResponse{}` | блокируется (FK `zones.region_id` RESTRICT) если есть зоны |
+
 ### InternalZoneService (`internal_catalog_service.proto`) — kacho-only
 
 | RPC | REST (api-gateway internal mux) | response | примечание |
 |---|---|---|---|
-| `Create` | `POST /compute/v1/zones` body `{id, region_id, status}` | → `Zone` | admin задаёт `id` явно (PK, immutable) |
-| `Update` | `PATCH /compute/v1/zones/{zone_id}` body `{region_id, status}` | → `Zone` | |
-| `Delete` | `DELETE /compute/v1/zones/{zone_id}` | → `DeleteZoneResponse{}` | |
+| `Create` | `POST /compute/v1/zones` body `{id, region_id, name, status}` | → `Zone` | admin задаёт `id` явно (PK, immutable) |
+| `Update` | `PATCH /compute/v1/zones/{zone_id}` body `{region_id, name, status}` | → `Zone` | |
+| `Delete` | `DELETE /compute/v1/zones/{zone_id}` | → `DeleteZoneResponse{}` | проверяет своих dependents (instances/disks/disk_types); кросс-сервисных (vpc-подсети) НЕ проверяет — admin-ответственность |
+
+### InternalHypervisorService (`internal_hypervisor_service.proto`) — kacho-only, infra-registry
+
+**Синхронные RPC (не Operation)** — инфра-реестр гипервизоров (placement / HW
+инвентарь — internal-only ресурс; см. workspace `CLAUDE.md` §«Инфра-чувствительные
+данные»). Проброшено через api-gateway internal mux **только на cluster-internal
+listener** — на external TLS endpoint `GET /compute/v1/hypervisors` → 404 (нет
+tenant-facing пути).
+
+| RPC | REST (api-gateway internal mux) | response | примечание |
+|---|---|---|---|
+| `RegisterHypervisor` | `POST /compute/v1/hypervisors` body `{id?, zone_id, fqdn?, capacity?}` | → `Hypervisor` | присваивает `node_index` next-free (`hypervisor_node_index_seq` MINVALUE 0 + `hypervisor_node_index_free`); идемпотентно по `id`; пустой `zone_id` → `InvalidArgument`; диапазон исчерпан → `ResourceExhausted` |
+| `GetHypervisor` | `GET /compute/v1/hypervisors/{hypervisor_id}` | → `Hypervisor` | не зарегистрирован → `NotFound` |
+| `ListHypervisors` | `GET /compute/v1/hypervisors?zoneId=&state=&pageSize=&pageToken=` | → `ListHypervisorsResponse` | опц. фильтр по зоне/состоянию |
+| `UpdateHypervisorState` | `POST /compute/v1/hypervisors/{hypervisor_id}:updateState` body `{state, capacity?, heartbeat?}` | → `Hypervisor` | `NotFound` если нет |
+| `DeregisterHypervisor` | `DELETE /compute/v1/hypervisors/{hypervisor_id}` | → `DeregisterHypervisorResponse{}` | возвращает `node_index` во free-list; `FailedPrecondition` если на хосте есть инстансы |
+
+Потребители: kacho-compute reconciler (placement), kacho-vpc-implement (читает
+`node_index` → SRv6 `/48`-локатор), admin-UI/tooling. id-формат — `hyp` + 17-char
+base32 (либо явный id от admin).
 
 > ⚠️ `InternalDiskTypeService` / `InternalZoneService` — kacho-only расширение;
 > в verbatim YC Compute API есть только `DiskTypeService.{Get,List}` /
@@ -177,11 +217,14 @@ kacho-proto/proto/kacho/cloud/compute/v1/
 ├── snapshot.proto / snapshot_service.proto
 ├── instance.proto / instance_service.proto
 ├── disk_type.proto / disk_type_service.proto
-├── zone.proto / zone_service.proto
+├── region.proto / region_service.proto  Geography (owner kacho-compute, эпик KAC-15)
+├── zone.proto / zone_service.proto       Geography (owner kacho-compute, эпик KAC-15)
+├── hypervisor.proto                      Hypervisor — internal-only ресурс (placement/HW)
 ├── hardware_generation.proto / kek.proto / maintenance.proto / application.proto / package_options.proto
 │
 ├── internal_watch_service.proto         InternalWatchService.Watch (outbox stream)
-├── internal_catalog_service.proto       InternalDiskTypeService / InternalZoneService (admin CRUD)
+├── internal_catalog_service.proto       InternalDiskTypeService / InternalRegionService / InternalZoneService (admin CRUD)
+├── internal_hypervisor_service.proto    InternalHypervisorService (sync RPC, infra-registry)
 │
 └── (vendored, реализация отложена) disk_placement_group*.proto, placement_group*.proto,
     host_group*.proto, host_type*.proto, gpu_cluster*.proto, filesystem*.proto,
