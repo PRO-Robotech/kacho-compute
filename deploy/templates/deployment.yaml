@@ -68,6 +68,13 @@ spec:
               value: "{{ .Values.vpcInternalAddr }}"
             - name: KACHO_COMPUTE_SKIP_PEER_VALIDATION
               value: "{{ .Values.skipPeerValidation }}"
+          resources:
+            requests:
+              cpu: {{ .Values.resources.requests.cpu }}
+              memory: {{ .Values.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.resources.limits.cpu }}
+              memory: {{ .Values.resources.limits.memory }}
           readinessProbe:
             tcpSocket:
               port: grpc
