@@ -16,13 +16,13 @@
 | # | Документ | О чём |
 |---|---|---|
 | 00 | [Overview](00-overview.md) | Что делает kacho-compute, какие ресурсы owns, что вне скоупа, 6 принципов проекта, Clean Architecture, verbatim-YC parity goal |
-| 01 | [Resources](01-resources.md) | Детально по каждому ресурсу: Disk, Image, Snapshot, Instance, DiskType, Zone — proto-поля, ID-префиксы, status-enum'ы, полный список RPC с пометкой implemented/blocked/Unimplemented, инварианты, cross-resource links |
+| 01 | [Resources](01-resources.md) | Детально по каждому ресурсу: Disk, Image, Snapshot, Instance (+`nic_id`→kacho-vpc NIC), DiskType, Region, Zone (Geography, owner kacho-compute), Hypervisor (internal-only) — proto-поля, ID-префиксы, status-enum'ы, полный список RPC с пометкой implemented/blocked/Unimplemented, инварианты, cross-resource links |
 | 02 | [Data Flows](02-data-flows.md) | Sequence-диаграммы compute-сценариев: Operations LRO worker, Disk.Create, Image.Create (source oneof), Snapshot.Create, Instance.Create (NIC/boot-disk validation), AttachDisk/DetachDisk, outbox + LISTEN/NOTIFY + InternalWatchService |
 | 03 | [Instance Lifecycle](03-instance-lifecycle.md) | State-машина `Instance.Status` (PROVISIONING/RUNNING/STOPPING/STOPPED/STARTING/RESTARTING/UPDATING/ERROR/CRASHED/DELETING), transition-таблица (RPC × precondition × end-status × Operation.response), control-plane имитация, AttachDisk/DetachDisk/NAT инварианты |
-| 04 | [API Surface](04-api-surface.md) | Таблица всех публичных RPC (REST path, method, request/response, Operation metadata/response, sync-vs-async, implemented/blocked) + internal RPC (InternalWatchService / InternalDiskTypeService / InternalZoneService на :9091) |
-| 05 | [Database](05-database.md) | Схема `kacho_compute` (`0001_initial.sql` baseline): все таблицы (`operations`, `zones`, `disk_types`, `disks`, `images`, `snapshots`, `instances`, `instance_network_interfaces`, `attached_disks`, `compute_outbox`, `compute_watch_cursors`), колонки, индексы, FK, partial UNIQUE, outbox trigger, seed, flat-схема, xmin OCC |
-| 06 | [Conventions & Gotchas](06-conventions.md) | Compute-specific правила: naming, error mapping, timestamp truncation, UpdateMask discipline, pagination, filter, hard-delete, Operation prefix `epd`, cross-service ref-validation, `KACHO_COMPUTE_SKIP_PEER_VALIDATION` |
-| 07 | [Намеренные решения / расхождения с YC](07-known-divergences.md) | Реестр осознанных by-design расхождений с verbatim-YC (НЕ баги; баги/задачи — GitHub Issues) — id-syntax validation, name-policy probe, Instance precondition тексты, control-plane имитация, DiskType/Zone admin-CRUD, blocked-on-missing-service |
+| 04 | [API Surface](04-api-surface.md) | Таблица всех публичных RPC (REST path, method, request/response, Operation metadata/response, sync-vs-async, implemented/blocked) + internal RPC (InternalWatchService / InternalDiskTypeService / InternalRegionService / InternalZoneService / InternalHypervisorService на :9091; Hypervisor — `GET /compute/v1/hypervisors` на external → 404) |
+| 05 | [Database](05-database.md) | Схема `kacho_compute`, миграции `0001`..`0005` (`0003_geography_owner.sql` — regions+zones owned by compute; `0004_hypervisors.sql` — hypervisors + node_index seq/free-list; `0005_instance_nic_id.sql` — `instance_network_interfaces.nic_id`): все таблицы, колонки, индексы, FK, partial UNIQUE, outbox trigger, seed, flat-схема, xmin OCC |
+| 06 | [Conventions & Gotchas](06-conventions.md) | Compute-specific правила: naming, error mapping, timestamp truncation, UpdateMask discipline, pagination, filter, hard-delete, Operation prefix `epd`, cross-service ref-validation, `nic_id`-on-Instance, Hypervisor internal-only, Geography owner=compute, `KACHO_COMPUTE_SKIP_PEER_VALIDATION` |
+| 07 | [Намеренные решения / расхождения с YC](07-known-divergences.md) | Реестр осознанных by-design решений (НЕ баги; verbatim-parity отложена) — id-syntax validation, name-policy probe, Instance precondition тексты, control-plane имитация, DiskType/Region/Zone admin-CRUD, Geography owner=kacho-compute (KAC-15), Hypervisor internal-only, Instance NIC ↔ kacho-vpc NetworkInterface (KAC-9), blocked-on-missing-service |
 | 08 | [UI](08-ui.md) | Интеграция с `kacho-ui` (Vite + React SPA): compute-views (Instances/Disks/Images/Snapshots), generic CRUD-страницы, polling Operation, attach/detach disk, Start/Stop/Restart actions, DiskType/Zone dropdowns — forward-looking design |
 | 09 | [Go skills applied](09-go-skills-applied.md) | Какие практики `golang-*` скилов применены: clean architecture / DI, error handling, context propagation, graceful shutdown, slog, testing pyramid, naming, grpc, pgx-database |
 
@@ -35,11 +35,16 @@ Sub-phase 0.4 продукта Kachō. gRPC-сервис управления в
 timestamp precision, regex'ы, behavioural semantics, state-машина Instance.
 
 Owns:
-- 4 мутируемых folder-level ресурса (verbatim YC): Disk, Image, Snapshot, Instance.
-- 2 read-only глобальных справочника (verbatim YC: только Get/List): DiskType, Zone.
+- 4 мутируемых folder-level ресурса: Disk, Image, Snapshot, Instance (NIC бэкуется
+  kacho-vpc `NetworkInterface` через `nic_id` — эпик `KAC-9`).
+- read-only справочники: DiskType; **Region, Zone** (Geography — owner kacho-compute,
+  эпик `KAC-15`: перенесено из kacho-vpc, нет proxy / `skipPeer`-fallback).
+- internal-only инфра-реестр **Hypervisor** (физ. хосты; placement / HW инвентарь —
+  на публичной поверхности не появляется; `node_index` 0-based → SRv6-локатор в kacho-vpc-implement).
 - `operations` таблица (per-сервисная, prefix `epd`).
 - in-process outbox + LISTEN/NOTIFY → `InternalWatchService`.
-- `InternalDiskTypeService` / `InternalZoneService` — kacho-only admin CRUD справочников.
+- `InternalDiskTypeService` / `InternalRegionService` / `InternalZoneService` — kacho-only
+  admin CRUD справочников; `InternalHypervisorService` — синхронные RPC, инфра-реестр.
 
 Control plane only: реального гипервизора нет — `Instance.status` переходит
 детерминированной state-машиной внутри worker'а соответствующей операции;

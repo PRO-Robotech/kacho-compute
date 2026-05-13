@@ -1,9 +1,11 @@
 # kacho-compute
 
 Compute-сервис Kachō: control-plane для **Instance, Disk, Image, Snapshot** +
-read-only справочники **DiskType, Zone**. Цель — verbatim parity с Yandex Cloud
-Compute API (`kacho.cloud.compute.v1` == зеркало `yandex.cloud.compute.v1`).
-Подробности — `CLAUDE.md` (sub-phase 0.4) и `docs/architecture/`.
+read-only справочники **DiskType, Region, Zone** (Geography — owner kacho-compute,
+эпик `KAC-15`) + internal-only инфра-реестр **Hypervisor** (физические хосты;
+placement / HW инвентарь — на публичной поверхности не появляется). Compute-NIC
+бэкуется ресурсом kacho-vpc `NetworkInterface` (`nic_id`, эпик `KAC-9`).
+Подробности — `CLAUDE.md` и `docs/architecture/`.
 
 ## Quick start (локальный стенд)
 
@@ -16,8 +18,11 @@ kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
 
 # 3. Smoke
 curl 'http://localhost:18080/compute/v1/diskTypes'
+curl 'http://localhost:18080/compute/v1/regions'
 curl 'http://localhost:18080/compute/v1/zones'
 curl 'http://localhost:18080/compute/v1/disks?folderId=<folder>&pageSize=5'
+# Hypervisor — internal-only: доступен ТОЛЬКО на cluster-internal listener,
+# на external TLS endpoint GET /compute/v1/hypervisors → 404
 ```
 
 Перезапуск только compute после изменений в коде:
@@ -40,8 +45,8 @@ Clean Architecture (`domain → service → handler/repo/clients`); `cmd/compute
 
 | Порт   | Сервисы                                                                  | Кто использует                  |
 |--------|--------------------------------------------------------------------------|----------------------------------|
-| `:9090`| `InstanceService`, `DiskService`, `ImageService`, `SnapshotService`, `DiskTypeService`, `ZoneService`, `OperationService` | api-gateway (external + UI) |
-| `:9091`| `InternalWatchService`, `InternalDiskTypeService`, `InternalZoneService` | admin-tooling / UI (через api-gateway internal mux) — НЕ на external TLS endpoint |
+| `:9090`| `InstanceService`, `DiskService`, `ImageService`, `SnapshotService`, `DiskTypeService`, `RegionService`, `ZoneService`, `OperationService` | api-gateway (external + UI) |
+| `:9091`| `InternalWatchService`, `InternalDiskTypeService`, `InternalRegionService`, `InternalZoneService`, `InternalHypervisorService` (синхронные RPC — infra-registry) | admin-tooling / UI (через api-gateway internal mux) — НЕ на external TLS endpoint; `GET /compute/v1/hypervisors` на external → 404 |
 
 ## Тесты
 

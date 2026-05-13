@@ -5,9 +5,12 @@
 `kacho-compute` — доменный сервис Kachō (control-plane only), отвечающий за
 вычислительные ресурсы: **Instance** (виртуальные машины), **Disk** (тома),
 **Image** (образы), **Snapshot** (снимки дисков) + read-only справочники
-**DiskType** и **Zone**. Реального data-plane нет — сервис только хранит
-конфигурацию, валидирует её, имитирует жизненный цикл (state-машина Instance) и
-эмитит события об изменениях через outbox.
+**DiskType**, **Region**, **Zone** (Geography — owner kacho-compute с эпика
+`KAC-15`) + internal-only инфра-реестр **Hypervisor** (физические хосты;
+placement / HW инвентарь — на публичной поверхности не появляется). Реального
+data-plane нет — сервис только хранит конфигурацию, валидирует её, имитирует
+жизненный цикл (state-машина Instance) и эмитит события об изменениях через outbox.
+Compute-NIC бэкуется ресурсом kacho-vpc `NetworkInterface` (`nic_id`, эпик `KAC-9`).
 
 Внешний контракт повторяет Yandex Cloud Compute API (`kacho.cloud.compute.v1`
 == зеркало `yandex.cloud.compute.v1`): proto-форма, имена полей, enum-значения,
@@ -24,13 +27,17 @@ texts, status codes, timestamp precision, regex'ы, behavioural semantics.
                   │   ├─ Image (образы; family / GetLatestByFamily)│
                   │   └─ Snapshot (снимки дисков)                  │
                   │                                               │
-     public  ──►  │   verbatim-YC read-only справочники           │
+     public  ──►  │   read-only справочники                       │
                   │   ├─ DiskType (Get / List)                    │
-                  │   └─ Zone     (Get / List)                    │
+                  │   ├─ Region   (Get / List) — Geography (KAC-15)│
+                  │   └─ Zone     (Get / List) — Geography (KAC-15)│
                   │                                               │
      internal ──► │   InternalWatchService (outbox stream :9091)  │
                   │   InternalDiskTypeService (admin CRUD :9091)  │
+                  │   InternalRegionService   (admin CRUD :9091)  │
                   │   InternalZoneService     (admin CRUD :9091)  │
+                  │   InternalHypervisorService (infra-registry,  │
+                  │     sync RPC, :9091; НЕ на external endpoint)  │
                   └───────────────────────────────────────────────┘
 ```
 
@@ -64,8 +71,12 @@ no-op (operation сразу done, response Empty).
 **DiskType** — Get / List (read-only справочник; seed: `network-hdd`,
 `network-ssd`, `network-ssd-nonreplicated`, `network-ssd-io-m3`).
 
-**Zone** — Get / List (read-only; seed зеркалит kacho-vpc zones:
-`ru-central1-a`, `ru-central1-b`, `ru-central1-d`).
+**Region / Zone** — Get / List (read-only публичный справочник Geography).
+⚠️ **kacho-compute — owner Geography** (эпик `KAC-15`: перенесено из kacho-vpc;
+больше нет proxy / `skipPeer`-fallback — compute читает зоны/регионы из своих
+таблиц `regions`/`zones`; другие сервисы валидируют `zone_id` вызовом нашего
+`ZoneService.Get`). Seed: `ru-central1` + `ru-central1-{a,b,d}`. Admin-CRUD —
+`InternalRegionService` / `InternalZoneService` на `:9091`.
 
 **OperationService** — Get / Cancel (per-сервисная таблица `operations`,
 prefix `epd`).
@@ -75,11 +86,21 @@ prefix `epd`).
 - `InternalWatchService.Watch` — outbox stream через LISTEN/NOTIFY
   (`compute_outbox`), для будущих consumer'ов / observability / admin-tooling.
 - `InternalDiskTypeService.{Create,Update,Delete}` /
+  `InternalRegionService.{Create,Update,Delete}` /
   `InternalZoneService.{Create,Update,Delete}` — admin CRUD справочников
-  (kacho-only, в verbatim-YC только Get/List). Проброшено через api-gateway
-  internal mux на `/compute/v1/diskTypes`, `/compute/v1/zones` — только на
+  (kacho-only). Проброшено через api-gateway internal mux на
+  `/compute/v1/diskTypes`, `/compute/v1/regions`, `/compute/v1/zones` — только на
   cluster-internal listener, НЕ на external TLS endpoint (`api.kacho.local:443`,
-  advertised для `yc` CLI — см. workspace `CLAUDE.md` §запрет 6).
+  advertised для внешних клиентов — см. workspace `CLAUDE.md` §запрет 6).
+- `InternalHypervisorService.{RegisterHypervisor,GetHypervisor,ListHypervisors,
+  UpdateHypervisorState,DeregisterHypervisor}` — **синхронные RPC (не Operation)**:
+  инфра-реестр гипервизоров (placement / HW инвентарь — internal-only ресурс, см.
+  workspace `CLAUDE.md` §«Инфра-чувствительные данные»). Проброшено через
+  api-gateway internal mux на `/compute/v1/hypervisors...`, `:updateState` —
+  **только** cluster-internal listener; на external TLS endpoint `GET
+  /compute/v1/hypervisors` → 404. `node_index` (0-based) аллоцируется next-free из
+  sequence + free-list; consumers — compute reconciler (placement), kacho-vpc-implement
+  (читает `node_index` → SRv6-локатор), admin-UI.
 
 ## Вне скоупа (proto vendored, реализация отложена)
 
@@ -215,8 +236,10 @@ Instance, те же precondition-ошибки. Любой newman-кейс дол
 
 - Org/Cloud/Folder — это `kacho-resource-manager`. Compute только проверяет
   существование folder через `folderClient`.
-- Network/Subnet/SecurityGroup/Address — это `kacho-vpc`. Compute только
-  валидирует ссылки Instance NIC через `vpcClient` (не FK).
+- Network/Subnet/SecurityGroup/Address/**NetworkInterface** — это `kacho-vpc`.
+  Compute создаёт/attach'ит kacho-vpc `NetworkInterface` для Instance-NIC'ов и
+  валидирует ссылки через `vpcClient` (не FK); `nic_id` бэкующего NIC хранится в
+  `instance_network_interfaces.nic_id`.
 - KMS-ключи (`kms_key_id`) — `kacho-kms` (нет → blocked).
 - Marketplace-продукты (`os_product_ids`) — `kacho-marketplace` (нет → blocked).
 - Filesystem-ресурсы (`AttachFilesystem`) — `kacho-filesystem` (нет → blocked).

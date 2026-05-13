@@ -41,7 +41,7 @@ precondition по текущему status; нарушение → `FailedPrecond
 
 | RPC | preconditions (иначе `FailedPrecondition`) | промежуточный status (внутри TX) | end status | Operation.response |
 |---|---|---|---|---|
-| `Create` | — | `PROVISIONING` | `RUNNING` | `Instance` |
+| `Create` | — (NIC spec: exactly one of {`subnet_id`, `nic_id`} — см. ниже «materializeNICs») | `PROVISIONING` | `RUNNING` | `Instance` |
 | `Start` | `status ∈ {STOPPED}` | `STARTING` | `RUNNING` | `Instance` |
 | `Stop` | `status ∈ {RUNNING}` | `STOPPING` | `STOPPED` | `google.protobuf.Empty` |
 | `Restart` | `status ∈ {RUNNING}` | `RESTARTING` | `RUNNING` | `google.protobuf.Empty` |
@@ -59,7 +59,7 @@ precondition по текущему status; нарушение → `FailedPrecond
 | `GetSerialPortOutput` | any (это **sync** read, не операция) | — | — | `GetInstanceSerialPortOutputResponse{contents}` (синтетический текст) |
 | `Relocate` | `status ∈ {STOPPED}` или RUNNING-с-restart (proto: «running instance will be restarted») — **blocked** (нужен cross-zone disk move) | — | (blocked) | `Instance` |
 | `SimulateMaintenanceEvent` | any — **no-op** | — | unchanged | `google.protobuf.Empty` |
-| `Delete` | any (Instance с дисками — отвязывает по `auto_delete`) | `DELETING` | (deleted) | `google.protobuf.Empty` |
+| `Delete` | any (Instance с дисками — отвязывает по `auto_delete`; для каждого NIC с непустым `nic_id` — detach + delete kacho-vpc `NetworkInterface`) | `DELETING` | (deleted) | `google.protobuf.Empty` |
 
 ⚠️ verbatim YC-тексты precondition-ошибок — **probe реального YC** при написании
 acceptance/newman. До probe — placeholder-формулировки (зафиксированы в
@@ -160,6 +160,37 @@ stateDiagram-v2
   (требует ли `STOPPED`) — **probe YC** (зафиксировано в `07-known-divergences.md`).
 - `AttachNetworkInterface` / `DetachNetworkInterface`: proto-комментарии явно
   требуют `status == STOPPED`; нельзя detach последний NIC (минимум 1 на Instance).
+
+## materializeNICs — Instance ↔ kacho-vpc NetworkInterface (эпик KAC-9)
+
+Compute-NIC бэкуется ресурсом **kacho-vpc `NetworkInterface`** — он source of
+truth для интерфейса (адрес, SG, data-plane wiring); `subnet_id` /
+`primary_v4_address` / `security_group_ids` в `compute.v1.NetworkInterface` —
+read-only denorm-зеркало. id бэкующего NIC — `compute.v1.NetworkInterface.nic_id`
+(proto field 7), хранится в `instance_network_interfaces.nic_id` (миграция
+`0005_instance_nic_id.sql`). Device-index интерфейса — `compute.v1.NetworkInterface.index`
+(остаётся как было).
+
+`NetworkInterfaceSpec` принимает **exactly one of {`subnet_id`, `nic_id`}**
+(`subnet_id` больше не безусловно `(required)`):
+
+- **`Instance.Create` (worker, materializeNICs):**
+  - spec задал `nic_id` → `vpcClient.AttachToInstance(nic_id, instance_id, device_index)`
+    на уже существующем kacho-vpc NIC; читает его атрибуты в denorm-зеркало.
+  - spec задал `subnet_id` → inline-создаёт kacho-vpc `Address` (эфемерный
+    internal IPAM) + `NetworkInterface` (+ attach к инстансу), сохраняет его id в
+    `nic_id`.
+  - `KACHO_COMPUTE_SKIP_PEER_VALIDATION=true` → синтетический NIC без
+    kacho-vpc-ресурса (`nic_id=''`) — для unit/newman без поднятого kacho-vpc.
+- **`Instance.Delete` (worker):** для каждого NIC с непустым `nic_id` —
+  `vpcClient.DetachFromInstance` + delete kacho-vpc `NetworkInterface` (что
+  освобождает его `Address`-ресурсы). Best-effort: VPC недоступен → log warning,
+  операцию не валим (как и с one_to_one_nat addresses).
+
+Новые runtime cross-domain edges (зафиксированы в workspace `CLAUDE.md`
+§«Кросс-репо зависимости»): `kacho-compute → kacho-vpc` (NIC create/attach/detach
++ эфемерный Address IPAM) и `kacho-vpc-implement → kacho-compute` (читает
+`Hypervisor.node_index`).
 
 ## `Update` resources_spec / platform_id требует STOPPED
 
