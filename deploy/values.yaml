@@ -18,3 +18,19 @@ vpcAddr: "vpc.kacho.svc.cluster.local:9090"
 # compute берёт справочник зон из VPC-модуля (см. docs/architecture/07-known-divergences.md §6.1).
 vpcInternalAddr: "vpc.kacho.svc.cluster.local:9091"
 skipPeerValidation: "false"
+
+# compute is not on the Address.Create write-path; HPA + resources
+# present for uniform policy across services. maxReplicas=5 is plenty.
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
