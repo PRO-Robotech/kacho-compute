@@ -512,6 +512,14 @@ func (s *InstanceService) materializeNICs(ctx context.Context, instanceID string
 // приаттачен к другому инстансу, аттачит его к instanceID@idx и собирает
 // domain.NetworkInterface с denorm-полями из NIC-ресурса. В skipIPAM-режиме —
 // без обращения к VPC (NICID берётся как есть).
+//
+// Software fast-path-check (info.InstanceID != "" && != instanceID) — для
+// human-friendly error до похода в Attach RPC. Финальная race-safe защита —
+// на vpc-стороне (миграция 0016 partial UNIQUE + conditional UPDATE CAS,
+// KAC-52). Если concurrent Attach к одному и тому же existing NIC прошёл
+// software-guard, vpc вернёт FailedPrecondition — здесь мы её **пробрасываем
+// как есть** (не оборачиваем в codes.Internal), чтобы клиент получил
+// нормальный 412 с осмысленным сообщением, а не "internal error".
 func (s *InstanceService) attachExistingNIC(ctx context.Context, instanceID, idx, nicID string) (domain.NetworkInterface, error) {
 	if s.skipIPAM {
 		return domain.NetworkInterface{Index: idx, NICID: nicID, PrimaryV4Address: synthInternalIP(0)}, nil
@@ -527,7 +535,18 @@ func (s *InstanceService) attachExistingNIC(ctx context.Context, instanceID, idx
 		return domain.NetworkInterface{}, status.Errorf(codes.FailedPrecondition, "Network interface %s is already attached to instance %s", nicID, info.InstanceID)
 	}
 	if err := s.vpcClient.AttachNetworkInterface(ctx, nicID, instanceID, idx); err != nil {
-		return domain.NetworkInterface{}, status.Errorf(codes.Internal, "attach network interface %s: %v", nicID, err)
+		// Map gRPC code from kacho-vpc:
+		//   FailedPrecondition — NIC race / уже attached (DB-side CAS отбил);
+		//   NotFound — NIC исчез между Get и Attach;
+		//   InvalidArgument — bad request (нереально с проверенным id, но прокидываем);
+		//   Unavailable — vpc недоступен, retryable;
+		//   остальное — Internal.
+		switch status.Code(err) {
+		case codes.FailedPrecondition, codes.NotFound, codes.InvalidArgument, codes.Unavailable:
+			return domain.NetworkInterface{}, err
+		default:
+			return domain.NetworkInterface{}, status.Errorf(codes.Internal, "attach network interface %s: %v", nicID, err)
+		}
 	}
 	return domain.NetworkInterface{
 		Index:            idx,
