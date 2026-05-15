@@ -65,14 +65,13 @@ func main() {
 
 // services — собранный набор бизнес-сервисов (composition-point).
 type services struct {
-	disk       *service.DiskService
-	image      *service.ImageService
-	snapshot   *service.SnapshotService
-	diskType   *service.DiskTypeService
-	zone       *service.ZoneService
-	region     *service.RegionService
-	hypervisor *service.HypervisorService
-	instance   *service.InstanceService
+	disk     *service.DiskService
+	image    *service.ImageService
+	snapshot *service.SnapshotService
+	diskType *service.DiskTypeService
+	zone     *service.ZoneService
+	region   *service.RegionService
+	instance *service.InstanceService
 }
 
 func runServe(cfg config.Config) error {
@@ -240,7 +239,6 @@ func buildServices(pool *pgxpool.Pool, folderClient service.FolderClient, vpcCli
 	diskTypeRepo := repo.NewDiskTypeRepo(pool)
 	zoneRepo := repo.NewZoneRepo(pool)
 	regionRepo := repo.NewRegionRepo(pool)
-	hypervisorRepo := repo.NewHypervisorRepo(pool)
 
 	// Источник зон для existence-check zone_id (Disk/Instance Create, Disk Relocate)
 	// — локальная таблица `zones` (compute — owner Geography).
@@ -248,14 +246,13 @@ func buildServices(pool *pgxpool.Pool, folderClient service.FolderClient, vpcCli
 
 	diskTypeSvc := service.NewDiskTypeService(diskTypeRepo)
 	return &services{
-		disk:       service.NewDiskService(diskRepo, imageRepo, snapshotRepo, diskTypeRepo, zoneRegistry, folderClient, opsRepo),
-		image:      service.NewImageService(imageRepo, diskRepo, snapshotRepo, folderClient, opsRepo),
-		snapshot:   service.NewSnapshotService(snapshotRepo, diskRepo, folderClient, opsRepo),
-		diskType:   diskTypeSvc,
-		zone:       service.NewZoneService(zoneRepo),
-		region:     service.NewRegionService(regionRepo),
-		hypervisor: service.NewHypervisorService(hypervisorRepo),
-		instance:   service.NewInstanceService(instanceRepo, diskRepo, imageRepo, snapshotRepo, zoneRegistry, folderClient, vpcClient, opsRepo, skipPeer),
+		disk:     service.NewDiskService(diskRepo, imageRepo, snapshotRepo, diskTypeRepo, zoneRegistry, folderClient, opsRepo),
+		image:    service.NewImageService(imageRepo, diskRepo, snapshotRepo, folderClient, opsRepo),
+		snapshot: service.NewSnapshotService(snapshotRepo, diskRepo, folderClient, opsRepo),
+		diskType: diskTypeSvc,
+		zone:     service.NewZoneService(zoneRepo),
+		region:   service.NewRegionService(regionRepo),
+		instance: service.NewInstanceService(instanceRepo, diskRepo, imageRepo, snapshotRepo, zoneRegistry, folderClient, vpcClient, opsRepo, skipPeer),
 	}
 }
 
@@ -279,7 +276,6 @@ func registerInternalServices(srv *grpc.Server, svcs *services, pool *pgxpool.Po
 	computev1.RegisterInternalDiskTypeServiceServer(srv, handler.NewInternalDiskTypeHandler(svcs.diskType))
 	computev1.RegisterInternalZoneServiceServer(srv, handler.NewInternalZoneHandler(svcs.zone))
 	computev1.RegisterInternalRegionServiceServer(srv, handler.NewInternalRegionHandler(svcs.region))
-	computev1.RegisterInternalHypervisorServiceServer(srv, handler.NewInternalHypervisorHandler(svcs.hypervisor))
 }
 
 func runMigrate(cfg config.Config, direction string) {

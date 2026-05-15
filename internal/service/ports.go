@@ -35,8 +35,6 @@ type (
 	ZoneRepo = ports.ZoneRepo
 	// RegionRepo — port-интерфейс репозитория регионов.
 	RegionRepo = ports.RegionRepo
-	// HypervisorRepo — port-интерфейс реестра гипервизоров (internal-only).
-	HypervisorRepo = ports.HypervisorRepo
 
 	// FolderClient — port для проверки существования Folder.
 	FolderClient = ports.FolderClient
