@@ -111,6 +111,11 @@ timestamp precision, regex'ы, behavioural semantics, state-машина Instanc
 
 ## 2. Доменная модель и связи
 
+> Полная mermaid-ER-схема всех таблиц `kacho_compute` (PK/FK/ON DELETE policy /
+> UNIQUE / CHECK, partial UNIQUE на boot disk / device_name) — см.
+> [`docs/architecture/er-diagram.md`](docs/architecture/er-diagram.md) (KAC-98,
+> Skill `evgeniy §5 E.6`). Раздел ниже — ASCII-сводка для быстрого ориентира.
+
 ```
                 ┌──────────── Image ◄─────┐ (source)
 Instance (1) ───┤                          │
