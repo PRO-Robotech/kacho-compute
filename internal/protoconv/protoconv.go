@@ -123,24 +123,6 @@ func Region(r *domain.Region) *computev1.Region {
 	}
 }
 
-// Hypervisor конвертирует domain.Hypervisor → computev1.Hypervisor (internal-only).
-func Hypervisor(h *domain.Hypervisor) *computev1.Hypervisor {
-	return &computev1.Hypervisor{
-		Id:        h.ID,
-		ZoneId:    h.ZoneID,
-		NodeIndex: h.NodeIndex,
-		Fqdn:      h.FQDN,
-		State:     computev1.Hypervisor_State(h.State),
-		Capacity: &computev1.Hypervisor_Capacity{
-			Vcpus:       h.Capacity.VCPUs,
-			MemoryBytes: h.Capacity.MemoryBytes,
-			Instances:   h.Capacity.Instances,
-		},
-		CreatedAt: ts(h.CreatedAt),
-		UpdatedAt: ts(h.UpdatedAt),
-	}
-}
-
 // Instance конвертирует domain.Instance → computev1.Instance.
 func Instance(in *domain.Instance) *computev1.Instance {
 	out := &computev1.Instance{
