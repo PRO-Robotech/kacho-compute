@@ -137,8 +137,8 @@ erDiagram
   }
 
   INSTANCE_NETWORK_INTERFACES {
-    text instance_id PK_compound "FK → instances.id ON DELETE CASCADE"
-    text idx PK_compound "PRIMARY KEY (instance_id, idx)"
+    text instance_id PK "composite PK (instance_id, idx); FK → instances.id ON DELETE CASCADE"
+    text idx PK "composite PK (instance_id, idx)"
     text mac_address
     text subnet_id "cross-service → vpc.subnets (no FK)"
     text primary_v4_address
@@ -153,8 +153,8 @@ erDiagram
   }
 
   ATTACHED_DISKS {
-    text instance_id PK_compound "FK → instances.id ON DELETE CASCADE"
-    text disk_id PK_compound "FK → disks.id ON DELETE RESTRICT; PRIMARY KEY (instance_id, disk_id)"
+    text instance_id PK "composite PK (instance_id, disk_id); FK → instances.id ON DELETE CASCADE"
+    text disk_id PK "composite PK (instance_id, disk_id); FK → disks.id ON DELETE RESTRICT"
     bool is_boot "partial UNIQUE (instance_id) WHERE is_boot — exactly one boot disk per instance"
     text mode "READ_ONLY | READ_WRITE | MODE_UNSPECIFIED"
     text device_name "partial UNIQUE (instance_id, device_name) WHERE device_name<>''"
