@@ -148,6 +148,10 @@ func (r *InstanceRepo) Insert(ctx context.Context, in *domain.Instance, inlineDi
 	}
 	for _, ad := range in.AttachedDisks {
 		if err := insertAttachedDiskTx(ctx, tx, in.ID, ad); err != nil {
+			// KAC-90: UNIQUE на attached_disks.disk_id — диск уже attached другой Instance.
+			if isAttachedDisksDiskIDUniqViolation(err) {
+				return nil, fmt.Errorf("%w: disk already attached to another instance", service.ErrFailedPrecondition)
+			}
 			return nil, err
 		}
 	}
@@ -316,6 +320,11 @@ func (r *InstanceRepo) mutateAndReload(ctx context.Context, id, eventType string
 	if err := mutate(ctx, tx); err != nil {
 		if isFKViolation(err) {
 			return nil, fmt.Errorf("%w: Instance %s has dependent resources", service.ErrFailedPrecondition, id)
+		}
+		// KAC-90: UNIQUE на attached_disks.disk_id — диск уже attached другой Instance.
+		// Отделяем от generic AlreadyExists (мапит в FailedPrecondition, не AlreadyExists).
+		if isAttachedDisksDiskIDUniqViolation(err) {
+			return nil, fmt.Errorf("%w: disk already attached to another instance", service.ErrFailedPrecondition)
 		}
 		if isUniqueViolation(err) {
 			return nil, service.ErrAlreadyExists
