@@ -89,8 +89,14 @@ type InstanceRepo interface {
 	Insert(ctx context.Context, in *domain.Instance, inlineDisks []*domain.Disk) (*domain.Instance, error)
 	// Update обновляет mutable поля + status (для lifecycle-операций).
 	Update(ctx context.Context, in *domain.Instance) (*domain.Instance, error)
-	// SetStatus меняет только status (Start/Stop/Restart). Возвращает обновлённую ВМ.
-	SetStatus(ctx context.Context, id string, status domain.InstanceStatus) (*domain.Instance, error)
+	// SetStatusCAS атомарно переводит instance из expected-status в next-status
+	// (CAS на DB-уровне: conditional UPDATE WHERE id=$1 AND status=$expected).
+	// Если row не существует → ErrNotFound; если status не совпадает с
+	// expected → ErrFailedPrecondition (state transition not allowed). Возвращает
+	// обновлённую ВМ (+ outbox UPDATED в той же TX). Workspace CLAUDE.md
+	// §«Within-service refs — DB-уровень обязателен» (KAC-91/KAC-87 G2,
+	// parity c kacho-vpc KAC-52 NIC-attach race).
+	SetStatusCAS(ctx context.Context, id string, expected, next domain.InstanceStatus) (*domain.Instance, error)
 	// SetFolderID меняет folder_id (для Move).
 	SetFolderID(ctx context.Context, id, folderID string) (*domain.Instance, error)
 	// AttachDisk добавляет строку attached_disks. Возвращает обновлённую ВМ.

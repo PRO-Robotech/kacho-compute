@@ -406,15 +406,20 @@ func (r *InstanceRepo) Update(_ context.Context, in *domain.Instance) (*domain.I
 	return in, nil
 }
 
-// SetStatus меняет status.
-func (r *InstanceRepo) SetStatus(_ context.Context, id string, status domain.InstanceStatus) (*domain.Instance, error) {
+// SetStatusCAS — in-memory CAS: атомарно переводит status из expected в next.
+// Если row не существует → ErrNotFound; если текущий status != expected →
+// ErrFailedPrecondition (mirrors DB-уровень в repo.InstanceRepo.SetStatusCAS).
+func (r *InstanceRepo) SetStatusCAS(_ context.Context, id string, expected, next domain.InstanceStatus) (*domain.Instance, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	in, ok := r.data[id]
 	if !ok {
 		return nil, ports.ErrNotFound
 	}
-	in.Status = status
+	if in.Status != expected {
+		return nil, fmt.Errorf("%w: state transition not allowed from current status", ports.ErrFailedPrecondition)
+	}
+	in.Status = next
 	return in, nil
 }
 

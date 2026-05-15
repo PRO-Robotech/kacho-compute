@@ -180,10 +180,13 @@ func TestIntegration_InstanceRepo_AttachFKCascade(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, updated.AttachedDisks, 1)
 
-	// SetStatus.
-	updated, err = instRepo.SetStatus(ctx, inID, domain.InstanceStatusStopped)
+	// SetStatusCAS: RUNNING → STOPPED.
+	updated, err = instRepo.SetStatusCAS(ctx, inID, domain.InstanceStatusRunning, domain.InstanceStatusStopped)
 	require.NoError(t, err)
 	require.Equal(t, domain.InstanceStatusStopped, updated.Status)
+	// CAS fail: instance уже STOPPED, повторный CAS RUNNING→STOPPED → FailedPrecondition.
+	_, err = instRepo.SetStatusCAS(ctx, inID, domain.InstanceStatusRunning, domain.InstanceStatusStopped)
+	require.ErrorIs(t, err, service.ErrFailedPrecondition)
 
 	// Delete instance with auto-delete boot disk → NIC + attached_disks cleaned via CASCADE, boot disk deleted.
 	require.NoError(t, instRepo.Delete(ctx, inID, []string{bootDiskID}))
