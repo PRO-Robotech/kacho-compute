@@ -203,12 +203,53 @@ func (r *InstanceRepo) Update(ctx context.Context, in *domain.Instance) (*domain
 	return updated, nil
 }
 
-// SetStatus меняет только status (Start/Stop/Restart) + outbox UPDATED.
-func (r *InstanceRepo) SetStatus(ctx context.Context, id string, st domain.InstanceStatus) (*domain.Instance, error) {
-	return r.mutateAndReload(ctx, id, "UPDATED", func(ctx context.Context, tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE instances SET status = $2 WHERE id = $1`, id, instanceStatusName(st))
-		return err
-	})
+// SetStatusCAS атомарно переводит instance из expected-status в next-status
+// (workspace CLAUDE.md §«Within-service refs — DB-уровень обязателен»).
+//
+// Conditional UPDATE: `WHERE id=$1 AND status=$expected` — Postgres row-level
+// lock сериализует concurrent writer'ов на одной row; второй writer ждёт
+// commit'а первого, после чего видит уже обновлённый status, WHERE не
+// matches, 0 rows → FailedPrecondition. Различаем NotFound vs
+// FailedPrecondition дополнительным `SELECT EXISTS` в той же TX. Закрывает
+// G2 audit KAC-85 (TOCTOU `Get→check→SetStatus`), parity c kacho-vpc KAC-52.
+func (r *InstanceRepo) SetStatusCAS(ctx context.Context, id string, expected, next domain.InstanceStatus) (*domain.Instance, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, service.ErrInternal
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	tag, err := tx.Exec(ctx, `UPDATE instances SET status = $3 WHERE id = $1 AND status = $2`,
+		id, instanceStatusName(expected), instanceStatusName(next))
+	if err != nil {
+		return nil, wrapPgErr(err, "Instance", id)
+	}
+	if tag.RowsAffected() == 0 {
+		// Различаем «instance не существует» vs «instance в другом state».
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM instances WHERE id = $1)`, id).Scan(&exists); err != nil {
+			return nil, wrapPgErr(err, "Instance", id)
+		}
+		if !exists {
+			return nil, fmt.Errorf("%w: Instance %s not found", service.ErrNotFound, id)
+		}
+		return nil, fmt.Errorf("%w: state transition not allowed from current status", service.ErrFailedPrecondition)
+	}
+	q := fmt.Sprintf(`SELECT %s FROM instances WHERE id = $1`, instanceCols)
+	in, err := scanInstance(tx.QueryRow(ctx, q, id))
+	if err != nil {
+		return nil, wrapPgErr(err, "Instance", id)
+	}
+	if err := r.fillChildrenTx(ctx, tx, in); err != nil {
+		return nil, err
+	}
+	if err := emitCompute(ctx, tx, "Instance", in.ID, "UPDATED", instancePayload(in)); err != nil {
+		return nil, service.ErrInternal
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, wrapPgErr(err, "Instance", id)
+	}
+	return in, nil
 }
 
 // SetFolderID меняет folder_id (для Move) + outbox UPDATED.

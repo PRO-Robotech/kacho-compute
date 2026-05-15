@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/netip"
@@ -828,22 +829,57 @@ func (s *InstanceService) UpdateMetadata(ctx context.Context, instanceID string,
 	return &op, nil
 }
 
-// Start/Stop/Restart — state-машина (см. CLAUDE.md §8).
+// Start/Stop/Restart — state-машина (см. CLAUDE.md §8). DB-уровневый CAS
+// (workspace CLAUDE.md §«Within-service refs — DB-уровень обязателен»):
+// `Get → check → SetStatus` заменено на atomic `SetStatusCAS(expected, next)`
+// в одной транзакции — concurrent Stop+Restart на RUNNING ВМ не может
+// привести к second-writer-wins / lost-state (KAC-91, gap G2 audit KAC-85,
+// parity c kacho-vpc KAC-52 NIC-attach race).
 func (s *InstanceService) Start(ctx context.Context, id string) (*operations.Operation, error) {
 	return s.lifecycle(ctx, id, "Start", domain.InstanceStatusStopped, domain.InstanceStatusRunning,
 		"Instance is not stopped", &computev1.StartInstanceMetadata{InstanceId: id})
 }
 
-// Stop переводит ВМ RUNNING→STOPPED.
+// Stop переводит ВМ RUNNING→STOPPED. CAS-условие на DB-уровне: только из
+// RUNNING. Второй concurrent Stop увидит status=STOPPED и получит
+// FailedPrecondition.
 func (s *InstanceService) Stop(ctx context.Context, id string) (*operations.Operation, error) {
 	return s.lifecycle(ctx, id, "Stop", domain.InstanceStatusRunning, domain.InstanceStatusStopped,
 		"Instance is not running", &computev1.StopInstanceMetadata{InstanceId: id})
 }
 
-// Restart перезапускает RUNNING ВМ (status остаётся RUNNING).
+// Restart перезапускает RUNNING ВМ. Two-step CAS: RUNNING→RESTARTING (gate
+// для concurrent Restart — ровно один winner), затем RESTARTING→RUNNING
+// (мы owner state RESTARTING, второй CAS не race-able). Конечный state — RUNNING.
 func (s *InstanceService) Restart(ctx context.Context, id string) (*operations.Operation, error) {
-	return s.lifecycle(ctx, id, "Restart", domain.InstanceStatusRunning, domain.InstanceStatusRunning,
-		"Instance is not running", &computev1.RestartInstanceMetadata{InstanceId: id})
+	if id == "" {
+		return nil, status.Error(codes.InvalidArgument, "instance_id required")
+	}
+	op, err := operations.New(ids.PrefixOperationCompute, fmt.Sprintf("Restart instance %s", id),
+		&computev1.RestartInstanceMetadata{InstanceId: id})
+	if err != nil {
+		return nil, err
+	}
+	if err := s.opsRepo.Create(ctx, op); err != nil {
+		return nil, err
+	}
+	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
+		// Step 1: RUNNING → RESTARTING (gate). Concurrent Restarts: только
+		// один writer пройдёт CAS, остальные получат FailedPrecondition.
+		if _, err := s.repo.SetStatusCAS(ctx, id, domain.InstanceStatusRunning, domain.InstanceStatusRestarting); err != nil {
+			return nil, mapLifecycleErr(err, "Instance is not running")
+		}
+		// Step 2: RESTARTING → RUNNING (control-plane: реального гипервизора
+		// нет, restart мгновенный). Мы owner state RESTARTING — race не
+		// возможен; если кто-то параллельно перевёл нас (admin/etc.) и
+		// status уже не RESTARTING — это аномалия, лучше FailedPrecondition.
+		updated, err := s.repo.SetStatusCAS(ctx, id, domain.InstanceStatusRestarting, domain.InstanceStatusRunning)
+		if err != nil {
+			return nil, mapLifecycleErr(err, "Instance is not running")
+		}
+		return anypb.New(protoconv.Instance(updated))
+	})
+	return &op, nil
 }
 
 func (s *InstanceService) lifecycle(ctx context.Context, id, action string, from, to domain.InstanceStatus, precondMsg string, meta protoreflectMessage) (*operations.Operation, error) {
@@ -858,20 +894,24 @@ func (s *InstanceService) lifecycle(ctx context.Context, id, action string, from
 		return nil, err
 	}
 	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		in, err := s.repo.Get(ctx, id)
+		updated, err := s.repo.SetStatusCAS(ctx, id, from, to)
 		if err != nil {
-			return nil, mapRepoErr(err)
-		}
-		if in.Status != from {
-			return nil, status.Error(codes.FailedPrecondition, precondMsg)
-		}
-		updated, err := s.repo.SetStatus(ctx, id, to)
-		if err != nil {
-			return nil, mapRepoErr(err)
+			return nil, mapLifecycleErr(err, precondMsg)
 		}
 		return anypb.New(protoconv.Instance(updated))
 	})
 	return &op, nil
+}
+
+// mapLifecycleErr маппит ошибку SetStatusCAS в gRPC-status: ErrFailedPrecondition
+// от CAS-промаха («status != expected») транслируется в FailedPrecondition с
+// verbatim YC-style precondMsg ("Instance is not running"/"... not stopped");
+// все остальные (ErrNotFound, ErrInternal, ...) — стандартный mapRepoErr.
+func mapLifecycleErr(err error, precondMsg string) error {
+	if errors.Is(err, ErrFailedPrecondition) {
+		return status.Error(codes.FailedPrecondition, precondMsg)
+	}
+	return mapRepoErr(err)
 }
 
 // AttachDisk подключает READY-диск к ВМ (status ∈ {RUNNING, STOPPED}).
