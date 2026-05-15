@@ -24,6 +24,24 @@ func isUniqueViolation(err error) bool {
 	return strings.Contains(s, "23505") || strings.Contains(s, "duplicate key value")
 }
 
+// isAttachedDisksDiskIDUniqViolation — true если 23505 пришла именно на индекс
+// `attached_disks_disk_id_uniq` (миграция 0007, KAC-90). Используется для
+// отделения «диск уже attached к другой Instance» (FailedPrecondition) от
+// общего AlreadyExists по другим UNIQUE-constraint.
+func isAttachedDisksDiskIDUniqViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		if pgErr.Code != "23505" {
+			return false
+		}
+		return pgErr.ConstraintName == "attached_disks_disk_id_uniq"
+	}
+	return strings.Contains(err.Error(), "attached_disks_disk_id_uniq")
+}
+
 // isFKViolation — Postgres foreign_key_violation (SQLSTATE 23503). Возникает на
 // Delete Disk пока он attached (FK attached_disks.disk_id RESTRICT). Маппится в
 // gRPC FailedPrecondition (verbatim YC: "The disk is being used").
