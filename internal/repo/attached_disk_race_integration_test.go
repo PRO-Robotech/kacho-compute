@@ -71,12 +71,12 @@ func TestIntegration_AttachedDisksDiskIDUniq_ConcurrentAttachRace(t *testing.T) 
 	// напрямую (а не InstanceRepo.AttachDisk) — нам нужна именно гонка на
 	// уровне INSERT-statement без software-pre-check'ов.
 	var (
-		wg            sync.WaitGroup
-		successCnt    atomic.Int32
-		uniqViolCnt   atomic.Int32
-		otherErrs     []error
-		otherErrsMu   sync.Mutex
-		startBarrier  = make(chan struct{})
+		wg           sync.WaitGroup
+		successCnt   atomic.Int32
+		uniqViolCnt  atomic.Int32
+		otherErrs    []error
+		otherErrsMu  sync.Mutex
+		startBarrier = make(chan struct{})
 	)
 
 	for i := 0; i < N; i++ {
