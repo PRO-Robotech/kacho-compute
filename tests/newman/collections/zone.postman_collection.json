@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "f5e112f6-476c-4383-ba71-d29df93bec04",
+    "_postman_id": "fc7d37af-1ebf-4243-a807-202f7bf077f5",
     "name": "kacho-compute / newman / zone",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -16,8 +16,8 @@
           "  const r = Math.floor(Math.random() * 1e9).toString(36);",
           "  pm.environment.set('runId', ('r' + t + r).replace(/[^a-z0-9]/g, '').slice(0, 11));",
           "}",
-          "pm.environment.set('_suiteFolderId', pm.environment.get('existingFolderId'));",
-          "pm.environment.set('_suiteFolderCrossId', pm.environment.get('existingFolderCrossId'));"
+          "pm.environment.set('_suiteFolderId', pm.environment.get('existingProjectId'));",
+          "pm.environment.set('_suiteFolderCrossId', pm.environment.get('existingProjectCrossId'));"
         ]
       }
     }

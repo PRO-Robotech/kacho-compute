@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "6309880c-ae55-434c-8dcf-816c67f3746f",
+    "_postman_id": "f39861e7-54da-45c6-8964-527f3a04c002",
     "name": "kacho-compute / newman / image",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -16,8 +16,8 @@
           "  const r = Math.floor(Math.random() * 1e9).toString(36);",
           "  pm.environment.set('runId', ('r' + t + r).replace(/[^a-z0-9]/g, '').slice(0, 11));",
           "}",
-          "pm.environment.set('_suiteFolderId', pm.environment.get('existingFolderId'));",
-          "pm.environment.set('_suiteFolderCrossId', pm.environment.get('existingFolderCrossId'));"
+          "pm.environment.set('_suiteFolderId', pm.environment.get('existingProjectId'));",
+          "pm.environment.set('_suiteFolderCrossId', pm.environment.get('existingProjectCrossId'));"
         ]
       }
     }
@@ -50,7 +50,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"disk-imgsrc-crok-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"size\": 10737418240}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"disk-imgsrc-crok-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"size\": 10737418240}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -148,7 +148,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"img-cr-{{runId}}\", \"family\": \"newman-fam-{{runId}}\", \"diskId\": \"{{baseDiskId}}\", \"description\": \"newman CRUD-OK\", \"labels\": {\"suite\": \"newman\"}}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"img-cr-{{runId}}\", \"family\": \"newman-fam-{{runId}}\", \"diskId\": \"{{baseDiskId}}\", \"description\": \"newman CRUD-OK\", \"labels\": {\"suite\": \"newman\"}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -295,7 +295,7 @@
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "const j = pm.response.json();",
                   "pm.test('id matches & fd8 prefix', () => { pm.expect(j.id).to.eql(pm.environment.get('imageId')); pm.expect(j.id).to.match(/^fd8/); });",
-                  "pm.test('folderId matches', () => pm.expect(j.folderId).to.eql(pm.environment.get('_suiteFolderId')));",
+                  "pm.test('projectId matches', () => pm.expect(j.projectId).to.eql(pm.environment.get('_suiteFolderId')));",
                   "pm.test('family matches', () => pm.expect(j.family).to.match(/^newman-fam-/));",
                   "pm.test('status READY', () => pm.expect(j.status).to.eql('READY'));",
                   "pm.test('minDiskSize numeric & >0', () => pm.expect(Number(j.minDiskSize)).to.be.above(0));",
@@ -508,7 +508,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"img-uri-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"img-uri-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -767,7 +767,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"img-base-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"img-base-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -865,7 +865,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"img-fromimg-{{runId}}\", \"imageId\": \"{{baseImageId}}\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"img-fromimg-{{runId}}\", \"imageId\": \"{{baseImageId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1208,7 +1208,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"disk-imgsrc-snapsrc-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"size\": 10737418240}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"disk-imgsrc-snapsrc-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"size\": 10737418240}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1306,7 +1306,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"snap-imgsrc-{{runId}}\", \"diskId\": \"{{baseDiskId}}\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"snap-imgsrc-{{runId}}\", \"diskId\": \"{{baseDiskId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1404,7 +1404,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"img-fromsnap-{{runId}}\", \"snapshotId\": \"{{snapshotId}}\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"img-fromsnap-{{runId}}\", \"snapshotId\": \"{{snapshotId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1805,7 +1805,7 @@
       ]
     },
     {
-      "name": "IMG-CR-VAL-FOLDER-REQUIRED — Create без folderId → 400 InvalidArgument",
+      "name": "IMG-CR-VAL-FOLDER-REQUIRED — Create без projectId → 400 InvalidArgument",
       "description": "class:VAL | priority:P0",
       "item": [
         {
@@ -1884,7 +1884,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"img-ns-{{runId}}\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"img-ns-{{runId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1937,7 +1937,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"img-ms-{{runId}}\", \"imageId\": \"{{garbageImageId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"img-ms-{{runId}}\", \"imageId\": \"{{garbageImageId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1990,7 +1990,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"img-bd-{{runId}}\", \"diskId\": \"{{garbageComputeId}}\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"img-bd-{{runId}}\", \"diskId\": \"{{garbageComputeId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2124,7 +2124,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"img-bi-{{runId}}\", \"imageId\": \"{{garbageImageId}}\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"img-bi-{{runId}}\", \"imageId\": \"{{garbageImageId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2232,7 +2232,7 @@
       ]
     },
     {
-      "name": "IMG-CR-NEG-FOLDER-NOTFOUND — Create image в garbage folderId → async NOT_FOUND 'Folder ... not found'",
+      "name": "IMG-CR-NEG-FOLDER-NOTFOUND — Create image в garbage projectId → async NOT_FOUND 'Folder ... not found'",
       "description": "class:NEG | priority:P0",
       "item": [
         {
@@ -2258,7 +2258,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{garbageRmId}}\", \"name\": \"img-bf-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{garbageRmId}}\", \"name\": \"img-bf-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2393,7 +2393,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"img-dup-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"img-dup-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2491,7 +2491,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"img-dup-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"img-dup-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2709,7 +2709,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"img-bf2-{{runId}}\", \"family\": \"Bad_Family!\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"img-bf2-{{runId}}\", \"family\": \"Bad_Family!\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2762,7 +2762,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"img-glf1-{{runId}}\", \"family\": \"glf-fam-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"img-glf1-{{runId}}\", \"family\": \"glf-fam-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2860,7 +2860,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"img-glf2-{{runId}}\", \"family\": \"glf-fam-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"img-glf2-{{runId}}\", \"family\": \"glf-fam-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2946,14 +2946,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/compute/v1/images:latestByFamily?folderId={{_suiteFolderId}}&family=glf-fam-{{runId}}",
+              "raw": "{{baseUrl}}/compute/v1/images:latestByFamily?projectId={{_suiteFolderId}}&family=glf-fam-{{runId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "compute",
                 "v1",
-                "images:latestByFamily?folderId={{_suiteFolderId}}&family=glf-fam-{{runId}}"
+                "images:latestByFamily?projectId={{_suiteFolderId}}&family=glf-fam-{{runId}}"
               ]
             }
           },
@@ -3157,14 +3157,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/compute/v1/images:latestByFamily?folderId={{_suiteFolderId}}&family=nonexistent-fam-{{runId}}",
+              "raw": "{{baseUrl}}/compute/v1/images:latestByFamily?projectId={{_suiteFolderId}}&family=nonexistent-fam-{{runId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "compute",
                 "v1",
-                "images:latestByFamily?folderId={{_suiteFolderId}}&family=nonexistent-fam-{{runId}}"
+                "images:latestByFamily?projectId={{_suiteFolderId}}&family=nonexistent-fam-{{runId}}"
               ]
             }
           },
@@ -3187,7 +3187,7 @@
       ]
     },
     {
-      "name": "IMG-GLF-VAL-FOLDER-REQUIRED — GetLatestByFamily без folderId → 400 InvalidArgument",
+      "name": "IMG-GLF-VAL-FOLDER-REQUIRED — GetLatestByFamily без projectId → 400 InvalidArgument",
       "description": "class:VAL | priority:P1",
       "item": [
         {
@@ -3336,14 +3336,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/compute/v1/images?folderId={{_suiteFolderId}}",
+              "raw": "{{baseUrl}}/compute/v1/images?projectId={{_suiteFolderId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "compute",
                 "v1",
-                "images?folderId={{_suiteFolderId}}"
+                "images?projectId={{_suiteFolderId}}"
               ]
             }
           },
@@ -3363,7 +3363,7 @@
       ]
     },
     {
-      "name": "IMG-LST-VAL-FOLDER-REQUIRED — List без folderId → 400 InvalidArgument",
+      "name": "IMG-LST-VAL-FOLDER-REQUIRED — List без projectId → 400 InvalidArgument",
       "description": "class:VAL | class:AUTHZ | priority:P0",
       "item": [
         {
@@ -3433,7 +3433,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"img-upd-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\", \"description\": \"init\", \"labels\": {\"orig\": \"1\"}}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"img-upd-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\", \"description\": \"init\", \"labels\": {\"orig\": \"1\"}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3944,7 +3944,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"img-delok-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"img-delok-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4252,7 +4252,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"img-lop-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"img-lop-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4477,7 +4477,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"img-life-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"img-life-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4599,14 +4599,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/compute/v1/images?folderId={{_suiteFolderId}}&pageSize=1000",
+              "raw": "{{baseUrl}}/compute/v1/images?projectId={{_suiteFolderId}}&pageSize=1000",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "compute",
                 "v1",
-                "images?folderId={{_suiteFolderId}}&pageSize=1000"
+                "images?projectId={{_suiteFolderId}}&pageSize=1000"
               ]
             }
           },
@@ -4850,14 +4850,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/compute/v1/images?folderId={{_suiteFolderId}}&pageSize=1000",
+              "raw": "{{baseUrl}}/compute/v1/images?projectId={{_suiteFolderId}}&pageSize=1000",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "compute",
                 "v1",
-                "images?folderId={{_suiteFolderId}}&pageSize=1000"
+                "images?projectId={{_suiteFolderId}}&pageSize=1000"
               ]
             }
           },
@@ -4931,14 +4931,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/compute/v1/images?folderId={{_suiteFolderId}}&pageSize=0",
+              "raw": "{{baseUrl}}/compute/v1/images?projectId={{_suiteFolderId}}&pageSize=0",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "compute",
                 "v1",
-                "images?folderId={{_suiteFolderId}}&pageSize=0"
+                "images?projectId={{_suiteFolderId}}&pageSize=0"
               ]
             }
           },
@@ -4971,14 +4971,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/compute/v1/images?folderId={{_suiteFolderId}}&pageSize=1",
+              "raw": "{{baseUrl}}/compute/v1/images?projectId={{_suiteFolderId}}&pageSize=1",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "compute",
                 "v1",
-                "images?folderId={{_suiteFolderId}}&pageSize=1"
+                "images?projectId={{_suiteFolderId}}&pageSize=1"
               ]
             }
           },
@@ -5012,14 +5012,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/compute/v1/images?folderId={{_suiteFolderId}}&pageSize=1000",
+              "raw": "{{baseUrl}}/compute/v1/images?projectId={{_suiteFolderId}}&pageSize=1000",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "compute",
                 "v1",
-                "images?folderId={{_suiteFolderId}}&pageSize=1000"
+                "images?projectId={{_suiteFolderId}}&pageSize=1000"
               ]
             }
           },
@@ -5052,14 +5052,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/compute/v1/images?folderId={{_suiteFolderId}}&pageSize=1001",
+              "raw": "{{baseUrl}}/compute/v1/images?projectId={{_suiteFolderId}}&pageSize=1001",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "compute",
                 "v1",
-                "images?folderId={{_suiteFolderId}}&pageSize=1001"
+                "images?projectId={{_suiteFolderId}}&pageSize=1001"
               ]
             }
           },
@@ -5096,14 +5096,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/compute/v1/images?folderId={{_suiteFolderId}}&pageSize=10&pageToken=not-a-real-token",
+              "raw": "{{baseUrl}}/compute/v1/images?projectId={{_suiteFolderId}}&pageSize=10&pageToken=not-a-real-token",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "compute",
                 "v1",
-                "images?folderId={{_suiteFolderId}}&pageSize=10&pageToken=not-a-real-token"
+                "images?projectId={{_suiteFolderId}}&pageSize=10&pageToken=not-a-real-token"
               ]
             }
           },
@@ -5140,14 +5140,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/compute/v1/images?folderId={{_suiteFolderId}}&filter=name%3D%22foo%22",
+              "raw": "{{baseUrl}}/compute/v1/images?projectId={{_suiteFolderId}}&filter=name%3D%22foo%22",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "compute",
                 "v1",
-                "images?folderId={{_suiteFolderId}}&filter=name%3D%22foo%22"
+                "images?projectId={{_suiteFolderId}}&filter=name%3D%22foo%22"
               ]
             }
           },
@@ -5180,14 +5180,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/compute/v1/images?folderId={{_suiteFolderId}}&filter=this%20is%20not%20valid%20syntax",
+              "raw": "{{baseUrl}}/compute/v1/images?projectId={{_suiteFolderId}}&filter=this%20is%20not%20valid%20syntax",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "compute",
                 "v1",
-                "images?folderId={{_suiteFolderId}}&filter=this%20is%20not%20valid%20syntax"
+                "images?projectId={{_suiteFolderId}}&filter=this%20is%20not%20valid%20syntax"
               ]
             }
           },
@@ -5220,14 +5220,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/compute/v1/images?folderId={{_suiteFolderId}}&filter=nonexistent_field%3D%22x%22",
+              "raw": "{{baseUrl}}/compute/v1/images?projectId={{_suiteFolderId}}&filter=nonexistent_field%3D%22x%22",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "compute",
                 "v1",
-                "images?folderId={{_suiteFolderId}}&filter=nonexistent_field%3D%22x%22"
+                "images?projectId={{_suiteFolderId}}&filter=nonexistent_field%3D%22x%22"
               ]
             }
           },
@@ -5272,7 +5272,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5371,7 +5371,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"nabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijab\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"nabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijab\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5470,7 +5470,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"nabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabc\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"nabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabc\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5523,7 +5523,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"InvalidUpper-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"InvalidUpper-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5576,7 +5576,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"9invalid-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"9invalid-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5629,7 +5629,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"-bad-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"-bad-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5682,7 +5682,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"name!@#-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"name!@#-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5735,7 +5735,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"img-descm-{{runId}}\", \"description\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"img-descm-{{runId}}\", \"description\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5834,7 +5834,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"img-d2-{{runId}}\", \"description\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"img-d2-{{runId}}\", \"description\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5887,7 +5887,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"img-lblup-{{runId}}\", \"labels\": {\"BADKEY\": \"v\"}, \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"img-lblup-{{runId}}\", \"labels\": {\"BADKEY\": \"v\"}, \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5940,7 +5940,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"img-lblbad-{{runId}}\", \"labels\": {\"bad key!\": \"v\"}, \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"img-lblbad-{{runId}}\", \"labels\": {\"bad key!\": \"v\"}, \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5993,7 +5993,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"img-lblm-{{runId}}\", \"labels\": {\"k0\": \"v0\", \"k1\": \"v1\", \"k2\": \"v2\", \"k3\": \"v3\", \"k4\": \"v4\", \"k5\": \"v5\", \"k6\": \"v6\", \"k7\": \"v7\", \"k8\": \"v8\", \"k9\": \"v9\", \"k10\": \"v10\", \"k11\": \"v11\", \"k12\": \"v12\", \"k13\": \"v13\", \"k14\": \"v14\", \"k15\": \"v15\", \"k16\": \"v16\", \"k17\": \"v17\", \"k18\": \"v18\", \"k19\": \"v19\", \"k20\": \"v20\", \"k21\": \"v21\", \"k22\": \"v22\", \"k23\": \"v23\", \"k24\": \"v24\", \"k25\": \"v25\", \"k26\": \"v26\", \"k27\": \"v27\", \"k28\": \"v28\", \"k29\": \"v29\", \"k30\": \"v30\", \"k31\": \"v31\", \"k32\": \"v32\", \"k33\": \"v33\", \"k34\": \"v34\", \"k35\": \"v35\", \"k36\": \"v36\", \"k37\": \"v37\", \"k38\": \"v38\", \"k39\": \"v39\", \"k40\": \"v40\", \"k41\": \"v41\", \"k42\": \"v42\", \"k43\": \"v43\", \"k44\": \"v44\", \"k45\": \"v45\", \"k46\": \"v46\", \"k47\": \"v47\", \"k48\": \"v48\", \"k49\": \"v49\", \"k50\": \"v50\", \"k51\": \"v51\", \"k52\": \"v52\", \"k53\": \"v53\", \"k54\": \"v54\", \"k55\": \"v55\", \"k56\": \"v56\", \"k57\": \"v57\", \"k58\": \"v58\", \"k59\": \"v59\", \"k60\": \"v60\", \"k61\": \"v61\", \"k62\": \"v62\", \"k63\": \"v63\"}, \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"img-lblm-{{runId}}\", \"labels\": {\"k0\": \"v0\", \"k1\": \"v1\", \"k2\": \"v2\", \"k3\": \"v3\", \"k4\": \"v4\", \"k5\": \"v5\", \"k6\": \"v6\", \"k7\": \"v7\", \"k8\": \"v8\", \"k9\": \"v9\", \"k10\": \"v10\", \"k11\": \"v11\", \"k12\": \"v12\", \"k13\": \"v13\", \"k14\": \"v14\", \"k15\": \"v15\", \"k16\": \"v16\", \"k17\": \"v17\", \"k18\": \"v18\", \"k19\": \"v19\", \"k20\": \"v20\", \"k21\": \"v21\", \"k22\": \"v22\", \"k23\": \"v23\", \"k24\": \"v24\", \"k25\": \"v25\", \"k26\": \"v26\", \"k27\": \"v27\", \"k28\": \"v28\", \"k29\": \"v29\", \"k30\": \"v30\", \"k31\": \"v31\", \"k32\": \"v32\", \"k33\": \"v33\", \"k34\": \"v34\", \"k35\": \"v35\", \"k36\": \"v36\", \"k37\": \"v37\", \"k38\": \"v38\", \"k39\": \"v39\", \"k40\": \"v40\", \"k41\": \"v41\", \"k42\": \"v42\", \"k43\": \"v43\", \"k44\": \"v44\", \"k45\": \"v45\", \"k46\": \"v46\", \"k47\": \"v47\", \"k48\": \"v48\", \"k49\": \"v49\", \"k50\": \"v50\", \"k51\": \"v51\", \"k52\": \"v52\", \"k53\": \"v53\", \"k54\": \"v54\", \"k55\": \"v55\", \"k56\": \"v56\", \"k57\": \"v57\", \"k58\": \"v58\", \"k59\": \"v59\", \"k60\": \"v60\", \"k61\": \"v61\", \"k62\": \"v62\", \"k63\": \"v63\"}, \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6092,7 +6092,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"img-lblo-{{runId}}\", \"labels\": {\"k0\": \"v0\", \"k1\": \"v1\", \"k2\": \"v2\", \"k3\": \"v3\", \"k4\": \"v4\", \"k5\": \"v5\", \"k6\": \"v6\", \"k7\": \"v7\", \"k8\": \"v8\", \"k9\": \"v9\", \"k10\": \"v10\", \"k11\": \"v11\", \"k12\": \"v12\", \"k13\": \"v13\", \"k14\": \"v14\", \"k15\": \"v15\", \"k16\": \"v16\", \"k17\": \"v17\", \"k18\": \"v18\", \"k19\": \"v19\", \"k20\": \"v20\", \"k21\": \"v21\", \"k22\": \"v22\", \"k23\": \"v23\", \"k24\": \"v24\", \"k25\": \"v25\", \"k26\": \"v26\", \"k27\": \"v27\", \"k28\": \"v28\", \"k29\": \"v29\", \"k30\": \"v30\", \"k31\": \"v31\", \"k32\": \"v32\", \"k33\": \"v33\", \"k34\": \"v34\", \"k35\": \"v35\", \"k36\": \"v36\", \"k37\": \"v37\", \"k38\": \"v38\", \"k39\": \"v39\", \"k40\": \"v40\", \"k41\": \"v41\", \"k42\": \"v42\", \"k43\": \"v43\", \"k44\": \"v44\", \"k45\": \"v45\", \"k46\": \"v46\", \"k47\": \"v47\", \"k48\": \"v48\", \"k49\": \"v49\", \"k50\": \"v50\", \"k51\": \"v51\", \"k52\": \"v52\", \"k53\": \"v53\", \"k54\": \"v54\", \"k55\": \"v55\", \"k56\": \"v56\", \"k57\": \"v57\", \"k58\": \"v58\", \"k59\": \"v59\", \"k60\": \"v60\", \"k61\": \"v61\", \"k62\": \"v62\", \"k63\": \"v63\", \"k64\": \"v64\"}, \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"img-lblo-{{runId}}\", \"labels\": {\"k0\": \"v0\", \"k1\": \"v1\", \"k2\": \"v2\", \"k3\": \"v3\", \"k4\": \"v4\", \"k5\": \"v5\", \"k6\": \"v6\", \"k7\": \"v7\", \"k8\": \"v8\", \"k9\": \"v9\", \"k10\": \"v10\", \"k11\": \"v11\", \"k12\": \"v12\", \"k13\": \"v13\", \"k14\": \"v14\", \"k15\": \"v15\", \"k16\": \"v16\", \"k17\": \"v17\", \"k18\": \"v18\", \"k19\": \"v19\", \"k20\": \"v20\", \"k21\": \"v21\", \"k22\": \"v22\", \"k23\": \"v23\", \"k24\": \"v24\", \"k25\": \"v25\", \"k26\": \"v26\", \"k27\": \"v27\", \"k28\": \"v28\", \"k29\": \"v29\", \"k30\": \"v30\", \"k31\": \"v31\", \"k32\": \"v32\", \"k33\": \"v33\", \"k34\": \"v34\", \"k35\": \"v35\", \"k36\": \"v36\", \"k37\": \"v37\", \"k38\": \"v38\", \"k39\": \"v39\", \"k40\": \"v40\", \"k41\": \"v41\", \"k42\": \"v42\", \"k43\": \"v43\", \"k44\": \"v44\", \"k45\": \"v45\", \"k46\": \"v46\", \"k47\": \"v47\", \"k48\": \"v48\", \"k49\": \"v49\", \"k50\": \"v50\", \"k51\": \"v51\", \"k52\": \"v52\", \"k53\": \"v53\", \"k54\": \"v54\", \"k55\": \"v55\", \"k56\": \"v56\", \"k57\": \"v57\", \"k58\": \"v58\", \"k59\": \"v59\", \"k60\": \"v60\", \"k61\": \"v61\", \"k62\": \"v62\", \"k63\": \"v63\", \"k64\": \"v64\"}, \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6145,7 +6145,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6257,7 +6257,7 @@
       ]
     },
     {
-      "name": "IMG-CR-VAL-EMPTY-BODY — Create с пустым body → 400 (folder_id required)",
+      "name": "IMG-CR-VAL-EMPTY-BODY — Create с пустым body → 400 (project_id required)",
       "description": "class:VAL | class:NEG | priority:P2",
       "item": [
         {
@@ -6336,7 +6336,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"test' OR 1=1--\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"test' OR 1=1--\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6388,7 +6388,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"x' UNION SELECT * FROM operations--\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"x' UNION SELECT * FROM operations--\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6440,7 +6440,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"<script>alert(1)</script>\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"<script>alert(1)</script>\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6492,7 +6492,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"; rm -rf / ;\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"; rm -rf / ;\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6544,7 +6544,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"../../etc/passwd\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"../../etc/passwd\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6596,7 +6596,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6636,14 +6636,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/compute/v1/images?folderId={{_suiteFolderId}}&filter=name%3D%22a%27%20OR%201%3D1--%22",
+              "raw": "{{baseUrl}}/compute/v1/images?projectId={{_suiteFolderId}}&filter=name%3D%22a%27%20OR%201%3D1--%22",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "compute",
                 "v1",
-                "images?folderId={{_suiteFolderId}}&filter=name%3D%22a%27%20OR%201%3D1--%22"
+                "images?projectId={{_suiteFolderId}}&filter=name%3D%22a%27%20OR%201%3D1--%22"
               ]
             }
           },
@@ -6689,7 +6689,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"img-idpfx-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"img-idpfx-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"

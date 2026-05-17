@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "78ea5e6c-ad2f-4696-ae28-242007364bd4",
+    "_postman_id": "20377e7c-1c4c-4fa3-816c-6ee98c7ee35f",
     "name": "kacho-compute / newman / instance",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -16,8 +16,8 @@
           "  const r = Math.floor(Math.random() * 1e9).toString(36);",
           "  pm.environment.set('runId', ('r' + t + r).replace(/[^a-z0-9]/g, '').slice(0, 11));",
           "}",
-          "pm.environment.set('_suiteFolderId', pm.environment.get('existingFolderId'));",
-          "pm.environment.set('_suiteFolderCrossId', pm.environment.get('existingFolderCrossId'));"
+          "pm.environment.set('_suiteFolderId', pm.environment.get('existingProjectId'));",
+          "pm.environment.set('_suiteFolderCrossId', pm.environment.get('existingProjectCrossId'));"
         ]
       }
     }
@@ -50,7 +50,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-cr-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-cr-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}], \"description\": \"newman CRUD-OK\", \"labels\": {\"suite\": \"newman\"}}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-cr-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-cr-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}], \"description\": \"newman CRUD-OK\", \"labels\": {\"suite\": \"newman\"}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -197,7 +197,7 @@
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "const j = pm.response.json();",
                   "pm.test('id matches & epd prefix', () => { pm.expect(j.id).to.eql(pm.environment.get('instanceId')); pm.expect(j.id).to.match(/^epd/); });",
-                  "pm.test('folderId matches', () => pm.expect(j.folderId).to.eql(pm.environment.get('_suiteFolderId')));",
+                  "pm.test('projectId matches', () => pm.expect(j.projectId).to.eql(pm.environment.get('_suiteFolderId')));",
                   "pm.test('zoneId matches', () => pm.expect(j.zoneId).to.eql(pm.environment.get('existingZoneId')));",
                   "pm.test('platformId matches', () => pm.expect(j.platformId).to.eql(pm.environment.get('existingPlatformId')));",
                   "pm.test('status RUNNING', () => pm.expect(j.status).to.eql('RUNNING'));",
@@ -330,7 +330,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"img-instboot-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"img-instboot-{{runId}}\", \"uri\": \"https://storage.example.net/presigned/image.qcow2\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -428,7 +428,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-crimg-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-crimg-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\", \"imageId\": \"{{imageId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-crimg-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-crimg-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\", \"imageId\": \"{{imageId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -771,7 +771,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"disk-instbootid-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"size\": 21474836480}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"disk-instbootid-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"size\": 21474836480}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -869,7 +869,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-crbd-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": false, \"diskId\": \"{{bootDiskId}}\"}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-crbd-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": false, \"diskId\": \"{{bootDiskId}}\"}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1212,7 +1212,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-reqz-{{runId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-reqz-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-reqz-{{runId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-reqz-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1265,7 +1265,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-reqp-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-reqp-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-reqp-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-reqp-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1318,7 +1318,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-reqr-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-reqr-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-reqr-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-reqr-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1371,7 +1371,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-reqb-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-reqb-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1424,7 +1424,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-reqn-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-reqn-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-reqn-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-reqn-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1451,7 +1451,7 @@
       ]
     },
     {
-      "name": "INST-CR-VAL-MISSING-FOLDER — Create instance без folderId → 400 InvalidArgument",
+      "name": "INST-CR-VAL-MISSING-FOLDER — Create instance без projectId → 400 InvalidArgument",
       "description": "class:VAL | priority:P0",
       "item": [
         {
@@ -1504,7 +1504,7 @@
       ]
     },
     {
-      "name": "INST-CR-NEG-FOLDER-NOTFOUND — Create instance в garbage folderId → async NOT_FOUND 'Folder ... not found'",
+      "name": "INST-CR-NEG-FOLDER-NOTFOUND — Create instance в garbage projectId → async NOT_FOUND 'Folder ... not found'",
       "description": "class:NEG | priority:P0",
       "item": [
         {
@@ -1530,7 +1530,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{garbageRmId}}\", \"name\": \"inst-bf-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-bf-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{garbageRmId}}\", \"name\": \"inst-bf-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-bf-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1665,7 +1665,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-bs-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-bs-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"e9bnonexistent999999\", \"primaryV4AddressSpec\": {}}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-bs-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-bs-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"e9bnonexistent999999\", \"primaryV4AddressSpec\": {}}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1800,7 +1800,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-dup-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-dup-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-dup-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-dup-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1933,7 +1933,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-dup-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-dup2-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-dup-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-dup2-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2151,7 +2151,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"InstUpper-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-u-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"InstUpper-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-u-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2204,7 +2204,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"9inst-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-d-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"9inst-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-d-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2257,7 +2257,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-cf-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 37}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-cf-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-cf-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 37}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-cf-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2310,7 +2310,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-co-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 3, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-co-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-co-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 3, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-co-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2363,7 +2363,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-bd2-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskId\": \"{{garbageComputeId}}\", \"diskSpec\": {\"name\": \"bd-x-{{runId}}\", \"size\": 21474836480}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-bd2-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskId\": \"{{garbageComputeId}}\", \"diskSpec\": {\"name\": \"bd-x-{{runId}}\", \"size\": 21474836480}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2416,7 +2416,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"nm-nicnet-{{runId}}\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"nm-nicnet-{{runId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2514,7 +2514,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"nm-nicsub-{{runId}}\", \"networkId\": \"{{vpcNetId}}\", \"zoneId\": \"{{existingZoneId}}\", \"v4CidrBlocks\": [\"192.168.222.0/24\"]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"nm-nicsub-{{runId}}\", \"networkId\": \"{{vpcNetId}}\", \"zoneId\": \"{{existingZoneId}}\", \"v4CidrBlocks\": [\"192.168.222.0/24\"]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2612,7 +2612,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"nm-nic-{{runId}}\", \"subnetId\": \"{{vpcSubnetId}}\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"nm-nic-{{runId}}\", \"subnetId\": \"{{vpcSubnetId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2710,7 +2710,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-nicid-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-nicid-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"nicId\": \"{{vpcNicId}}\"}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-nicid-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-nicid-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"nicId\": \"{{vpcNicId}}\"}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3303,7 +3303,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-inlnic-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-inlnic-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-inlnic-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-inlnic-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3650,14 +3650,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/compute/v1/instances?folderId={{_suiteFolderId}}",
+              "raw": "{{baseUrl}}/compute/v1/instances?projectId={{_suiteFolderId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "compute",
                 "v1",
-                "instances?folderId={{_suiteFolderId}}"
+                "instances?projectId={{_suiteFolderId}}"
               ]
             }
           },
@@ -3677,7 +3677,7 @@
       ]
     },
     {
-      "name": "INST-LST-VAL-FOLDER-REQUIRED — List instances без folderId → 400 InvalidArgument",
+      "name": "INST-LST-VAL-FOLDER-REQUIRED — List instances без projectId → 400 InvalidArgument",
       "description": "class:VAL | class:AUTHZ | priority:P0",
       "item": [
         {
@@ -3747,7 +3747,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-vbasic-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-vbasic-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}], \"metadata\": {\"foo\": \"bar\"}}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-vbasic-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-vbasic-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}], \"metadata\": {\"foo\": \"bar\"}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3868,14 +3868,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/compute/v1/instances?folderId={{_suiteFolderId}}&pageSize=1000",
+              "raw": "{{baseUrl}}/compute/v1/instances?projectId={{_suiteFolderId}}&pageSize=1000",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "compute",
                 "v1",
-                "instances?folderId={{_suiteFolderId}}&pageSize=1000"
+                "instances?projectId={{_suiteFolderId}}&pageSize=1000"
               ]
             }
           },
@@ -4007,7 +4007,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-upd-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-upd-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}], \"description\": \"init\", \"labels\": {\"orig\": \"1\"}}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-upd-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-upd-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}], \"description\": \"init\", \"labels\": {\"orig\": \"1\"}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4399,7 +4399,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-updres-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-updres-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-updres-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-updres-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5202,7 +5202,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-startrun-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-startrun-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-startrun-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-startrun-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5591,7 +5591,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-stopok-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-stopok-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-stopok-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-stopok-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5979,7 +5979,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-startstop-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-startstop-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-startstop-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-startstop-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6496,7 +6496,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-stopstop-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-stopstop-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-stopstop-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-stopstop-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6978,7 +6978,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-restartok-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-restartok-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-restartok-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-restartok-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -7366,7 +7366,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-restartstop-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-restartstop-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-restartstop-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-restartstop-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -7956,7 +7956,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-adok-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-adok-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-adok-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-adok-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -8089,7 +8089,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"disk-adok-extra-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"size\": 10737418240}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"disk-adok-extra-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"size\": 10737418240}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -8622,7 +8622,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-adwz-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-adwz-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-adwz-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-adwz-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -8755,7 +8755,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"disk-adwz-alt-{{runId}}\", \"zoneId\": \"{{existingZoneAltId}}\", \"size\": 10737418240}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"disk-adwz-alt-{{runId}}\", \"zoneId\": \"{{existingZoneAltId}}\", \"size\": 10737418240}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -9157,7 +9157,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-adaa-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-adaa-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-adaa-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-adaa-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -9290,7 +9290,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"disk-adaa-extra-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"size\": 10737418240}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"disk-adaa-extra-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"size\": 10737418240}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -9914,7 +9914,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-ddok-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-ddok-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-ddok-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-ddok-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -10047,7 +10047,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"disk-ddok-extra-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"size\": 10737418240}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"disk-ddok-extra-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"size\": 10737418240}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -10614,7 +10614,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-ddboot-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-ddboot-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-ddboot-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-ddboot-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -11043,7 +11043,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-ddna-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-ddna-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-ddna-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-ddna-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -11176,7 +11176,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"disk-ddna-loose-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"size\": 10737418240}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"disk-ddna-loose-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"size\": 10737418240}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -11578,7 +11578,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-dkdel-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-dkdel-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-dkdel-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-dkdel-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -11711,7 +11711,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"disk-dkdel-extra-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"size\": 10737418240}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"disk-dkdel-extra-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"size\": 10737418240}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -12473,7 +12473,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-natadd-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-natadd-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-natadd-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-natadd-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -12957,7 +12957,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-nataa-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-nataa-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-nataa-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-nataa-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -13535,7 +13535,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-natrm-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-natrm-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-natrm-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-natrm-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -14055,7 +14055,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-uni-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-uni-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-uni-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-uni-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -14408,7 +14408,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-unibad-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-unibad-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-unibad-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-unibad-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -14762,7 +14762,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-umeta-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-umeta-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-umeta-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-umeta-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -15320,7 +15320,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-spo-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-spo-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-spo-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-spo-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -15624,7 +15624,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-sme-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-sme-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-sme-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-sme-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -15947,7 +15947,7 @@
       ]
     },
     {
-      "name": "INST-MV-CRUD-OK — Move instance в другой folder → folderId в Get обновлён, status сохранён",
+      "name": "INST-MV-CRUD-OK — Move instance в другой folder → projectId в Get обновлён, status сохранён",
       "description": "class:CRUD | class:STATE | priority:P1",
       "item": [
         {
@@ -15973,7 +15973,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-mv-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-mv-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-mv-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-mv-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -16107,7 +16107,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"destinationFolderId\": \"{{_suiteFolderCrossId}}\"}",
+              "raw": "{\"destinationProjectId\": \"{{_suiteFolderCrossId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -16242,7 +16242,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('folderId == cross', () => pm.expect(pm.response.json().folderId).to.eql(pm.environment.get('_suiteFolderCrossId')));",
+                  "pm.test('projectId == cross', () => pm.expect(pm.response.json().projectId).to.eql(pm.environment.get('_suiteFolderCrossId')));",
                   "pm.test('status still RUNNING', () => pm.expect(pm.response.json().status).to.eql('RUNNING'));"
                 ]
               }
@@ -16363,7 +16363,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"destinationFolderId\": \"{{_suiteFolderId}}\"}",
+              "raw": "{\"destinationProjectId\": \"{{_suiteFolderId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -16416,7 +16416,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-lop-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-lop-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-lop-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-lop-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -16718,7 +16718,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-delok-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-delok-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-delok-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-delok-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -17016,7 +17016,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-delad-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-delad-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-delad-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-delad-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -17354,7 +17354,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"disk-delnoad-boot-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"size\": 21474836480}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"disk-delnoad-boot-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"size\": 21474836480}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -17452,7 +17452,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-delnoad-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": false, \"diskId\": \"{{bootDiskId}}\"}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-delnoad-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": false, \"diskId\": \"{{bootDiskId}}\"}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -17876,7 +17876,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-delm-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-delm-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-delm-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-delm-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -18137,7 +18137,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-life-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-life-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-life-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-life-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -18294,14 +18294,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/compute/v1/instances?folderId={{_suiteFolderId}}&pageSize=1000",
+              "raw": "{{baseUrl}}/compute/v1/instances?projectId={{_suiteFolderId}}&pageSize=1000",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "compute",
                 "v1",
-                "instances?folderId={{_suiteFolderId}}&pageSize=1000"
+                "instances?projectId={{_suiteFolderId}}&pageSize=1000"
               ]
             }
           },
@@ -18803,14 +18803,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/compute/v1/instances?folderId={{_suiteFolderId}}&pageSize=1000",
+              "raw": "{{baseUrl}}/compute/v1/instances?projectId={{_suiteFolderId}}&pageSize=1000",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "compute",
                 "v1",
-                "instances?folderId={{_suiteFolderId}}&pageSize=1000"
+                "instances?projectId={{_suiteFolderId}}&pageSize=1000"
               ]
             }
           },
@@ -18896,7 +18896,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"inst-idpfx-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-idpfx-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"inst-idpfx-{{runId}}\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-idpfx-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}, \"securityGroupIds\": [\"{{existingSgId}}\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -19075,14 +19075,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/compute/v1/instances?folderId={{_suiteFolderId}}&pageSize=0",
+              "raw": "{{baseUrl}}/compute/v1/instances?projectId={{_suiteFolderId}}&pageSize=0",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "compute",
                 "v1",
-                "instances?folderId={{_suiteFolderId}}&pageSize=0"
+                "instances?projectId={{_suiteFolderId}}&pageSize=0"
               ]
             }
           },
@@ -19115,14 +19115,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/compute/v1/instances?folderId={{_suiteFolderId}}&pageSize=1",
+              "raw": "{{baseUrl}}/compute/v1/instances?projectId={{_suiteFolderId}}&pageSize=1",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "compute",
                 "v1",
-                "instances?folderId={{_suiteFolderId}}&pageSize=1"
+                "instances?projectId={{_suiteFolderId}}&pageSize=1"
               ]
             }
           },
@@ -19156,14 +19156,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/compute/v1/instances?folderId={{_suiteFolderId}}&pageSize=1000",
+              "raw": "{{baseUrl}}/compute/v1/instances?projectId={{_suiteFolderId}}&pageSize=1000",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "compute",
                 "v1",
-                "instances?folderId={{_suiteFolderId}}&pageSize=1000"
+                "instances?projectId={{_suiteFolderId}}&pageSize=1000"
               ]
             }
           },
@@ -19196,14 +19196,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/compute/v1/instances?folderId={{_suiteFolderId}}&pageSize=1001",
+              "raw": "{{baseUrl}}/compute/v1/instances?projectId={{_suiteFolderId}}&pageSize=1001",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "compute",
                 "v1",
-                "instances?folderId={{_suiteFolderId}}&pageSize=1001"
+                "instances?projectId={{_suiteFolderId}}&pageSize=1001"
               ]
             }
           },
@@ -19240,14 +19240,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/compute/v1/instances?folderId={{_suiteFolderId}}&pageSize=10&pageToken=not-a-real-token",
+              "raw": "{{baseUrl}}/compute/v1/instances?projectId={{_suiteFolderId}}&pageSize=10&pageToken=not-a-real-token",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "compute",
                 "v1",
-                "instances?folderId={{_suiteFolderId}}&pageSize=10&pageToken=not-a-real-token"
+                "instances?projectId={{_suiteFolderId}}&pageSize=10&pageToken=not-a-real-token"
               ]
             }
           },
@@ -19284,14 +19284,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/compute/v1/instances?folderId={{_suiteFolderId}}&filter=name%3D%22foo%22",
+              "raw": "{{baseUrl}}/compute/v1/instances?projectId={{_suiteFolderId}}&filter=name%3D%22foo%22",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "compute",
                 "v1",
-                "instances?folderId={{_suiteFolderId}}&filter=name%3D%22foo%22"
+                "instances?projectId={{_suiteFolderId}}&filter=name%3D%22foo%22"
               ]
             }
           },
@@ -19324,14 +19324,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/compute/v1/instances?folderId={{_suiteFolderId}}&filter=this%20is%20not%20valid%20syntax",
+              "raw": "{{baseUrl}}/compute/v1/instances?projectId={{_suiteFolderId}}&filter=this%20is%20not%20valid%20syntax",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "compute",
                 "v1",
-                "instances?folderId={{_suiteFolderId}}&filter=this%20is%20not%20valid%20syntax"
+                "instances?projectId={{_suiteFolderId}}&filter=this%20is%20not%20valid%20syntax"
               ]
             }
           },
@@ -19364,14 +19364,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/compute/v1/instances?folderId={{_suiteFolderId}}&filter=nonexistent_field%3D%22x%22",
+              "raw": "{{baseUrl}}/compute/v1/instances?projectId={{_suiteFolderId}}&filter=nonexistent_field%3D%22x%22",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "compute",
                 "v1",
-                "instances?folderId={{_suiteFolderId}}&filter=nonexistent_field%3D%22x%22"
+                "instances?projectId={{_suiteFolderId}}&filter=nonexistent_field%3D%22x%22"
               ]
             }
           },
@@ -19416,7 +19416,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\"}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -19479,7 +19479,7 @@
       ]
     },
     {
-      "name": "INST-CR-VAL-EMPTY-BODY — Create instance с пустым body → 400 (folder_id required)",
+      "name": "INST-CR-VAL-EMPTY-BODY — Create instance с пустым body → 400 (project_id required)",
       "description": "class:VAL | class:NEG | priority:P1",
       "item": [
         {
@@ -19607,7 +19607,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"test' OR 1=1--\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-sec-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"test' OR 1=1--\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-sec-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -19659,7 +19659,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"x' UNION SELECT * FROM operations--\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-sec-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"x' UNION SELECT * FROM operations--\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-sec-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -19711,7 +19711,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"<script>alert(1)</script>\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-sec-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"<script>alert(1)</script>\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-sec-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -19763,7 +19763,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"; rm -rf / ;\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-sec-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"; rm -rf / ;\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-sec-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -19815,7 +19815,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"../../etc/passwd\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-sec-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"../../etc/passwd\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-sec-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -19867,7 +19867,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{_suiteFolderId}}\", \"name\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-sec-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}}]}",
+              "raw": "{\"projectId\": \"{{_suiteFolderId}}\", \"name\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"zoneId\": \"{{existingZoneId}}\", \"platformId\": \"{{existingPlatformId}}\", \"resourcesSpec\": {\"cores\": 2, \"memory\": 2147483648, \"coreFraction\": 100}, \"bootDiskSpec\": {\"autoDelete\": true, \"diskSpec\": {\"name\": \"bd-sec-{{runId}}\", \"size\": 21474836480, \"typeId\": \"{{existingDiskTypeId}}\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{existingSubnetId}}\", \"primaryV4AddressSpec\": {}}]}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -19907,14 +19907,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/compute/v1/instances?folderId={{_suiteFolderId}}&filter=name%3D%22a%27%20OR%201%3D1--%22",
+              "raw": "{{baseUrl}}/compute/v1/instances?projectId={{_suiteFolderId}}&filter=name%3D%22a%27%20OR%201%3D1--%22",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "compute",
                 "v1",
-                "instances?folderId={{_suiteFolderId}}&filter=name%3D%22a%27%20OR%201%3D1--%22"
+                "instances?projectId={{_suiteFolderId}}&filter=name%3D%22a%27%20OR%201%3D1--%22"
               ]
             }
           },

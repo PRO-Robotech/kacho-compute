@@ -29,7 +29,7 @@ func TestIntegration_OutboxEmit_OnDiskCreate(t *testing.T) {
 	defer pool.Close()
 
 	r := repo.NewDiskRepo(pool)
-	d := &domain.Disk{ID: ids.NewID(ids.PrefixDisk), FolderID: "f", CreatedAt: time.Now().UTC().Truncate(time.Microsecond), Name: "d-outbox", TypeID: "network-ssd", ZoneID: "ru-central1-a", Size: 4194304, BlockSize: 4096, Status: domain.DiskStatusReady}
+	d := &domain.Disk{ID: ids.NewID(ids.PrefixDisk), ProjectID: "f", CreatedAt: time.Now().UTC().Truncate(time.Microsecond), Name: "d-outbox", TypeID: "network-ssd", ZoneID: "ru-central1-a", Size: 4194304, BlockSize: 4096, Status: domain.DiskStatusReady}
 	_, err = r.Insert(ctx, d)
 	require.NoError(t, err)
 
@@ -68,7 +68,7 @@ func TestIntegration_OutboxListenNotify(t *testing.T) {
 
 	// триггер события через Insert диска.
 	r := repo.NewDiskRepo(pool)
-	_, err = r.Insert(ctx, &domain.Disk{ID: ids.NewID(ids.PrefixDisk), FolderID: "f", CreatedAt: time.Now().UTC().Truncate(time.Microsecond), Name: "d-notify", TypeID: "network-ssd", ZoneID: "ru-central1-a", Size: 4194304, BlockSize: 4096, Status: domain.DiskStatusReady})
+	_, err = r.Insert(ctx, &domain.Disk{ID: ids.NewID(ids.PrefixDisk), ProjectID: "f", CreatedAt: time.Now().UTC().Truncate(time.Microsecond), Name: "d-notify", TypeID: "network-ssd", ZoneID: "ru-central1-a", Size: 4194304, BlockSize: 4096, Status: domain.DiskStatusReady})
 	require.NoError(t, err)
 
 	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)

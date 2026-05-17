@@ -23,7 +23,7 @@ type ImageRepo struct {
 // NewImageRepo создаёт ImageRepo.
 func NewImageRepo(pool *pgxpool.Pool) *ImageRepo { return &ImageRepo{pool: pool} }
 
-const imageCols = `id, folder_id, created_at, name, description, labels, family, storage_size, min_disk_size, product_ids, ` +
+const imageCols = `id, project_id, created_at, name, description, labels, family, storage_size, min_disk_size, product_ids, ` +
 	`status, os_type, os_nvidia_driver, pooled, hardware_generation, kms_key, source_image_id, source_snapshot_id, source_disk_id, source_uri`
 
 // Get возвращает образ по id.
@@ -38,7 +38,7 @@ func (r *ImageRepo) Get(ctx context.Context, id string) (*domain.Image, error) {
 
 // GetLatestByFamily возвращает образ с max created_at в family внутри folder.
 func (r *ImageRepo) GetLatestByFamily(ctx context.Context, folderID, family string) (*domain.Image, error) {
-	q := fmt.Sprintf(`SELECT %s FROM images WHERE folder_id = $1 AND family = $2 ORDER BY created_at DESC, id DESC LIMIT 1`, imageCols)
+	q := fmt.Sprintf(`SELECT %s FROM images WHERE project_id = $1 AND family = $2 ORDER BY created_at DESC, id DESC LIMIT 1`, imageCols)
 	i, err := scanImage(r.pool.QueryRow(ctx, q, folderID, family))
 	if err != nil {
 		return nil, wrapPgErr(err, "Image", family)
@@ -55,9 +55,9 @@ func (r *ImageRepo) List(ctx context.Context, f service.ImageFilter, p service.P
 	var args []any
 	var conditions []string
 	argIdx := 1
-	if f.FolderID != "" {
-		conditions = append(conditions, fmt.Sprintf("folder_id = $%d", argIdx))
-		args = append(args, f.FolderID)
+	if f.ProjectID != "" {
+		conditions = append(conditions, fmt.Sprintf("project_id = $%d", argIdx))
+		args = append(args, f.ProjectID)
 		argIdx++
 	}
 	if f.Filter != "" {
@@ -124,7 +124,7 @@ func (r *ImageRepo) Insert(ctx context.Context, i *domain.Image) (*domain.Image,
 		return nil, service.ErrInternal
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	const q = `INSERT INTO images (id, folder_id, created_at, name, description, labels, family, storage_size, min_disk_size, product_ids,
+	const q = `INSERT INTO images (id, project_id, created_at, name, description, labels, family, storage_size, min_disk_size, product_ids,
 		status, os_type, os_nvidia_driver, pooled, hardware_generation, kms_key, source_image_id, source_snapshot_id, source_disk_id, source_uri)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING ` + imageCols
 	result, err := scanImage(tx.QueryRow(ctx, q, args...))
@@ -208,7 +208,7 @@ func imageInsertArgs(i *domain.Image) ([]any, error) {
 		return nil, err
 	}
 	return []any{
-		i.ID, i.FolderID, i.CreatedAt, i.Name, i.Description, labelsJSON, i.Family, i.StorageSize, i.MinDiskSize, prodJSON,
+		i.ID, i.ProjectID, i.CreatedAt, i.Name, i.Description, labelsJSON, i.Family, i.StorageSize, i.MinDiskSize, prodJSON,
 		imageStatusName(i.Status), osTypeName(i.OsType), i.OsNvidiaDriver, i.Pooled, hgJSON, kmsJSON,
 		i.SourceImageID, i.SourceSnapshotID, i.SourceDiskID, i.SourceURI,
 	}, nil
@@ -219,7 +219,7 @@ func scanImage(row scannable) (*domain.Image, error) {
 	var labelsJSON, prodJSON, hgJSON, kmsJSON []byte
 	var statusName, osTypeStr string
 	if err := row.Scan(
-		&i.ID, &i.FolderID, &i.CreatedAt, &i.Name, &i.Description, &labelsJSON, &i.Family, &i.StorageSize, &i.MinDiskSize, &prodJSON,
+		&i.ID, &i.ProjectID, &i.CreatedAt, &i.Name, &i.Description, &labelsJSON, &i.Family, &i.StorageSize, &i.MinDiskSize, &prodJSON,
 		&statusName, &osTypeStr, &i.OsNvidiaDriver, &i.Pooled, &hgJSON, &kmsJSON,
 		&i.SourceImageID, &i.SourceSnapshotID, &i.SourceDiskID, &i.SourceURI,
 	); err != nil {

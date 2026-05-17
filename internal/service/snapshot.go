@@ -21,7 +21,7 @@ import (
 
 // CreateSnapshotReq — запрос на создание снапшота (disk_id обязателен).
 type CreateSnapshotReq struct {
-	FolderID           string
+	ProjectID           string
 	DiskID             string
 	Name               string
 	Description        string
@@ -42,13 +42,13 @@ type UpdateSnapshotReq struct {
 type SnapshotService struct {
 	repo         SnapshotRepo
 	diskRepo     DiskRepo
-	folderClient FolderClient
+	projectClient ProjectClient
 	opsRepo      operations.Repo
 }
 
 // NewSnapshotService создаёт SnapshotService.
-func NewSnapshotService(repo SnapshotRepo, diskRepo DiskRepo, folderClient FolderClient, opsRepo operations.Repo) *SnapshotService {
-	return &SnapshotService{repo: repo, diskRepo: diskRepo, folderClient: folderClient, opsRepo: opsRepo}
+func NewSnapshotService(repo SnapshotRepo, diskRepo DiskRepo, projectClient ProjectClient, opsRepo operations.Repo) *SnapshotService {
+	return &SnapshotService{repo: repo, diskRepo: diskRepo, projectClient: projectClient, opsRepo: opsRepo}
 }
 
 // Get возвращает Snapshot по ID.
@@ -60,18 +60,18 @@ func (s *SnapshotService) Get(ctx context.Context, id string) (*domain.Snapshot,
 	return snap, nil
 }
 
-// List возвращает список снапшотов. folder_id обязателен.
+// List возвращает список снапшотов. project_id обязателен.
 func (s *SnapshotService) List(ctx context.Context, f SnapshotFilter, p Pagination) ([]*domain.Snapshot, string, error) {
-	if f.FolderID == "" {
-		return nil, "", status.Error(codes.InvalidArgument, "folder_id required")
+	if f.ProjectID == "" {
+		return nil, "", status.Error(codes.InvalidArgument, "project_id required")
 	}
 	return s.repo.List(ctx, f, p)
 }
 
 // Create инициирует создание Snapshot из Disk.
 func (s *SnapshotService) Create(ctx context.Context, req CreateSnapshotReq) (*operations.Operation, error) {
-	if req.FolderID == "" {
-		return nil, status.Error(codes.InvalidArgument, "folder_id required")
+	if req.ProjectID == "" {
+		return nil, status.Error(codes.InvalidArgument, "project_id required")
 	}
 	if req.DiskID == "" {
 		return nil, status.Error(codes.InvalidArgument, "disk_id required")
@@ -101,12 +101,12 @@ func (s *SnapshotService) Create(ctx context.Context, req CreateSnapshotReq) (*o
 }
 
 func (s *SnapshotService) doCreate(ctx context.Context, snapID string, req CreateSnapshotReq) (*anypb.Any, error) {
-	exists, err := s.folderClient.Exists(ctx, req.FolderID)
+	exists, err := s.projectClient.Exists(ctx, req.ProjectID)
 	if err != nil {
 		return nil, status.Errorf(codes.Unavailable, "folder check: %v", err)
 	}
 	if !exists {
-		return nil, status.Errorf(codes.NotFound, "Folder with id %s not found", req.FolderID)
+		return nil, status.Errorf(codes.NotFound, "Folder with id %s not found", req.ProjectID)
 	}
 	d, err := s.diskRepo.Get(ctx, req.DiskID)
 	if err != nil {
@@ -117,7 +117,7 @@ func (s *SnapshotService) doCreate(ctx context.Context, snapID string, req Creat
 	}
 	snap := &domain.Snapshot{
 		ID:                 snapID,
-		FolderID:           req.FolderID,
+		ProjectID:           req.ProjectID,
 		CreatedAt:          time.Now().UTC(),
 		Name:               req.Name,
 		Description:        req.Description,

@@ -23,7 +23,7 @@ type DiskRepo struct {
 // NewDiskRepo создаёт DiskRepo.
 func NewDiskRepo(pool *pgxpool.Pool) *DiskRepo { return &DiskRepo{pool: pool} }
 
-const diskCols = `id, folder_id, created_at, name, description, labels, type_id, zone_id, size, block_size, ` +
+const diskCols = `id, project_id, created_at, name, description, labels, type_id, zone_id, size, block_size, ` +
 	`product_ids, status, source_image_id, source_snapshot_id, disk_placement_policy, hardware_generation, kms_key`
 
 // Get возвращает диск по id (+ instance_ids из attached_disks).
@@ -48,9 +48,9 @@ func (r *DiskRepo) List(ctx context.Context, f service.DiskFilter, p service.Pag
 	var args []any
 	var conditions []string
 	argIdx := 1
-	if f.FolderID != "" {
-		conditions = append(conditions, fmt.Sprintf("folder_id = $%d", argIdx))
-		args = append(args, f.FolderID)
+	if f.ProjectID != "" {
+		conditions = append(conditions, fmt.Sprintf("project_id = $%d", argIdx))
+		args = append(args, f.ProjectID)
 		argIdx++
 	}
 	if f.Filter != "" {
@@ -123,7 +123,7 @@ func (r *DiskRepo) Insert(ctx context.Context, d *domain.Disk) (*domain.Disk, er
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	const q = `INSERT INTO disks (id, folder_id, created_at, name, description, labels, type_id, zone_id, size, block_size,
+	const q = `INSERT INTO disks (id, project_id, created_at, name, description, labels, type_id, zone_id, size, block_size,
 		product_ids, status, source_image_id, source_snapshot_id, disk_placement_policy, hardware_generation, kms_key)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING ` + diskCols
 	result, err := scanDisk(tx.QueryRow(ctx, q, args...))
@@ -169,9 +169,9 @@ func (r *DiskRepo) Update(ctx context.Context, d *domain.Disk) (*domain.Disk, er
 	return result, nil
 }
 
-// SetFolderID меняет folder_id (для Move).
-func (r *DiskRepo) SetFolderID(ctx context.Context, id, folderID string) (*domain.Disk, error) {
-	return r.simpleSet(ctx, id, "folder_id", folderID)
+// SetProjectID меняет project_id (для Move).
+func (r *DiskRepo) SetProjectID(ctx context.Context, id, folderID string) (*domain.Disk, error) {
+	return r.simpleSet(ctx, id, "project_id", folderID)
 }
 
 // SetZoneID меняет zone_id (для Relocate).
@@ -275,7 +275,7 @@ func diskInsertArgs(d *domain.Disk) ([]any, error) {
 		return nil, err
 	}
 	return []any{
-		d.ID, d.FolderID, d.CreatedAt, d.Name, d.Description, labelsJSON, d.TypeID, d.ZoneID, d.Size, d.BlockSize,
+		d.ID, d.ProjectID, d.CreatedAt, d.Name, d.Description, labelsJSON, d.TypeID, d.ZoneID, d.Size, d.BlockSize,
 		prodJSON, diskStatusName(d.Status), d.SourceImageID, d.SourceSnapshotID, dppJSON, hgJSON, kmsJSON,
 	}, nil
 }
@@ -285,7 +285,7 @@ func scanDisk(row scannable) (*domain.Disk, error) {
 	var labelsJSON, prodJSON, dppJSON, hgJSON, kmsJSON []byte
 	var statusName string
 	if err := row.Scan(
-		&d.ID, &d.FolderID, &d.CreatedAt, &d.Name, &d.Description, &labelsJSON, &d.TypeID, &d.ZoneID, &d.Size, &d.BlockSize,
+		&d.ID, &d.ProjectID, &d.CreatedAt, &d.Name, &d.Description, &labelsJSON, &d.TypeID, &d.ZoneID, &d.Size, &d.BlockSize,
 		&prodJSON, &statusName, &d.SourceImageID, &d.SourceSnapshotID, &dppJSON, &hgJSON, &kmsJSON,
 	); err != nil {
 		return nil, err

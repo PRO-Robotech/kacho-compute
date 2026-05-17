@@ -67,7 +67,7 @@ func (r *DiskRepo) List(_ context.Context, f ports.DiskFilter, _ ports.Paginatio
 	defer r.mu.Unlock()
 	var out []*domain.Disk
 	for _, d := range r.data {
-		if f.FolderID == "" || d.FolderID == f.FolderID {
+		if f.ProjectID == "" || d.ProjectID == f.ProjectID {
 			out = append(out, d)
 		}
 	}
@@ -80,7 +80,7 @@ func (r *DiskRepo) Insert(_ context.Context, d *domain.Disk) (*domain.Disk, erro
 	defer r.mu.Unlock()
 	if d.Name != "" {
 		for _, x := range r.data {
-			if x.FolderID == d.FolderID && x.Name == d.Name {
+			if x.ProjectID == d.ProjectID && x.Name == d.Name {
 				return nil, ports.ErrAlreadyExists
 			}
 		}
@@ -114,15 +114,15 @@ func (r *DiskRepo) Delete(_ context.Context, id string) error {
 	return nil
 }
 
-// SetFolderID меняет folder_id.
-func (r *DiskRepo) SetFolderID(_ context.Context, id, folderID string) (*domain.Disk, error) {
+// SetProjectID меняет project_id.
+func (r *DiskRepo) SetProjectID(_ context.Context, id, folderID string) (*domain.Disk, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	d, ok := r.data[id]
 	if !ok {
 		return nil, ports.ErrNotFound
 	}
-	d.FolderID = folderID
+	d.ProjectID = folderID
 	return d, nil
 }
 
@@ -180,7 +180,7 @@ func (r *ImageRepo) GetLatestByFamily(_ context.Context, folderID, family string
 	defer r.mu.Unlock()
 	var best *domain.Image
 	for _, i := range r.data {
-		if i.FolderID != folderID || i.Family != family {
+		if i.ProjectID != folderID || i.Family != family {
 			continue
 		}
 		if best == nil || i.CreatedAt.After(best.CreatedAt) {
@@ -199,7 +199,7 @@ func (r *ImageRepo) List(_ context.Context, f ports.ImageFilter, _ ports.Paginat
 	defer r.mu.Unlock()
 	var out []*domain.Image
 	for _, i := range r.data {
-		if f.FolderID == "" || i.FolderID == f.FolderID {
+		if f.ProjectID == "" || i.ProjectID == f.ProjectID {
 			out = append(out, i)
 		}
 	}
@@ -212,7 +212,7 @@ func (r *ImageRepo) Insert(_ context.Context, i *domain.Image) (*domain.Image, e
 	defer r.mu.Unlock()
 	if i.Name != "" {
 		for _, x := range r.data {
-			if x.FolderID == i.FolderID && x.Name == i.Name {
+			if x.ProjectID == i.ProjectID && x.Name == i.Name {
 				return nil, ports.ErrAlreadyExists
 			}
 		}
@@ -278,7 +278,7 @@ func (r *SnapshotRepo) List(_ context.Context, f ports.SnapshotFilter, _ ports.P
 	defer r.mu.Unlock()
 	var out []*domain.Snapshot
 	for _, s := range r.data {
-		if f.FolderID == "" || s.FolderID == f.FolderID {
+		if f.ProjectID == "" || s.ProjectID == f.ProjectID {
 			out = append(out, s)
 		}
 	}
@@ -291,7 +291,7 @@ func (r *SnapshotRepo) Insert(_ context.Context, s *domain.Snapshot) (*domain.Sn
 	defer r.mu.Unlock()
 	if s.Name != "" {
 		for _, x := range r.data {
-			if x.FolderID == s.FolderID && x.Name == s.Name {
+			if x.ProjectID == s.ProjectID && x.Name == s.Name {
 				return nil, ports.ErrAlreadyExists
 			}
 		}
@@ -364,7 +364,7 @@ func (r *InstanceRepo) List(_ context.Context, f ports.InstanceFilter, _ ports.P
 	defer r.mu.Unlock()
 	var out []*domain.Instance
 	for _, in := range r.data {
-		if f.FolderID == "" || in.FolderID == f.FolderID {
+		if f.ProjectID == "" || in.ProjectID == f.ProjectID {
 			out = append(out, in)
 		}
 	}
@@ -377,7 +377,7 @@ func (r *InstanceRepo) Insert(_ context.Context, in *domain.Instance, inlineDisk
 	defer r.mu.Unlock()
 	if in.Name != "" {
 		for _, x := range r.data {
-			if x.FolderID == in.FolderID && x.Name == in.Name {
+			if x.ProjectID == in.ProjectID && x.Name == in.Name {
 				return nil, ports.ErrAlreadyExists
 			}
 		}
@@ -423,15 +423,15 @@ func (r *InstanceRepo) SetStatusCAS(_ context.Context, id string, expected, next
 	return in, nil
 }
 
-// SetFolderID меняет folder_id.
-func (r *InstanceRepo) SetFolderID(_ context.Context, id, folderID string) (*domain.Instance, error) {
+// SetProjectID меняет project_id.
+func (r *InstanceRepo) SetProjectID(_ context.Context, id, folderID string) (*domain.Instance, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	in, ok := r.data[id]
 	if !ok {
 		return nil, ports.ErrNotFound
 	}
-	in.FolderID = folderID
+	in.ProjectID = folderID
 	return in, nil
 }
 
@@ -790,13 +790,13 @@ func (r *RegionRepo) CountZones(_ context.Context, regionID string) (int, error)
 	return r.zoneCount[regionID], nil
 }
 
-// ---- FolderClient / VPCClient ----
+// ---- ProjectClient / VPCClient ----
 
-// FolderClient — fake FolderClient. OK задаёт результат Exists().
-type FolderClient struct{ OK bool }
+// ProjectClient — fake ProjectClient. OK задаёт результат Exists().
+type ProjectClient struct{ OK bool }
 
-// Exists возвращает FolderClient.OK.
-func (c *FolderClient) Exists(_ context.Context, _ string) (bool, error) { return c.OK, nil }
+// Exists возвращает ProjectClient.OK.
+func (c *ProjectClient) Exists(_ context.Context, _ string) (bool, error) { return c.OK, nil }
 
 // VPCClient — fake VPCClient. SubnetFound/SubnetZone/SubnetCidrBlocks задают
 // ответ GetSubnet; SGFound — SecurityGroupExists; AddrFound — GetExternalAddress.
@@ -1165,7 +1165,7 @@ var (
 	_ ports.ZoneSource   = (*ZoneRepo)(nil)
 	_ ports.ZoneRegistry = (*VPCClient)(nil)
 	_ ports.RegionRepo   = (*RegionRepo)(nil)
-	_ ports.FolderClient = (*FolderClient)(nil)
+	_ ports.ProjectClient = (*ProjectClient)(nil)
 	_ ports.VPCClient    = (*VPCClient)(nil)
 	_ operations.Repo    = (*OpsRepo)(nil)
 )

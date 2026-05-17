@@ -66,7 +66,7 @@ type DiskSourceSpec struct {
 
 // CreateInstanceReq — запрос на создание ВМ.
 type CreateInstanceReq struct {
-	FolderID            string
+	ProjectID            string
 	Name                string
 	Description         string
 	Labels              map[string]string
@@ -117,7 +117,7 @@ type InstanceService struct {
 	// InternalZoneService (compute зон не владеет); при SKIP_PEER_VALIDATION —
 	// fallback на локальную таблицу `zones`. Wiring — cmd/compute/main.go.
 	zones        ZoneRegistry
-	folderClient FolderClient
+	projectClient ProjectClient
 	vpcClient    VPCClient
 	opsRepo      operations.Repo
 	// skipIPAM — true при KACHO_COMPUTE_SKIP_PEER_VALIDATION: cross-service
@@ -128,10 +128,10 @@ type InstanceService struct {
 // NewInstanceService создаёт InstanceService. skipIPAM=true (зеркалит
 // KACHO_COMPUTE_SKIP_PEER_VALIDATION) → NIC-ам выдаются синтетические IP вместо
 // реальных, выделенных через kacho-vpc IPAM (для unit/newman/load без VPC).
-func NewInstanceService(repo InstanceRepo, diskRepo DiskRepo, imageRepo ImageRepo, snapshotRepo SnapshotRepo, zones ZoneRegistry, folderClient FolderClient, vpcClient VPCClient, opsRepo operations.Repo, skipIPAM bool) *InstanceService {
+func NewInstanceService(repo InstanceRepo, diskRepo DiskRepo, imageRepo ImageRepo, snapshotRepo SnapshotRepo, zones ZoneRegistry, projectClient ProjectClient, vpcClient VPCClient, opsRepo operations.Repo, skipIPAM bool) *InstanceService {
 	return &InstanceService{
 		repo: repo, diskRepo: diskRepo, imageRepo: imageRepo, snapshotRepo: snapshotRepo,
-		zones: zones, folderClient: folderClient, vpcClient: vpcClient, opsRepo: opsRepo,
+		zones: zones, projectClient: projectClient, vpcClient: vpcClient, opsRepo: opsRepo,
 		skipIPAM: skipIPAM,
 	}
 }
@@ -145,18 +145,18 @@ func (s *InstanceService) Get(ctx context.Context, id string) (*domain.Instance,
 	return in, nil
 }
 
-// List возвращает список ВМ. folder_id обязателен.
+// List возвращает список ВМ. project_id обязателен.
 func (s *InstanceService) List(ctx context.Context, f InstanceFilter, p Pagination) ([]*domain.Instance, string, error) {
-	if f.FolderID == "" {
-		return nil, "", status.Error(codes.InvalidArgument, "folder_id required")
+	if f.ProjectID == "" {
+		return nil, "", status.Error(codes.InvalidArgument, "project_id required")
 	}
 	return s.repo.List(ctx, f, p)
 }
 
 // Create инициирует создание Instance.
 func (s *InstanceService) Create(ctx context.Context, req CreateInstanceReq) (*operations.Operation, error) {
-	if req.FolderID == "" {
-		return nil, status.Error(codes.InvalidArgument, "folder_id required")
+	if req.ProjectID == "" {
+		return nil, status.Error(codes.InvalidArgument, "project_id required")
 	}
 	if req.ZoneID == "" {
 		return nil, status.Error(codes.InvalidArgument, "zone_id required")
@@ -209,7 +209,7 @@ func (s *InstanceService) Create(ctx context.Context, req CreateInstanceReq) (*o
 }
 
 func (s *InstanceService) doCreate(ctx context.Context, instanceID string, req CreateInstanceReq) (*anypb.Any, error) {
-	if err := s.checkFolder(ctx, req.FolderID); err != nil {
+	if err := s.checkFolder(ctx, req.ProjectID); err != nil {
 		return nil, err
 	}
 	if _, err := s.zones.GetZone(ctx, req.ZoneID); err != nil {
@@ -229,7 +229,7 @@ func (s *InstanceService) doCreate(ctx context.Context, instanceID string, req C
 
 	// Boot disk + secondary disks: resolve existing OR materialize inline.
 	var inlineDisks []*domain.Disk
-	bootAD, bootInline, err := s.resolveDiskSource(ctx, req.FolderID, req.ZoneID, req.BootDisk, true)
+	bootAD, bootInline, err := s.resolveDiskSource(ctx, req.ProjectID, req.ZoneID, req.BootDisk, true)
 	if err != nil {
 		s.releaseNICs(ctx, createdNICIDs)
 		s.releaseAddresses(ctx, createdAddrIDs)
@@ -240,7 +240,7 @@ func (s *InstanceService) doCreate(ctx context.Context, instanceID string, req C
 	}
 	attached := []domain.AttachedDisk{bootAD}
 	for _, sd := range req.SecondaryDisks {
-		ad, inline, err := s.resolveDiskSource(ctx, req.FolderID, req.ZoneID, sd, false)
+		ad, inline, err := s.resolveDiskSource(ctx, req.ProjectID, req.ZoneID, sd, false)
 		if err != nil {
 			s.releaseNICs(ctx, createdNICIDs)
 			s.releaseAddresses(ctx, createdAddrIDs)
@@ -254,7 +254,7 @@ func (s *InstanceService) doCreate(ctx context.Context, instanceID string, req C
 
 	in := &domain.Instance{
 		ID:                    instanceID,
-		FolderID:              req.FolderID,
+		ProjectID:              req.ProjectID,
 		CreatedAt:             time.Now().UTC(),
 		Name:                  req.Name,
 		Description:           req.Description,
@@ -461,7 +461,7 @@ func (s *InstanceService) materializeNICs(ctx context.Context, instanceID string
 		case s.skipIPAM:
 			nic.PrimaryV4Address = synthInternalIP(i)
 		default:
-			addr, err := s.vpcClient.CreateInternalAddress(ctx, req.FolderID, nicAddressName(instanceID, idx), spec.SubnetID)
+			addr, err := s.vpcClient.CreateInternalAddress(ctx, req.ProjectID, nicAddressName(instanceID, idx), spec.SubnetID)
 			if err != nil {
 				return nil, createdAddrIDs, createdNICIDs, status.Errorf(codes.Internal, "allocate internal ip for nic %s: %v", idx, err)
 			}
@@ -478,7 +478,7 @@ func (s *InstanceService) materializeNICs(ctx context.Context, instanceID string
 				v4Addrs = []string{nic.PrimaryV4AddressID}
 			}
 			nicID, err := s.vpcClient.CreateNetworkInterface(ctx, CreateNICReq{
-				FolderID:         req.FolderID,
+				ProjectID:         req.ProjectID,
 				Name:             nicResourceName(instanceID, idx),
 				SubnetID:         spec.SubnetID,
 				SecurityGroupIDs: spec.SecurityGroupIDs,
@@ -495,7 +495,7 @@ func (s *InstanceService) materializeNICs(ctx context.Context, instanceID string
 
 		// External (one-to-one NAT) IPv4.
 		if spec.OneToOneNat != nil {
-			nat, addrID, err := s.resolveNatAddress(ctx, req.FolderID, req.ZoneID, nicNatAddressName(instanceID, idx), spec.OneToOneNat, i)
+			nat, addrID, err := s.resolveNatAddress(ctx, req.ProjectID, req.ZoneID, nicNatAddressName(instanceID, idx), spec.OneToOneNat, i)
 			if err != nil {
 				return nil, createdAddrIDs, createdNICIDs, err
 			}
@@ -676,7 +676,7 @@ func (s *InstanceService) resolveDiskSource(ctx context.Context, folderID, zoneI
 	}
 	d := &domain.Disk{
 		ID:               newDiskID,
-		FolderID:         folderID,
+		ProjectID:         folderID,
 		CreatedAt:        time.Now().UTC(),
 		TypeID:           orDefault(spec.NewDiskTypeID, defaultDiskType),
 		ZoneID:           zoneID,
@@ -1051,7 +1051,7 @@ func (s *InstanceService) AddOneToOneNat(ctx context.Context, id, nicIndex strin
 		if natSpec == nil {
 			natSpec = &NatSpec{}
 		}
-		nat, addrID, err := s.resolveNatAddress(ctx, in.FolderID, in.ZoneID, nicNatAddressName(id, nic.Index), natSpec, 0)
+		nat, addrID, err := s.resolveNatAddress(ctx, in.ProjectID, in.ZoneID, nicNatAddressName(id, nic.Index), natSpec, 0)
 		if err != nil {
 			return nil, err
 		}
@@ -1124,15 +1124,15 @@ func (s *InstanceService) RemoveOneToOneNat(ctx context.Context, id, nicIndex st
 }
 
 // Move инициирует перенос ВМ в другой folder.
-func (s *InstanceService) Move(ctx context.Context, id, destFolderID string) (*operations.Operation, error) {
+func (s *InstanceService) Move(ctx context.Context, id, destProjectID string) (*operations.Operation, error) {
 	if id == "" {
 		return nil, status.Error(codes.InvalidArgument, "instance_id required")
 	}
-	if destFolderID == "" {
-		return nil, invalidArg("destination_folder_id", "destination_folder_id is required")
+	if destProjectID == "" {
+		return nil, invalidArg("destination_project_id", "destination_project_id is required")
 	}
 	op, err := operations.New(ids.PrefixOperationCompute, fmt.Sprintf("Move instance %s", id),
-		&computev1.MoveInstanceMetadata{InstanceId: id, DestinationFolderId: destFolderID})
+		&computev1.MoveInstanceMetadata{InstanceId: id, DestinationProjectId: destProjectID})
 	if err != nil {
 		return nil, err
 	}
@@ -1140,10 +1140,10 @@ func (s *InstanceService) Move(ctx context.Context, id, destFolderID string) (*o
 		return nil, err
 	}
 	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		if err := s.checkFolder(ctx, destFolderID); err != nil {
+		if err := s.checkFolder(ctx, destProjectID); err != nil {
 			return nil, err
 		}
-		updated, err := s.repo.SetFolderID(ctx, id, destFolderID)
+		updated, err := s.repo.SetProjectID(ctx, id, destProjectID)
 		if err != nil {
 			return nil, mapRepoErr(err)
 		}
@@ -1272,7 +1272,7 @@ func (s *InstanceService) ListOperations(ctx context.Context, id string, p Pagin
 }
 
 func (s *InstanceService) checkFolder(ctx context.Context, folderID string) error {
-	exists, err := s.folderClient.Exists(ctx, folderID)
+	exists, err := s.projectClient.Exists(ctx, folderID)
 	if err != nil {
 		return status.Errorf(codes.Unavailable, "folder check: %v", err)
 	}

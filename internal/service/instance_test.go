@@ -23,7 +23,7 @@ func newInstanceSvc(t *testing.T, folderOK bool) (*InstanceService, *portmock.In
 	instanceRepo := portmock.NewInstanceRepo().WithDiskRepo(diskRepo)
 	ops := portmock.NewOpsRepo()
 	svc := NewInstanceService(instanceRepo, diskRepo, imgRepo, snapRepo, portmock.NewZoneRepo(),
-		&portmock.FolderClient{OK: folderOK}, &portmock.VPCClient{SubnetFound: true, SubnetZone: "", SGFound: true, AddrFound: true}, ops, false)
+		&portmock.ProjectClient{OK: folderOK}, &portmock.VPCClient{SubnetFound: true, SubnetZone: "", SGFound: true, AddrFound: true}, ops, false)
 	return svc, instanceRepo, diskRepo, imgRepo, ops
 }
 
@@ -37,7 +37,7 @@ func instanceFromOp(t *testing.T, op *operations.Operation) *computev1.Instance 
 
 func baseCreateReq() CreateInstanceReq {
 	return CreateInstanceReq{
-		FolderID: "f", Name: "vm-1", ZoneID: "ru-central1-a", PlatformID: "standard-v3",
+		ProjectID: "f", Name: "vm-1", ZoneID: "ru-central1-a", PlatformID: "standard-v3",
 		Cores: 2, Memory: 2 << 30, CoreFraction: 100,
 		BootDisk: DiskSourceSpec{NewDiskSizeGiB: diskSizeMin, NewSourceImage: ""},
 		NICs:     []NICSpec{{SubnetID: "e9bsubnet"}},
@@ -95,7 +95,7 @@ func TestInstance_Create_SubnetNotFound(t *testing.T) {
 	instanceRepo := portmock.NewInstanceRepo().WithDiskRepo(diskRepo)
 	ops := portmock.NewOpsRepo()
 	svc := NewInstanceService(instanceRepo, diskRepo, imgRepo, portmock.NewSnapshotRepo(), portmock.NewZoneRepo(),
-		&portmock.FolderClient{OK: true}, &portmock.VPCClient{SubnetFound: false}, ops, false)
+		&portmock.ProjectClient{OK: true}, &portmock.VPCClient{SubnetFound: false}, ops, false)
 	op, err := svc.Create(context.Background(), baseCreateReq())
 	require.NoError(t, err)
 	done := portmock.AwaitOpDone(t, ops, op.ID)
@@ -108,7 +108,7 @@ func TestInstance_Create_SubnetZoneMismatch(t *testing.T) {
 	instanceRepo := portmock.NewInstanceRepo().WithDiskRepo(diskRepo)
 	ops := portmock.NewOpsRepo()
 	svc := NewInstanceService(instanceRepo, diskRepo, portmock.NewImageRepo(), portmock.NewSnapshotRepo(), portmock.NewZoneRepo(),
-		&portmock.FolderClient{OK: true}, &portmock.VPCClient{SubnetFound: true, SubnetZone: "ru-central1-b"}, ops, false)
+		&portmock.ProjectClient{OK: true}, &portmock.VPCClient{SubnetFound: true, SubnetZone: "ru-central1-b"}, ops, false)
 	op, err := svc.Create(context.Background(), baseCreateReq())
 	require.NoError(t, err)
 	done := portmock.AwaitOpDone(t, ops, op.ID)
@@ -118,7 +118,7 @@ func TestInstance_Create_SubnetZoneMismatch(t *testing.T) {
 
 func seedRunningInstance(repo *portmock.InstanceRepo, status domain.InstanceStatus) *domain.Instance {
 	in := &domain.Instance{
-		ID: "epdvm1", FolderID: "f", Name: "vm", ZoneID: "ru-central1-a", PlatformID: "standard-v3",
+		ID: "epdvm1", ProjectID: "f", Name: "vm", ZoneID: "ru-central1-a", PlatformID: "standard-v3",
 		Cores: 2, Memory: 2 << 30, CoreFraction: 100, Status: status,
 		NetworkInterfaces: []domain.NetworkInterface{{Index: "0", SubnetID: "e9bsubnet", PrimaryV4Address: "10.0.0.10"}},
 		AttachedDisks:     []domain.AttachedDisk{{DiskID: "epdboot", IsBoot: true}},
@@ -183,8 +183,8 @@ func TestInstance_Update_NameAnyStatus(t *testing.T) {
 func TestInstance_AttachDetachDisk(t *testing.T) {
 	svc, repo, diskRepo, _, ops := newInstanceSvc(t, true)
 	seedRunningInstance(repo, domain.InstanceStatusRunning)
-	diskRepo.Seed(&domain.Disk{ID: "epdboot", FolderID: "f", ZoneID: "ru-central1-a", Status: domain.DiskStatusReady})
-	diskRepo.Seed(&domain.Disk{ID: "epddata", FolderID: "f", ZoneID: "ru-central1-a", Status: domain.DiskStatusReady})
+	diskRepo.Seed(&domain.Disk{ID: "epdboot", ProjectID: "f", ZoneID: "ru-central1-a", Status: domain.DiskStatusReady})
+	diskRepo.Seed(&domain.Disk{ID: "epddata", ProjectID: "f", ZoneID: "ru-central1-a", Status: domain.DiskStatusReady})
 
 	op, err := svc.AttachDisk(context.Background(), "epdvm1", DiskSourceSpec{DiskID: "epddata", DeviceName: "data0"})
 	require.NoError(t, err)
@@ -246,14 +246,14 @@ func TestInstance_Move_OK(t *testing.T) {
 	op, err := svc.Move(context.Background(), "epdvm1", "f2")
 	require.NoError(t, err)
 	in := instanceFromOp(t, portmock.AwaitOpDone(t, ops, op.ID))
-	require.Equal(t, "f2", in.FolderId)
+	require.Equal(t, "f2", in.ProjectId)
 }
 
 func TestInstance_Delete_AutoDeleteDisk(t *testing.T) {
 	svc, repo, diskRepo, _, ops := newInstanceSvc(t, true)
 	in0 := seedRunningInstance(repo, domain.InstanceStatusRunning)
 	in0.AttachedDisks = []domain.AttachedDisk{{DiskID: "epdboot", IsBoot: true, AutoDelete: true}}
-	diskRepo.Seed(&domain.Disk{ID: "epdboot", FolderID: "f", Status: domain.DiskStatusReady})
+	diskRepo.Seed(&domain.Disk{ID: "epdboot", ProjectID: "f", Status: domain.DiskStatusReady})
 	diskRepo.SetAttached("epdboot", true)
 	op, err := svc.Delete(context.Background(), "epdvm1")
 	require.NoError(t, err)
@@ -281,7 +281,7 @@ func newInstanceSvcVPC(t *testing.T, vpc *portmock.VPCClient) (*InstanceService,
 	instanceRepo := portmock.NewInstanceRepo().WithDiskRepo(diskRepo)
 	ops := portmock.NewOpsRepo()
 	svc := NewInstanceService(instanceRepo, diskRepo, portmock.NewImageRepo(), portmock.NewSnapshotRepo(), portmock.NewZoneRepo(),
-		&portmock.FolderClient{OK: true}, vpc, ops, false)
+		&portmock.ProjectClient{OK: true}, vpc, ops, false)
 	return svc, instanceRepo, diskRepo, ops
 }
 
@@ -554,7 +554,7 @@ func TestInstance_Create_ZoneFromVPCSource(t *testing.T) {
 		Zones: map[string]string{"ru-central1-a": "ru-central1"},
 	}
 	svc := NewInstanceService(instanceRepo, diskRepo, portmock.NewImageRepo(), portmock.NewSnapshotRepo(),
-		vpcSource, &portmock.FolderClient{OK: true}, vpcSource, ops, false)
+		vpcSource, &portmock.ProjectClient{OK: true}, vpcSource, ops, false)
 
 	// known vpc zone → success.
 	op, err := svc.Create(context.Background(), baseCreateReq())

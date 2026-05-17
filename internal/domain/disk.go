@@ -27,7 +27,7 @@ const (
 // хранятся как proto-указатели; repo сериализует их в JSONB через protojson.
 type Disk struct {
 	ID                  string
-	FolderID            string
+	ProjectID            string
 	CreatedAt           time.Time
 	Name                string
 	Description         string

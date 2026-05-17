@@ -30,7 +30,7 @@ const (
 
 // CreateDiskReq — запрос на создание диска.
 type CreateDiskReq struct {
-	FolderID            string
+	ProjectID            string
 	Name                string
 	Description         string
 	Labels              map[string]string
@@ -66,15 +66,15 @@ type DiskService struct {
 	// InternalZoneService (compute зон не владеет); при SKIP_PEER_VALIDATION —
 	// fallback на локальную таблицу `zones`. Wiring — cmd/compute/main.go.
 	zones        ZoneRegistry
-	folderClient FolderClient
+	projectClient ProjectClient
 	opsRepo      operations.Repo
 }
 
 // NewDiskService создаёт DiskService.
-func NewDiskService(repo DiskRepo, imageRepo ImageRepo, snapshotRepo SnapshotRepo, diskTypeRepo DiskTypeRepo, zones ZoneRegistry, folderClient FolderClient, opsRepo operations.Repo) *DiskService {
+func NewDiskService(repo DiskRepo, imageRepo ImageRepo, snapshotRepo SnapshotRepo, diskTypeRepo DiskTypeRepo, zones ZoneRegistry, projectClient ProjectClient, opsRepo operations.Repo) *DiskService {
 	return &DiskService{
 		repo: repo, imageRepo: imageRepo, snapshotRepo: snapshotRepo,
-		diskTypeRepo: diskTypeRepo, zones: zones, folderClient: folderClient, opsRepo: opsRepo,
+		diskTypeRepo: diskTypeRepo, zones: zones, projectClient: projectClient, opsRepo: opsRepo,
 	}
 }
 
@@ -87,18 +87,18 @@ func (s *DiskService) Get(ctx context.Context, id string) (*domain.Disk, error) 
 	return d, nil
 }
 
-// List возвращает список дисков. folder_id обязателен.
+// List возвращает список дисков. project_id обязателен.
 func (s *DiskService) List(ctx context.Context, f DiskFilter, p Pagination) ([]*domain.Disk, string, error) {
-	if f.FolderID == "" {
-		return nil, "", status.Error(codes.InvalidArgument, "folder_id required")
+	if f.ProjectID == "" {
+		return nil, "", status.Error(codes.InvalidArgument, "project_id required")
 	}
 	return s.repo.List(ctx, f, p)
 }
 
 // Create инициирует создание Disk.
 func (s *DiskService) Create(ctx context.Context, req CreateDiskReq) (*operations.Operation, error) {
-	if req.FolderID == "" {
-		return nil, status.Error(codes.InvalidArgument, "folder_id required")
+	if req.ProjectID == "" {
+		return nil, status.Error(codes.InvalidArgument, "project_id required")
 	}
 	if req.ZoneID == "" {
 		return nil, status.Error(codes.InvalidArgument, "zone_id required")
@@ -138,7 +138,7 @@ func (s *DiskService) Create(ctx context.Context, req CreateDiskReq) (*operation
 }
 
 func (s *DiskService) doCreate(ctx context.Context, diskID string, req CreateDiskReq) (*anypb.Any, error) {
-	if err := s.checkFolder(ctx, req.FolderID); err != nil {
+	if err := s.checkFolder(ctx, req.ProjectID); err != nil {
 		return nil, err
 	}
 	if _, err := s.zones.GetZone(ctx, req.ZoneID); err != nil {
@@ -177,7 +177,7 @@ func (s *DiskService) doCreate(ctx context.Context, diskID string, req CreateDis
 
 	d := &domain.Disk{
 		ID:                  diskID,
-		FolderID:            req.FolderID,
+		ProjectID:            req.ProjectID,
 		CreatedAt:           time.Now().UTC(),
 		Name:                req.Name,
 		Description:         req.Description,
@@ -319,15 +319,15 @@ func (s *DiskService) Delete(ctx context.Context, id string) (*operations.Operat
 }
 
 // Move инициирует перенос Disk в другой folder.
-func (s *DiskService) Move(ctx context.Context, id, destFolderID string) (*operations.Operation, error) {
+func (s *DiskService) Move(ctx context.Context, id, destProjectID string) (*operations.Operation, error) {
 	if id == "" {
 		return nil, status.Error(codes.InvalidArgument, "disk_id required")
 	}
-	if destFolderID == "" {
-		return nil, invalidArg("destination_folder_id", "destination_folder_id is required")
+	if destProjectID == "" {
+		return nil, invalidArg("destination_project_id", "destination_project_id is required")
 	}
 	op, err := operations.New(ids.PrefixOperationCompute, fmt.Sprintf("Move disk %s", id),
-		&computev1.MoveDiskMetadata{DiskId: id, DestinationFolderId: destFolderID})
+		&computev1.MoveDiskMetadata{DiskId: id, DestinationProjectId: destProjectID})
 	if err != nil {
 		return nil, err
 	}
@@ -335,10 +335,10 @@ func (s *DiskService) Move(ctx context.Context, id, destFolderID string) (*opera
 		return nil, err
 	}
 	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		if err := s.checkFolder(ctx, destFolderID); err != nil {
+		if err := s.checkFolder(ctx, destProjectID); err != nil {
 			return nil, err
 		}
-		updated, err := s.repo.SetFolderID(ctx, id, destFolderID)
+		updated, err := s.repo.SetProjectID(ctx, id, destProjectID)
 		if err != nil {
 			return nil, mapRepoErr(err)
 		}
@@ -392,7 +392,7 @@ func (s *DiskService) ListOperations(ctx context.Context, id string, p Paginatio
 }
 
 func (s *DiskService) checkFolder(ctx context.Context, folderID string) error {
-	exists, err := s.folderClient.Exists(ctx, folderID)
+	exists, err := s.projectClient.Exists(ctx, folderID)
 	if err != nil {
 		return status.Errorf(codes.Unavailable, "folder check: %v", err)
 	}

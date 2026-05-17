@@ -16,7 +16,7 @@ _SAMPLE_URI = "https://storage.example.net/presigned/image.qcow2"  # control-pla
 
 
 def _img_body(name_suffix, **over):
-    b = {"folderId": "{{_suiteFolderId}}", "name": f"img-{name_suffix}-{{{{runId}}}}"}
+    b = {"projectId": "{{_suiteFolderId}}", "name": f"img-{name_suffix}-{{{{runId}}}}"}
     b.update(over)
     return b
 
@@ -25,7 +25,7 @@ def _pre_disk(suffix="src"):
     """Создать base disk, сохранить baseDiskId; вернуть список шагов."""
     return [
         Step(name=f"pre-disk-{suffix}", method="POST", path=DISKS,
-             body={"folderId": "{{_suiteFolderId}}", "name": f"disk-imgsrc-{suffix}-{{{{runId}}}}",
+             body={"projectId": "{{_suiteFolderId}}", "name": f"disk-imgsrc-{suffix}-{{{{runId}}}}",
                    "zoneId": "{{existingZoneId}}", "size": _DEF_DISK_SIZE},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
                           *save_from_response("j.metadata && j.metadata.diskId", "baseDiskId")]),
@@ -52,7 +52,7 @@ CASES.append(Case(
     steps=[
         *_pre_disk("crok"),
         Step(name="create", method="POST", path=IMAGES,
-             body={"folderId": "{{_suiteFolderId}}", "name": "img-cr-{{runId}}",
+             body={"projectId": "{{_suiteFolderId}}", "name": "img-cr-{{runId}}",
                    "family": "newman-fam-{{runId}}", "diskId": "{{baseDiskId}}",
                    "description": "newman CRUD-OK", "labels": {"suite": "newman"}},
              test_script=[*assert_status(200), *assert_operation_envelope(),
@@ -63,7 +63,7 @@ CASES.append(Case(
              test_script=[*assert_status(200),
                           "const j = pm.response.json();",
                           "pm.test('id matches & fd8 prefix', () => { pm.expect(j.id).to.eql(pm.environment.get('imageId')); pm.expect(j.id).to.match(/^fd8/); });",
-                          "pm.test('folderId matches', () => pm.expect(j.folderId).to.eql(pm.environment.get('_suiteFolderId')));",
+                          "pm.test('projectId matches', () => pm.expect(j.projectId).to.eql(pm.environment.get('_suiteFolderId')));",
                           "pm.test('family matches', () => pm.expect(j.family).to.match(/^newman-fam-/));",
                           "pm.test('status READY', () => pm.expect(j.status).to.eql('READY'));",
                           "pm.test('minDiskSize numeric & >0', () => pm.expect(Number(j.minDiskSize)).to.be.above(0));",
@@ -80,7 +80,7 @@ CASES.append(Case(
     classes=["CRUD"], priority="P2",
     steps=[
         Step(name="create", method="POST", path=IMAGES,
-             body={"folderId": "{{_suiteFolderId}}", "name": "img-uri-{{runId}}", "uri": _SAMPLE_URI},
+             body={"projectId": "{{_suiteFolderId}}", "name": "img-uri-{{runId}}", "uri": _SAMPLE_URI},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
                           *save_from_response("j.metadata && j.metadata.imageId", "imageId")]),
         poll_operation_until_done(), assert_op_success(),
@@ -99,13 +99,13 @@ CASES.append(Case(
     steps=[
         # 1. base image из uri
         Step(name="cr-base-img", method="POST", path=IMAGES,
-             body={"folderId": "{{_suiteFolderId}}", "name": "img-base-{{runId}}", "uri": _SAMPLE_URI},
+             body={"projectId": "{{_suiteFolderId}}", "name": "img-base-{{runId}}", "uri": _SAMPLE_URI},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
                           *save_from_response("j.metadata && j.metadata.imageId", "baseImageId")]),
         poll_operation_until_done(),
         # 2. image из этого image
         Step(name="cr-img-from-img", method="POST", path=IMAGES,
-             body={"folderId": "{{_suiteFolderId}}", "name": "img-fromimg-{{runId}}", "imageId": "{{baseImageId}}"},
+             body={"projectId": "{{_suiteFolderId}}", "name": "img-fromimg-{{runId}}", "imageId": "{{baseImageId}}"},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
                           *save_from_response("j.metadata && j.metadata.imageId", "imageId")]),
         poll_operation_until_done(), assert_op_success(),
@@ -125,12 +125,12 @@ CASES.append(Case(
     steps=[
         *_pre_disk("snapsrc"),
         Step(name="cr-snapshot", method="POST", path="/compute/v1/snapshots",
-             body={"folderId": "{{_suiteFolderId}}", "name": "snap-imgsrc-{{runId}}", "diskId": "{{baseDiskId}}"},
+             body={"projectId": "{{_suiteFolderId}}", "name": "snap-imgsrc-{{runId}}", "diskId": "{{baseDiskId}}"},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
                           *save_from_response("j.metadata && j.metadata.snapshotId", "snapshotId")]),
         poll_operation_until_done(),
         Step(name="cr-img-from-snap", method="POST", path=IMAGES,
-             body={"folderId": "{{_suiteFolderId}}", "name": "img-fromsnap-{{runId}}", "snapshotId": "{{snapshotId}}"},
+             body={"projectId": "{{_suiteFolderId}}", "name": "img-fromsnap-{{runId}}", "snapshotId": "{{snapshotId}}"},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
                           *save_from_response("j.metadata && j.metadata.imageId", "imageId")]),
         poll_operation_until_done(), assert_op_success(),
@@ -146,7 +146,7 @@ CASES.append(Case(
 
 CASES.append(Case(
     id="IMG-CR-VAL-FOLDER-REQUIRED",
-    title="Create без folderId → 400 InvalidArgument",
+    title="Create без projectId → 400 InvalidArgument",
     classes=["VAL"], priority="P0",
     steps=[Step(name="cr-nf", method="POST", path=IMAGES, body={"name": "img-nf-{{runId}}", "uri": _SAMPLE_URI},
                 test_script=[*assert_status(400), *assert_grpc_code(3, "INVALID_ARGUMENT")])],
@@ -156,7 +156,7 @@ CASES.append(Case(
     id="IMG-CR-VAL-NO-SOURCE",
     title="Create без источника (нет image_id/snapshot_id/disk_id/uri) → 400 InvalidArgument 'exactly one of'",
     classes=["VAL", "NEG"], priority="P0",
-    steps=[Step(name="cr-no-src", method="POST", path=IMAGES, body={"folderId": "{{_suiteFolderId}}", "name": "img-ns-{{runId}}"},
+    steps=[Step(name="cr-no-src", method="POST", path=IMAGES, body={"projectId": "{{_suiteFolderId}}", "name": "img-ns-{{runId}}"},
                 # probe-needed: точный YC text — предполагаем mention "exactly one"/"source"
                 test_script=[*assert_status(400), *assert_grpc_code(3, "INVALID_ARGUMENT")])],
 ))
@@ -166,7 +166,7 @@ CASES.append(Case(
     title="Create с двумя источниками (image_id + uri) → 400 InvalidArgument",
     classes=["VAL", "NEG"], priority="P1",
     steps=[Step(name="cr-multi-src", method="POST", path=IMAGES,
-                body={"folderId": "{{_suiteFolderId}}", "name": "img-ms-{{runId}}",
+                body={"projectId": "{{_suiteFolderId}}", "name": "img-ms-{{runId}}",
                       "imageId": "{{garbageImageId}}", "uri": _SAMPLE_URI},
                 test_script=[*assert_status(400), *assert_grpc_code(3, "INVALID_ARGUMENT")])],
 ))
@@ -177,7 +177,7 @@ CASES.append(Case(
     classes=["NEG"], priority="P1",
     steps=[
         Step(name="cr-bad-disk", method="POST", path=IMAGES,
-             body={"folderId": "{{_suiteFolderId}}", "name": "img-bd-{{runId}}", "diskId": "{{garbageComputeId}}"},
+             body={"projectId": "{{_suiteFolderId}}", "name": "img-bd-{{runId}}", "diskId": "{{garbageComputeId}}"},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
         poll_operation_until_done(),
         assert_op_error(5, "NOT_FOUND"),
@@ -190,7 +190,7 @@ CASES.append(Case(
     classes=["NEG"], priority="P1",
     steps=[
         Step(name="cr-bad-img", method="POST", path=IMAGES,
-             body={"folderId": "{{_suiteFolderId}}", "name": "img-bi-{{runId}}", "imageId": "{{garbageImageId}}"},
+             body={"projectId": "{{_suiteFolderId}}", "name": "img-bi-{{runId}}", "imageId": "{{garbageImageId}}"},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
         poll_operation_until_done(),
         assert_op_error(5, "NOT_FOUND"),
@@ -199,12 +199,12 @@ CASES.append(Case(
 
 CASES.append(Case(
     id="IMG-CR-NEG-FOLDER-NOTFOUND",
-    title="Create image в garbage folderId → async NOT_FOUND 'Folder ... not found'",
+    title="Create image в garbage projectId → async NOT_FOUND 'Folder ... not found'",
     classes=["NEG"], priority="P0",
     steps=[
         # # requires peer-validation enabled
         Step(name="cr-bad-folder", method="POST", path=IMAGES,
-             body={"folderId": "{{garbageRmId}}", "name": "img-bf-{{runId}}", "uri": _SAMPLE_URI},
+             body={"projectId": "{{garbageRmId}}", "name": "img-bf-{{runId}}", "uri": _SAMPLE_URI},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
         poll_operation_until_done(),
         assert_op_error(5, "NOT_FOUND", msg_substr="folder"),
@@ -217,12 +217,12 @@ CASES.append(Case(
     classes=["NEG", "CONC"], priority="P1",
     steps=[
         Step(name="cr-1", method="POST", path=IMAGES,
-             body={"folderId": "{{_suiteFolderId}}", "name": "img-dup-{{runId}}", "uri": _SAMPLE_URI},
+             body={"projectId": "{{_suiteFolderId}}", "name": "img-dup-{{runId}}", "uri": _SAMPLE_URI},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
                           *save_from_response("j.metadata && j.metadata.imageId", "imageId")]),
         poll_operation_until_done(),
         Step(name="cr-2-dup", method="POST", path=IMAGES,
-             body={"folderId": "{{_suiteFolderId}}", "name": "img-dup-{{runId}}", "uri": _SAMPLE_URI},
+             body={"projectId": "{{_suiteFolderId}}", "name": "img-dup-{{runId}}", "uri": _SAMPLE_URI},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
         poll_operation_until_done(),
         assert_op_error(6, "ALREADY_EXISTS"),
@@ -236,7 +236,7 @@ CASES.append(Case(
     title="Create image с family содержащим спец-символы → 400 (proto pattern '|[a-z][-a-z0-9]{1,61}[a-z0-9]')",
     classes=["VAL"], priority="P2",
     steps=[Step(name="cr-bad-fam", method="POST", path=IMAGES,
-                body={"folderId": "{{_suiteFolderId}}", "name": "img-bf2-{{runId}}", "family": "Bad_Family!", "uri": _SAMPLE_URI},
+                body={"projectId": "{{_suiteFolderId}}", "name": "img-bf2-{{runId}}", "family": "Bad_Family!", "uri": _SAMPLE_URI},
                 test_script=[*assert_status(400), *assert_grpc_code(3, "INVALID_ARGUMENT")])],
 ))
 
@@ -250,16 +250,16 @@ CASES.append(Case(
     classes=["CRUD"], priority="P1",
     steps=[
         Step(name="cr-img-1", method="POST", path=IMAGES,
-             body={"folderId": "{{_suiteFolderId}}", "name": "img-glf1-{{runId}}", "family": "glf-fam-{{runId}}", "uri": _SAMPLE_URI},
+             body={"projectId": "{{_suiteFolderId}}", "name": "img-glf1-{{runId}}", "family": "glf-fam-{{runId}}", "uri": _SAMPLE_URI},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
                           *save_from_response("j.metadata && j.metadata.imageId", "img1Id")]),
         poll_operation_until_done(),
         Step(name="cr-img-2", method="POST", path=IMAGES,
-             body={"folderId": "{{_suiteFolderId}}", "name": "img-glf2-{{runId}}", "family": "glf-fam-{{runId}}", "uri": _SAMPLE_URI},
+             body={"projectId": "{{_suiteFolderId}}", "name": "img-glf2-{{runId}}", "family": "glf-fam-{{runId}}", "uri": _SAMPLE_URI},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
                           *save_from_response("j.metadata && j.metadata.imageId", "img2Id")]),
         poll_operation_until_done(),
-        Step(name="glf", method="GET", path=f"{IMAGES}:latestByFamily?folderId={{{{_suiteFolderId}}}}&family=glf-fam-{{{{runId}}}}",
+        Step(name="glf", method="GET", path=f"{IMAGES}:latestByFamily?projectId={{{{_suiteFolderId}}}}&family=glf-fam-{{{{runId}}}}",
              test_script=[*assert_status(200),
                           "const j = pm.response.json();",
                           "pm.test('family matches', () => pm.expect(j.family).to.match(/^glf-fam-/));",
@@ -276,13 +276,13 @@ CASES.append(Case(
     title="GetLatestByFamily для family без images → 404 NOT_FOUND",
     classes=["NEG"], priority="P1",
     steps=[Step(name="glf-nx", method="GET",
-                path=f"{IMAGES}:latestByFamily?folderId={{{{_suiteFolderId}}}}&family=nonexistent-fam-{{{{runId}}}}",
+                path=f"{IMAGES}:latestByFamily?projectId={{{{_suiteFolderId}}}}&family=nonexistent-fam-{{{{runId}}}}",
                 test_script=[*assert_status(404), *assert_grpc_code(5, "NOT_FOUND")])],
 ))
 
 CASES.append(Case(
     id="IMG-GLF-VAL-FOLDER-REQUIRED",
-    title="GetLatestByFamily без folderId → 400 InvalidArgument",
+    title="GetLatestByFamily без projectId → 400 InvalidArgument",
     classes=["VAL"], priority="P1",
     steps=[Step(name="glf-nf", method="GET", path=f"{IMAGES}:latestByFamily?family=anything",
                 test_script=[*assert_status(400), *assert_grpc_code(3, "INVALID_ARGUMENT")])],
@@ -313,13 +313,13 @@ CASES.append(Case(
     id="IMG-LST-CRUD-OK",
     title="List images в folder → images array",
     classes=["CRUD"], priority="P1",
-    steps=[Step(name="list", method="GET", path=f"{IMAGES}?folderId={{{{_suiteFolderId}}}}",
+    steps=[Step(name="list", method="GET", path=f"{IMAGES}?projectId={{{{_suiteFolderId}}}}",
                 test_script=[*assert_status(200), "pm.test('images is array', () => pm.expect(pm.response.json().images || []).to.be.an('array'));"])],
 ))
 
 CASES.append(Case(
     id="IMG-LST-VAL-FOLDER-REQUIRED",
-    title="List без folderId → 400 InvalidArgument",
+    title="List без projectId → 400 InvalidArgument",
     classes=["VAL", "AUTHZ"], priority="P0",
     steps=[Step(name="list-nf", method="GET", path=IMAGES,
                 test_script=[*assert_status(400), *assert_grpc_code(3, "INVALID_ARGUMENT")])],
@@ -335,7 +335,7 @@ CASES.append(Case(
     classes=["CRUD", "STATE"], priority="P1",
     steps=[
         Step(name="cr", method="POST", path=IMAGES,
-             body={"folderId": "{{_suiteFolderId}}", "name": "img-upd-{{runId}}", "uri": _SAMPLE_URI,
+             body={"projectId": "{{_suiteFolderId}}", "name": "img-upd-{{runId}}", "uri": _SAMPLE_URI,
                    "description": "init", "labels": {"orig": "1"}},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
                           *save_from_response("j.metadata && j.metadata.imageId", "imageId")]),
@@ -394,7 +394,7 @@ CASES.append(Case(
     classes=["CRUD", "STATE"], priority="P1",
     steps=[
         Step(name="cr", method="POST", path=IMAGES,
-             body={"folderId": "{{_suiteFolderId}}", "name": "img-delok-{{runId}}", "uri": _SAMPLE_URI},
+             body={"projectId": "{{_suiteFolderId}}", "name": "img-delok-{{runId}}", "uri": _SAMPLE_URI},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
                           *save_from_response("j.metadata && j.metadata.imageId", "imageId")]),
         poll_operation_until_done(),
@@ -424,7 +424,7 @@ CASES.append(Case(
     classes=["CRUD"], priority="P1",
     steps=[
         Step(name="cr", method="POST", path=IMAGES,
-             body={"folderId": "{{_suiteFolderId}}", "name": "img-lop-{{runId}}", "uri": _SAMPLE_URI},
+             body={"projectId": "{{_suiteFolderId}}", "name": "img-lop-{{runId}}", "uri": _SAMPLE_URI},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
                           *save_from_response("j.metadata && j.metadata.imageId", "imageId")]),
         poll_operation_until_done(),
@@ -445,13 +445,13 @@ CASES.append(Case(
     classes=["CRUD", "CONF", "STATE"], priority="P1",
     steps=[
         Step(name="cr", method="POST", path=IMAGES,
-             body={"folderId": "{{_suiteFolderId}}", "name": "img-life-{{runId}}", "uri": _SAMPLE_URI},
+             body={"projectId": "{{_suiteFolderId}}", "name": "img-life-{{runId}}", "uri": _SAMPLE_URI},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
                           *save_from_response("j.metadata && j.metadata.imageId", "imageId")]),
         poll_operation_until_done(),
         Step(name="get-1", method="GET", path=f"{IMAGES}/{{{{imageId}}}}",
              test_script=[*assert_status(200), "pm.test('id', () => pm.expect(pm.response.json().id).to.eql(pm.environment.get('imageId')));"]),
-        Step(name="lst-includes", method="GET", path=f"{IMAGES}?folderId={{{{_suiteFolderId}}}}&pageSize=1000",
+        Step(name="lst-includes", method="GET", path=f"{IMAGES}?projectId={{{{_suiteFolderId}}}}&pageSize=1000",
              test_script=[*assert_status(200),
                           "const ids = (pm.response.json().images || []).map(x => x.id);",
                           "pm.test('list contains', () => pm.expect(ids).to.include(pm.environment.get('imageId')));"]),
@@ -464,7 +464,7 @@ CASES.append(Case(
         Step(name="del", method="DELETE", path=f"{IMAGES}/{{{{imageId}}}}",
              test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
         poll_operation_until_done(),
-        Step(name="lst-excludes", method="GET", path=f"{IMAGES}?folderId={{{{_suiteFolderId}}}}&pageSize=1000",
+        Step(name="lst-excludes", method="GET", path=f"{IMAGES}?projectId={{{{_suiteFolderId}}}}&pageSize=1000",
              test_script=[*assert_status(200),
                           "const ids = (pm.response.json().images || []).map(x => x.id);",
                           "pm.test('list does not contain', () => pm.expect(ids).to.not.include(pm.environment.get('imageId')));"]),
@@ -494,7 +494,7 @@ CASES.append(Case(
     classes=["CONF"], priority="P1",
     steps=[
         Step(name="cr", method="POST", path=IMAGES,
-             body={"folderId": "{{_suiteFolderId}}", "name": "img-idpfx-{{runId}}", "uri": _SAMPLE_URI},
+             body={"projectId": "{{_suiteFolderId}}", "name": "img-idpfx-{{runId}}", "uri": _SAMPLE_URI},
              test_script=[*assert_status(200),
                           "const j = pm.response.json();",
                           "pm.test('operation.id epd...', () => pm.expect(j.id).to.match(/^epd[a-z0-9]{17}$/));",

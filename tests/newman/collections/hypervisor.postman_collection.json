@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "caef7fb9-e3d6-47ee-8f77-1a14b6dfc641",
+    "_postman_id": "75a344ca-d47a-494f-a3a1-b312b17efdef",
     "name": "kacho-compute / newman / hypervisor",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -16,8 +16,8 @@
           "  const r = Math.floor(Math.random() * 1e9).toString(36);",
           "  pm.environment.set('runId', ('r' + t + r).replace(/[^a-z0-9]/g, '').slice(0, 11));",
           "}",
-          "pm.environment.set('_suiteFolderId', pm.environment.get('existingFolderId'));",
-          "pm.environment.set('_suiteFolderCrossId', pm.environment.get('existingFolderCrossId'));"
+          "pm.environment.set('_suiteFolderId', pm.environment.get('existingProjectId'));",
+          "pm.environment.set('_suiteFolderCrossId', pm.environment.get('existingProjectCrossId'));"
         ]
       }
     }

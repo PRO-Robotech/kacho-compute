@@ -66,8 +66,8 @@ PRE_GLOBAL = [
     "  const r = Math.floor(Math.random() * 1e9).toString(36);",
     "  pm.environment.set('runId', ('r' + t + r).replace(/[^a-z0-9]/g, '').slice(0, 11));",
     "}",
-    "pm.environment.set('_suiteFolderId', pm.environment.get('existingFolderId'));",
-    "pm.environment.set('_suiteFolderCrossId', pm.environment.get('existingFolderCrossId'));",
+    "pm.environment.set('_suiteFolderId', pm.environment.get('existingProjectId'));",
+    "pm.environment.set('_suiteFolderCrossId', pm.environment.get('existingProjectCrossId'));",
 ]
 
 
@@ -191,10 +191,10 @@ def assert_op_success() -> Step:
 def list_page_block(prefix, list_path, folder_param=True):
     """BVA для List RPC: page_size 0 / 1 / 1000 / 1001 / garbage token.
 
-    folder_param=True — list_path требует ?folderId=... (Disk/Image/Snapshot/Instance);
-    folder_param=False — справочники (DiskType/Zone) — без folderId.
+    folder_param=True — list_path требует ?projectId=... (Disk/Image/Snapshot/Instance);
+    folder_param=False — справочники (DiskType/Zone) — без projectId.
     """
-    base = f"{list_path}?folderId={{{{_suiteFolderId}}}}&" if folder_param else f"{list_path}?"
+    base = f"{list_path}?projectId={{{{_suiteFolderId}}}}&" if folder_param else f"{list_path}?"
     return [
         Case(id=f"{prefix}-LST-BVA-PAGESIZE-ZERO",
              title="List pageSize=0 → default applied (200)",
@@ -235,14 +235,14 @@ def name_validation_block(prefix, create_path, body_extra=None, wrap=None):
       - начинается с дефиса → 400
       - спец-символы → 400
 
-    body_extra — обязательные поля кроме folderId/name.
+    body_extra — обязательные поля кроме projectId/name.
     wrap(case) — опциональный декоратор (для Image/Snapshot/Instance которым нужен pre-disk и т.п.);
                  если задан — name-кейсы которые ожидают 200 оборачиваются (нужен реальный ресурс),
                  остальные (400) — нет (отказ синхронный, до создания зависимостей).
     """
     body_extra = body_extra or {}
     wrap = wrap or (lambda c: c)
-    base = lambda name: {"folderId": "{{_suiteFolderId}}", "name": name, **body_extra}
+    base = lambda name: {"projectId": "{{_suiteFolderId}}", "name": name, **body_extra}
     out = []
     out.append(wrap(Case(id=f"{prefix}-CR-VAL-NAME-EMPTY-OK",
         title="Create с empty name → 200 (proto pattern допускает пустую строку)",
@@ -290,7 +290,7 @@ def labels_validation_block(prefix, create_path, body_extra=None, wrap=None):
     """ECP по labels: uppercase key → 400; invalid key char → 400; 64 (max) → 200; 65 (over) → 400."""
     body_extra = body_extra or {}
     wrap = wrap or (lambda c: c)
-    base = lambda name, labels: {"folderId": "{{_suiteFolderId}}", "name": name, "labels": labels, **body_extra}
+    base = lambda name, labels: {"projectId": "{{_suiteFolderId}}", "name": name, "labels": labels, **body_extra}
     return [
         Case(id=f"{prefix}-CR-VAL-LABELS-UPPERCASE-KEY",
              title="Create с UPPERCASE label key → 400",
@@ -324,7 +324,7 @@ def description_validation_block(prefix, create_path, body_extra=None, wrap=None
     """BVA по description: 256 (max) → 200; 257 (over) → 400."""
     body_extra = body_extra or {}
     wrap = wrap or (lambda c: c)
-    base = lambda name, desc: {"folderId": "{{_suiteFolderId}}", "name": name, "description": desc, **body_extra}
+    base = lambda name, desc: {"projectId": "{{_suiteFolderId}}", "name": name, "description": desc, **body_extra}
     return [
         wrap(Case(id=f"{prefix}-CR-BVA-DESC-MAX-256",
              title="Create с description len=256 (max) → 200",
@@ -350,19 +350,19 @@ def filter_block(prefix, list_path):
              title="List с filter name=\"foo\" → 200",
              classes=["FILTER", "CRUD"], priority="P2",
              steps=[Step(name="flt-ok", method="GET",
-                         path=f"{list_path}?folderId={{{{_suiteFolderId}}}}{sep}filter=name%3D%22foo%22",
+                         path=f"{list_path}?projectId={{{{_suiteFolderId}}}}{sep}filter=name%3D%22foo%22",
                          test_script=[*assert_status(200)])]),
         Case(id=f"{prefix}-LST-FILTER-GARBAGE",
              title="List с garbage filter syntax → 200 или 400",
              classes=["FILTER", "VAL"], priority="P2",
              steps=[Step(name="flt-bad", method="GET",
-                         path=f"{list_path}?folderId={{{{_suiteFolderId}}}}{sep}filter=this%20is%20not%20valid%20syntax",
+                         path=f"{list_path}?projectId={{{{_suiteFolderId}}}}{sep}filter=this%20is%20not%20valid%20syntax",
                          test_script=["pm.test('200 or 400', () => pm.expect(pm.response.code).to.be.oneOf([200, 400]));"])]),
         Case(id=f"{prefix}-LST-FILTER-UNKNOWN-FIELD",
              title="List с filter на unsupported field → 200 или 400",
              classes=["FILTER", "VAL"], priority="P2",
              steps=[Step(name="flt-unk", method="GET",
-                         path=f"{list_path}?folderId={{{{_suiteFolderId}}}}{sep}filter=nonexistent_field%3D%22x%22",
+                         path=f"{list_path}?projectId={{{{_suiteFolderId}}}}{sep}filter=nonexistent_field%3D%22x%22",
                          test_script=["pm.test('200 or 400', () => pm.expect(pm.response.code).to.be.oneOf([200, 400]));"])]),
     ]
 
@@ -384,7 +384,7 @@ def security_injection_block(prefix, create_path, list_path, body_extra=None):
             title=f"Security probe: {name} в name → handled, без 500/leak",
             classes=["SEC", "VAL", "NEG"], priority="P0",
             steps=[Step(name=f"sec-{name}", method="POST", path=create_path,
-                        body={"folderId": "{{_suiteFolderId}}", "name": payload[:200], **body_extra},
+                        body={"projectId": "{{_suiteFolderId}}", "name": payload[:200], **body_extra},
                         test_script=[
                             "pm.test('not 500', () => pm.expect(pm.response.code).to.not.eql(500));",
                             "pm.test('handled 2xx/4xx', () => pm.expect(pm.response.code).to.be.oneOf([200, 400, 413]));",
@@ -395,7 +395,7 @@ def security_injection_block(prefix, create_path, list_path, body_extra=None):
         title="Security: SQL injection в filter → не 500",
         classes=["SEC", "VAL", "NEG"], priority="P0",
         steps=[Step(name="lst-sqli", method="GET",
-                    path=f"{list_path}?folderId={{{{_suiteFolderId}}}}&filter=name%3D%22a%27%20OR%201%3D1--%22",
+                    path=f"{list_path}?projectId={{{{_suiteFolderId}}}}&filter=name%3D%22a%27%20OR%201%3D1--%22",
                     test_script=["pm.test('not 500', () => pm.expect(pm.response.code).to.not.eql(500));",
                                  "pm.test('handled', () => pm.expect(pm.response.code).to.be.oneOf([200, 400]));"])]))
     return out
@@ -407,7 +407,7 @@ def http_method_block(prefix, base_path):
         Case(id=f"{prefix}-METHOD-PUT-NOT-ALLOWED",
              title="PUT на List endpoint → 404/405/501",
              classes=["VAL", "NEG"], priority="P3",
-             steps=[Step(name="put-list", method="PUT", path=base_path, body={"folderId": "{{_suiteFolderId}}"},
+             steps=[Step(name="put-list", method="PUT", path=base_path, body={"projectId": "{{_suiteFolderId}}"},
                          test_script=["pm.test('not allowed', () => pm.expect(pm.response.code).to.be.oneOf([404, 405, 501]));"])]),
         Case(id=f"{prefix}-METHOD-DELETE-LIST",
              title="DELETE на List endpoint (без id) → 404/405/501",
@@ -427,7 +427,7 @@ def malformed_body_block(prefix, create_path):
                          pre_script=["pm.request.body = { mode: 'raw', raw: '{invalid json---}' };"],
                          test_script=["pm.test('400 or 415', () => pm.expect(pm.response.code).to.be.oneOf([400, 415]));"])]),
         Case(id=f"{prefix}-CR-VAL-EMPTY-BODY",
-             title="Create с пустым body → 400 (folder_id required)",
+             title="Create с пустым body → 400 (project_id required)",
              classes=["VAL", "NEG"], priority="P2",
              steps=[Step(name="cr-empty-body", method="POST", path=create_path, body={},
                          test_script=[*assert_status(400), *assert_grpc_code(3, "INVALID_ARGUMENT")])]),

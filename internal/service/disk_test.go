@@ -22,7 +22,7 @@ func newDiskSvc(t *testing.T, folderOK bool) (*DiskService, *portmock.DiskRepo, 
 	snapRepo := portmock.NewSnapshotRepo()
 	ops := portmock.NewOpsRepo()
 	svc := NewDiskService(diskRepo, imgRepo, snapRepo, portmock.NewDiskTypeRepo(), portmock.NewZoneRepo(),
-		&portmock.FolderClient{OK: folderOK}, ops)
+		&portmock.ProjectClient{OK: folderOK}, ops)
 	return svc, diskRepo, imgRepo, snapRepo, ops
 }
 
@@ -37,7 +37,7 @@ func diskFromOp(t *testing.T, op *operations.Operation) *computev1.Disk {
 func TestDisk_Create_OK(t *testing.T) {
 	svc, repo, _, _, ops := newDiskSvc(t, true)
 	op, err := svc.Create(context.Background(), CreateDiskReq{
-		FolderID: "fld1", Name: "my-disk", ZoneID: "ru-central1-a", Size: diskSizeMin,
+		ProjectID: "fld1", Name: "my-disk", ZoneID: "ru-central1-a", Size: diskSizeMin,
 	})
 	require.NoError(t, err)
 	done := portmock.AwaitOpDone(t, ops, op.ID)
@@ -60,11 +60,11 @@ func TestDisk_Create_SyncValidation(t *testing.T) {
 		code codes.Code
 	}{
 		{"no folder", CreateDiskReq{ZoneID: "ru-central1-a", Size: diskSizeMin}, codes.InvalidArgument},
-		{"no zone", CreateDiskReq{FolderID: "f", Size: diskSizeMin}, codes.InvalidArgument},
-		{"size too small", CreateDiskReq{FolderID: "f", ZoneID: "ru-central1-a", Size: 100}, codes.InvalidArgument},
-		{"size too big", CreateDiskReq{FolderID: "f", ZoneID: "ru-central1-a", Size: diskSizeMaxCreate + 1}, codes.InvalidArgument},
-		{"uppercase name", CreateDiskReq{FolderID: "f", ZoneID: "ru-central1-a", Size: diskSizeMin, Name: "Bad"}, codes.InvalidArgument},
-		{"both sources", CreateDiskReq{FolderID: "f", ZoneID: "ru-central1-a", Size: diskSizeMin, ImageID: "i", SnapshotID: "s"}, codes.InvalidArgument},
+		{"no zone", CreateDiskReq{ProjectID: "f", Size: diskSizeMin}, codes.InvalidArgument},
+		{"size too small", CreateDiskReq{ProjectID: "f", ZoneID: "ru-central1-a", Size: 100}, codes.InvalidArgument},
+		{"size too big", CreateDiskReq{ProjectID: "f", ZoneID: "ru-central1-a", Size: diskSizeMaxCreate + 1}, codes.InvalidArgument},
+		{"uppercase name", CreateDiskReq{ProjectID: "f", ZoneID: "ru-central1-a", Size: diskSizeMin, Name: "Bad"}, codes.InvalidArgument},
+		{"both sources", CreateDiskReq{ProjectID: "f", ZoneID: "ru-central1-a", Size: diskSizeMin, ImageID: "i", SnapshotID: "s"}, codes.InvalidArgument},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -76,7 +76,7 @@ func TestDisk_Create_SyncValidation(t *testing.T) {
 
 func TestDisk_Create_FolderNotFound(t *testing.T) {
 	svc, _, _, _, ops := newDiskSvc(t, false)
-	op, err := svc.Create(context.Background(), CreateDiskReq{FolderID: "missing", ZoneID: "ru-central1-a", Size: diskSizeMin})
+	op, err := svc.Create(context.Background(), CreateDiskReq{ProjectID: "missing", ZoneID: "ru-central1-a", Size: diskSizeMin})
 	require.NoError(t, err)
 	done := portmock.AwaitOpDone(t, ops, op.ID)
 	require.NotNil(t, done.Error)
@@ -85,8 +85,8 @@ func TestDisk_Create_FolderNotFound(t *testing.T) {
 
 func TestDisk_Create_FromImage_SizeTooSmall(t *testing.T) {
 	svc, _, imgRepo, _, ops := newDiskSvc(t, true)
-	imgRepo.Seed(&domain.Image{ID: "img1", FolderID: "f", MinDiskSize: diskSizeMin * 4})
-	op, err := svc.Create(context.Background(), CreateDiskReq{FolderID: "f", ZoneID: "ru-central1-a", Size: diskSizeMin, ImageID: "img1"})
+	imgRepo.Seed(&domain.Image{ID: "img1", ProjectID: "f", MinDiskSize: diskSizeMin * 4})
+	op, err := svc.Create(context.Background(), CreateDiskReq{ProjectID: "f", ZoneID: "ru-central1-a", Size: diskSizeMin, ImageID: "img1"})
 	require.NoError(t, err)
 	done := portmock.AwaitOpDone(t, ops, op.ID)
 	require.NotNil(t, done.Error)
@@ -107,7 +107,7 @@ func TestDisk_List_RequiresFolder(t *testing.T) {
 
 func TestDisk_Update_SizeDecrease_Rejected(t *testing.T) {
 	svc, repo, _, _, ops := newDiskSvc(t, true)
-	repo.Seed(&domain.Disk{ID: "d1", FolderID: "f", Size: diskSizeMin * 2, Status: domain.DiskStatusReady})
+	repo.Seed(&domain.Disk{ID: "d1", ProjectID: "f", Size: diskSizeMin * 2, Status: domain.DiskStatusReady})
 	op, err := svc.Update(context.Background(), UpdateDiskReq{DiskID: "d1", Size: diskSizeMin, UpdateMask: []string{"size"}})
 	require.NoError(t, err)
 	done := portmock.AwaitOpDone(t, ops, op.ID)
@@ -118,14 +118,14 @@ func TestDisk_Update_SizeDecrease_Rejected(t *testing.T) {
 
 func TestDisk_Update_ImmutableField_Rejected(t *testing.T) {
 	svc, repo, _, _, _ := newDiskSvc(t, true)
-	repo.Seed(&domain.Disk{ID: "d1", FolderID: "f", Size: diskSizeMin})
+	repo.Seed(&domain.Disk{ID: "d1", ProjectID: "f", Size: diskSizeMin})
 	_, err := svc.Update(context.Background(), UpdateDiskReq{DiskID: "d1", UpdateMask: []string{"zone_id"}})
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
 func TestDisk_Update_NameAndDescription(t *testing.T) {
 	svc, repo, _, _, ops := newDiskSvc(t, true)
-	repo.Seed(&domain.Disk{ID: "d1", FolderID: "f", Size: diskSizeMin, Name: "old"})
+	repo.Seed(&domain.Disk{ID: "d1", ProjectID: "f", Size: diskSizeMin, Name: "old"})
 	op, err := svc.Update(context.Background(), UpdateDiskReq{DiskID: "d1", Name: "new", Description: "hi", UpdateMask: []string{"name", "description"}})
 	require.NoError(t, err)
 	done := portmock.AwaitOpDone(t, ops, op.ID)
@@ -136,7 +136,7 @@ func TestDisk_Update_NameAndDescription(t *testing.T) {
 
 func TestDisk_Delete_OK(t *testing.T) {
 	svc, repo, _, _, ops := newDiskSvc(t, true)
-	repo.Seed(&domain.Disk{ID: "d1", FolderID: "f", Size: diskSizeMin})
+	repo.Seed(&domain.Disk{ID: "d1", ProjectID: "f", Size: diskSizeMin})
 	op, err := svc.Delete(context.Background(), "d1")
 	require.NoError(t, err)
 	done := portmock.AwaitOpDone(t, ops, op.ID)
@@ -147,7 +147,7 @@ func TestDisk_Delete_OK(t *testing.T) {
 
 func TestDisk_Delete_Attached_FailedPrecondition(t *testing.T) {
 	svc, repo, _, _, ops := newDiskSvc(t, true)
-	repo.Seed(&domain.Disk{ID: "d1", FolderID: "f", Size: diskSizeMin})
+	repo.Seed(&domain.Disk{ID: "d1", ProjectID: "f", Size: diskSizeMin})
 	repo.SetAttached("d1", true)
 	op, err := svc.Delete(context.Background(), "d1")
 	require.NoError(t, err)
@@ -158,17 +158,17 @@ func TestDisk_Delete_Attached_FailedPrecondition(t *testing.T) {
 
 func TestDisk_Move_OK(t *testing.T) {
 	svc, repo, _, _, ops := newDiskSvc(t, true)
-	repo.Seed(&domain.Disk{ID: "d1", FolderID: "f1", Size: diskSizeMin})
+	repo.Seed(&domain.Disk{ID: "d1", ProjectID: "f1", Size: diskSizeMin})
 	op, err := svc.Move(context.Background(), "d1", "f2")
 	require.NoError(t, err)
 	done := portmock.AwaitOpDone(t, ops, op.ID)
 	d := diskFromOp(t, done)
-	require.Equal(t, "f2", d.FolderId)
+	require.Equal(t, "f2", d.ProjectId)
 }
 
 func TestDisk_Relocate_Attached_Rejected(t *testing.T) {
 	svc, repo, _, _, ops := newDiskSvc(t, true)
-	repo.Seed(&domain.Disk{ID: "d1", FolderID: "f", ZoneID: "ru-central1-a", Size: diskSizeMin})
+	repo.Seed(&domain.Disk{ID: "d1", ProjectID: "f", ZoneID: "ru-central1-a", Size: diskSizeMin})
 	repo.SetAttached("d1", true)
 	op, err := svc.Relocate(context.Background(), "d1", "ru-central1-b")
 	require.NoError(t, err)
@@ -179,7 +179,7 @@ func TestDisk_Relocate_Attached_Rejected(t *testing.T) {
 
 func TestDisk_Operations_Always_HasComputePrefix(t *testing.T) {
 	svc, _, _, _, _ := newDiskSvc(t, true)
-	op, err := svc.Create(context.Background(), CreateDiskReq{FolderID: "f", ZoneID: "ru-central1-a", Size: diskSizeMin})
+	op, err := svc.Create(context.Background(), CreateDiskReq{ProjectID: "f", ZoneID: "ru-central1-a", Size: diskSizeMin})
 	require.NoError(t, err)
 	require.Equal(t, "epd", op.ID[:3], "all compute operations must use the epd prefix")
 }
@@ -192,16 +192,16 @@ func TestDisk_Create_ZoneFromVPCSource(t *testing.T) {
 	ops := portmock.NewOpsRepo()
 	vpcSource := &portmock.VPCClient{Zones: map[string]string{"ru-central1-a": "ru-central1"}}
 	svc := NewDiskService(diskRepo, portmock.NewImageRepo(), portmock.NewSnapshotRepo(),
-		portmock.NewDiskTypeRepo(), vpcSource, &portmock.FolderClient{OK: true}, ops)
+		portmock.NewDiskTypeRepo(), vpcSource, &portmock.ProjectClient{OK: true}, ops)
 
 	// known vpc zone → success.
-	op, err := svc.Create(context.Background(), CreateDiskReq{FolderID: "f", Name: "ok", ZoneID: "ru-central1-a", Size: diskSizeMin})
+	op, err := svc.Create(context.Background(), CreateDiskReq{ProjectID: "f", Name: "ok", ZoneID: "ru-central1-a", Size: diskSizeMin})
 	require.NoError(t, err)
 	done := portmock.AwaitOpDone(t, ops, op.ID)
 	require.Nil(t, done.Error, "create with known vpc zone must succeed")
 
 	// zone vpc does not know → InvalidArgument "Zone ... not found".
-	op2, err := svc.Create(context.Background(), CreateDiskReq{FolderID: "f", Name: "bad", ZoneID: "no-such-zone", Size: diskSizeMin})
+	op2, err := svc.Create(context.Background(), CreateDiskReq{ProjectID: "f", Name: "bad", ZoneID: "no-such-zone", Size: diskSizeMin})
 	require.NoError(t, err)
 	done2 := portmock.AwaitOpDone(t, ops, op2.ID)
 	require.NotNil(t, done2.Error)

@@ -23,12 +23,12 @@ func TestDiskHandler_CRUD(t *testing.T) {
 	diskRepo := portmock.NewDiskRepo()
 	ops := portmock.NewOpsRepo()
 	svc := service.NewDiskService(diskRepo, portmock.NewImageRepo(), portmock.NewSnapshotRepo(),
-		portmock.NewDiskTypeRepo(), portmock.NewZoneRepo(), &portmock.FolderClient{OK: true}, ops)
+		portmock.NewDiskTypeRepo(), portmock.NewZoneRepo(), &portmock.ProjectClient{OK: true}, ops)
 	h := NewDiskHandler(svc)
 	ctx := context.Background()
 
 	// Create.
-	op, err := h.Create(ctx, &computev1.CreateDiskRequest{FolderId: "f", Name: "d", ZoneId: "ru-central1-a", Size: 4194304})
+	op, err := h.Create(ctx, &computev1.CreateDiskRequest{ProjectId: "f", Name: "d", ZoneId: "ru-central1-a", Size: 4194304})
 	require.NoError(t, err)
 	require.NotEmpty(t, op.Id)
 	awaitOps(t, ops)
@@ -50,7 +50,7 @@ func TestDiskHandler_CRUD(t *testing.T) {
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 
 	// List.
-	list, err := h.List(ctx, &computev1.ListDisksRequest{FolderId: "f"})
+	list, err := h.List(ctx, &computev1.ListDisksRequest{ProjectId: "f"})
 	require.NoError(t, err)
 	require.Len(t, list.Disks, 1)
 

@@ -26,7 +26,7 @@ type InstanceRepo struct {
 // NewInstanceRepo создаёт InstanceRepo.
 func NewInstanceRepo(pool *pgxpool.Pool) *InstanceRepo { return &InstanceRepo{pool: pool} }
 
-const instanceCols = `id, folder_id, created_at, name, description, labels, zone_id, platform_id, cores, memory, core_fraction, gpus, ` +
+const instanceCols = `id, project_id, created_at, name, description, labels, zone_id, platform_id, cores, memory, core_fraction, gpus, ` +
 	`status, metadata, metadata_options, service_account_id, hostname, fqdn, network_settings_type, scheduling_preemptible, ` +
 	`placement_policy, serial_port_ssh_authorization, gpu_cluster_id, hardware_generation, maintenance_policy, ` +
 	`maintenance_grace_period_seconds, reserved_instance_pool_id, host_group_id, host_id, application`
@@ -53,9 +53,9 @@ func (r *InstanceRepo) List(ctx context.Context, f service.InstanceFilter, p ser
 	var args []any
 	var conditions []string
 	argIdx := 1
-	if f.FolderID != "" {
-		conditions = append(conditions, fmt.Sprintf("folder_id = $%d", argIdx))
-		args = append(args, f.FolderID)
+	if f.ProjectID != "" {
+		conditions = append(conditions, fmt.Sprintf("project_id = $%d", argIdx))
+		args = append(args, f.ProjectID)
 		argIdx++
 	}
 	if f.Filter != "" {
@@ -256,10 +256,10 @@ func (r *InstanceRepo) SetStatusCAS(ctx context.Context, id string, expected, ne
 	return in, nil
 }
 
-// SetFolderID меняет folder_id (для Move) + outbox UPDATED.
-func (r *InstanceRepo) SetFolderID(ctx context.Context, id, folderID string) (*domain.Instance, error) {
+// SetProjectID меняет project_id (для Move) + outbox UPDATED.
+func (r *InstanceRepo) SetProjectID(ctx context.Context, id, folderID string) (*domain.Instance, error) {
 	return r.mutateAndReload(ctx, id, "UPDATED", func(ctx context.Context, tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE instances SET folder_id = $2 WHERE id = $1`, id, folderID)
+		_, err := tx.Exec(ctx, `UPDATE instances SET project_id = $2 WHERE id = $1`, id, folderID)
 		return err
 	})
 }
@@ -492,7 +492,7 @@ func insertDiskTx(ctx context.Context, tx pgx.Tx, d *domain.Disk) error {
 	if err != nil {
 		return err
 	}
-	const q = `INSERT INTO disks (id, folder_id, created_at, name, description, labels, type_id, zone_id, size, block_size,
+	const q = `INSERT INTO disks (id, project_id, created_at, name, description, labels, type_id, zone_id, size, block_size,
 		product_ids, status, source_image_id, source_snapshot_id, disk_placement_policy, hardware_generation, kms_key)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`
 	_, err = tx.Exec(ctx, q, args...)
@@ -530,7 +530,7 @@ func instanceInsertArgs(in *domain.Instance) ([]any, error) {
 		return nil, err
 	}
 	return []any{
-		in.ID, in.FolderID, in.CreatedAt, in.Name, in.Description, labelsJSON, in.ZoneID, in.PlatformID, in.Cores, in.Memory, in.CoreFraction, in.GPUs,
+		in.ID, in.ProjectID, in.CreatedAt, in.Name, in.Description, labelsJSON, in.ZoneID, in.PlatformID, in.Cores, in.Memory, in.CoreFraction, in.GPUs,
 		instanceStatusName(in.Status), mdJSON, mdOptJSON, in.ServiceAccountID, in.Hostname, in.FQDN, in.NetworkSettingsType, in.SchedulingPreemptible,
 		ppJSON, in.SerialPortSSHAuthorization, in.GPUClusterID, hgJSON, in.MaintenancePolicy,
 		in.MaintenanceGracePeriodSeconds, in.ReservedInstancePoolID, in.HostGroupID, in.HostID, appJSON,
@@ -542,7 +542,7 @@ func scanInstance(row scannable) (*domain.Instance, error) {
 	var labelsJSON, mdJSON, mdOptJSON, ppJSON, hgJSON, appJSON []byte
 	var statusName string
 	if err := row.Scan(
-		&in.ID, &in.FolderID, &in.CreatedAt, &in.Name, &in.Description, &labelsJSON, &in.ZoneID, &in.PlatformID, &in.Cores, &in.Memory, &in.CoreFraction, &in.GPUs,
+		&in.ID, &in.ProjectID, &in.CreatedAt, &in.Name, &in.Description, &labelsJSON, &in.ZoneID, &in.PlatformID, &in.Cores, &in.Memory, &in.CoreFraction, &in.GPUs,
 		&statusName, &mdJSON, &mdOptJSON, &in.ServiceAccountID, &in.Hostname, &in.FQDN, &in.NetworkSettingsType, &in.SchedulingPreemptible,
 		&ppJSON, &in.SerialPortSSHAuthorization, &in.GPUClusterID, &hgJSON, &in.MaintenancePolicy,
 		&in.MaintenanceGracePeriodSeconds, &in.ReservedInstancePoolID, &in.HostGroupID, &in.HostID, &appJSON,

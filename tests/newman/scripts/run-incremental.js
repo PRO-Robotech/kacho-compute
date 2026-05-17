@@ -90,7 +90,7 @@ async function cleanupPass(passes = 3) {
     let removed = 0;
     for (const fid of TEST_FOLDERS) {
       for (const [restPath, listKey] of KINDS) {
-        const j = await jget(`${BASE}/compute/v1/${restPath}?folderId=${encodeURIComponent(fid)}&pageSize=1000`);
+        const j = await jget(`${BASE}/compute/v1/${restPath}?projectId=${encodeURIComponent(fid)}&pageSize=1000`);
         const arr = (j && Array.isArray(j[listKey])) ? j[listKey] : [];
         for (const r of arr) {
           if (!r || !r.id) continue;
@@ -110,7 +110,7 @@ async function cleanupPass(passes = 3) {
 async function remainingCount() {
   let n = 0;
   for (const fid of TEST_FOLDERS) for (const [restPath, listKey] of KINDS) {
-    const j = await jget(`${BASE}/compute/v1/${restPath}?folderId=${encodeURIComponent(fid)}&pageSize=1000`);
+    const j = await jget(`${BASE}/compute/v1/${restPath}?projectId=${encodeURIComponent(fid)}&pageSize=1000`);
     const arr = (j && Array.isArray(j[listKey])) ? j[listKey] : [];
     n += arr.length;
   }
