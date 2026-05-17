@@ -32,7 +32,7 @@ func (h *SnapshotHandler) Get(ctx context.Context, req *computev1.GetSnapshotReq
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, snap.FolderID); err != nil {
+	if err := AssertFolderOwnership(ctx, snap.ProjectID); err != nil {
 		return nil, err
 	}
 	return protoconv.Snapshot(snap), nil
@@ -40,10 +40,10 @@ func (h *SnapshotHandler) Get(ctx context.Context, req *computev1.GetSnapshotReq
 
 // List возвращает список снапшотов в folder.
 func (h *SnapshotHandler) List(ctx context.Context, req *computev1.ListSnapshotsRequest) (*computev1.ListSnapshotsResponse, error) {
-	if err := AssertFolderOwnership(ctx, req.FolderId); err != nil {
+	if err := AssertFolderOwnership(ctx, req.ProjectId); err != nil {
 		return nil, err
 	}
-	snaps, nextToken, err := h.svc.List(ctx, svc.SnapshotFilter{FolderID: req.FolderId, Filter: req.Filter},
+	snaps, nextToken, err := h.svc.List(ctx, svc.SnapshotFilter{ProjectID: req.ProjectId, Filter: req.Filter},
 		svc.Pagination{PageToken: req.PageToken, PageSize: req.PageSize})
 	if err != nil {
 		return nil, err
@@ -57,11 +57,11 @@ func (h *SnapshotHandler) List(ctx context.Context, req *computev1.ListSnapshots
 
 // Create инициирует создание Snapshot.
 func (h *SnapshotHandler) Create(ctx context.Context, req *computev1.CreateSnapshotRequest) (*operationpb.Operation, error) {
-	if err := AssertFolderOwnership(ctx, req.FolderId); err != nil {
+	if err := AssertFolderOwnership(ctx, req.ProjectId); err != nil {
 		return nil, err
 	}
 	op, err := h.svc.Create(ctx, svc.CreateSnapshotReq{
-		FolderID:           req.FolderId,
+		ProjectID:           req.ProjectId,
 		DiskID:             req.DiskId,
 		Name:               req.Name,
 		Description:        req.Description,
@@ -83,7 +83,7 @@ func (h *SnapshotHandler) Update(ctx context.Context, req *computev1.UpdateSnaps
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, snap.FolderID); err != nil {
+	if err := AssertFolderOwnership(ctx, snap.ProjectID); err != nil {
 		return nil, err
 	}
 	var mask []string
@@ -112,7 +112,7 @@ func (h *SnapshotHandler) Delete(ctx context.Context, req *computev1.DeleteSnaps
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, snap.FolderID); err != nil {
+	if err := AssertFolderOwnership(ctx, snap.ProjectID); err != nil {
 		return nil, err
 	}
 	op, err := h.svc.Delete(ctx, req.SnapshotId)
@@ -131,7 +131,7 @@ func (h *SnapshotHandler) ListOperations(ctx context.Context, req *computev1.Lis
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, snap.FolderID); err != nil {
+	if err := AssertFolderOwnership(ctx, snap.ProjectID); err != nil {
 		return nil, err
 	}
 	ops, nextToken, err := h.svc.ListOperations(ctx, req.SnapshotId, svc.Pagination{PageToken: req.PageToken, PageSize: req.PageSize})

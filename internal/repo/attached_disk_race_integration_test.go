@@ -45,7 +45,7 @@ func TestIntegration_AttachedDisksDiskIDUniq_ConcurrentAttachRace(t *testing.T) 
 	// 1 shared disk.
 	diskID := ids.NewID(ids.PrefixDisk)
 	_, err = diskRepo.Insert(ctx, &domain.Disk{
-		ID: diskID, FolderID: "f-race", CreatedAt: time.Now().UTC().Truncate(time.Microsecond),
+		ID: diskID, ProjectID: "f-race", CreatedAt: time.Now().UTC().Truncate(time.Microsecond),
 		ZoneID: "ru-central1-a", Size: 4194304, BlockSize: 4096, Status: domain.DiskStatusReady,
 	})
 	require.NoError(t, err)
@@ -57,7 +57,7 @@ func TestIntegration_AttachedDisksDiskIDUniq_ConcurrentAttachRace(t *testing.T) 
 		inID := ids.NewID(ids.PrefixInstance)
 		instanceIDs[i] = inID
 		in := &domain.Instance{
-			ID: inID, FolderID: "f-race", CreatedAt: time.Now().UTC().Truncate(time.Microsecond),
+			ID: inID, ProjectID: "f-race", CreatedAt: time.Now().UTC().Truncate(time.Microsecond),
 			ZoneID: "ru-central1-a", PlatformID: "standard-v3", Cores: 2, Memory: 2 << 30, CoreFraction: 100,
 			Status: domain.InstanceStatusRunning, FQDN: inID + ".auto.internal", NetworkSettingsType: "STANDARD",
 			NetworkInterfaces: []domain.NetworkInterface{{Index: "0", SubnetID: "e9bsub", PrimaryV4Address: "10.0.0.10"}},

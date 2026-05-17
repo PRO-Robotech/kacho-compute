@@ -110,7 +110,7 @@ func (c *VPCClient) SecurityGroupExists(ctx context.Context, sgID string) (bool,
 // возвращает выделенный VPC-ом IPv4 (из CIDR подсети) + id Address-ресурса.
 func (c *VPCClient) CreateInternalAddress(ctx context.Context, folderID, name, subnetID string) (service.VPCAddress, error) {
 	req := &vpcv1.CreateAddressRequest{
-		FolderId: folderID,
+		ProjectId: folderID,
 		Name:     name,
 		AddressSpec: &vpcv1.CreateAddressRequest_InternalIpv4AddressSpec{
 			InternalIpv4AddressSpec: &vpcv1.InternalIpv4AddressSpec{
@@ -133,7 +133,7 @@ func (c *VPCClient) CreateInternalAddress(ctx context.Context, folderID, name, s
 // возвращает выделенный VPC-ом публичный IPv4 (из AddressPool) + id ресурса.
 func (c *VPCClient) CreateExternalAddress(ctx context.Context, folderID, name, zoneID string) (service.VPCAddress, error) {
 	req := &vpcv1.CreateAddressRequest{
-		FolderId: folderID,
+		ProjectId: folderID,
 		Name:     name,
 		AddressSpec: &vpcv1.CreateAddressRequest_ExternalIpv4AddressSpec{
 			ExternalIpv4AddressSpec: &vpcv1.ExternalIpv4AddressSpec{ZoneId: zoneID},
@@ -268,7 +268,7 @@ func (c *VPCClient) CreateNetworkInterface(ctx context.Context, req service.Crea
 	if err := retry.OnUnavailable(ctx, func(ctx context.Context) error {
 		var rerr error
 		op, rerr = c.nics.Create(ctx, &vpcv1.CreateNetworkInterfaceRequest{
-			FolderId:         req.FolderID,
+			ProjectId:         req.ProjectID,
 			Name:             req.Name,
 			SubnetId:         req.SubnetID,
 			SecurityGroupIds: req.SecurityGroupIDs,

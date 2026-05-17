@@ -60,8 +60,11 @@ spec:
               value: "{{ .Values.ports.grpc }}"
             - name: KACHO_COMPUTE_INTERNAL_PORT
               value: "{{ .Values.ports.internalGrpc }}"
+            # KAC-106 (E1): peer for project-existence switched to kacho-iam.
+            - name: KACHO_COMPUTE_IAM_GRPC_ADDR
+              value: "{{ .Values.iamAddr }}"
             - name: KACHO_COMPUTE_RESOURCE_MANAGER_GRPC_ADDR
-              value: "{{ .Values.resourceManagerAddr }}"
+              value: "{{ default "" .Values.resourceManagerAddr }}"
             - name: KACHO_COMPUTE_VPC_GRPC_ADDR
               value: "{{ .Values.vpcAddr }}"
             - name: KACHO_COMPUTE_VPC_INTERNAL_GRPC_ADDR

@@ -38,7 +38,7 @@ func (h *InstanceHandler) Get(ctx context.Context, req *computev1.GetInstanceReq
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, in.FolderID); err != nil {
+	if err := AssertFolderOwnership(ctx, in.ProjectID); err != nil {
 		return nil, err
 	}
 	p := protoconv.Instance(in)
@@ -51,10 +51,10 @@ func (h *InstanceHandler) Get(ctx context.Context, req *computev1.GetInstanceReq
 
 // List возвращает список ВМ в folder.
 func (h *InstanceHandler) List(ctx context.Context, req *computev1.ListInstancesRequest) (*computev1.ListInstancesResponse, error) {
-	if err := AssertFolderOwnership(ctx, req.FolderId); err != nil {
+	if err := AssertFolderOwnership(ctx, req.ProjectId); err != nil {
 		return nil, err
 	}
-	ins, nextToken, err := h.svc.List(ctx, svc.InstanceFilter{FolderID: req.FolderId, Filter: req.Filter},
+	ins, nextToken, err := h.svc.List(ctx, svc.InstanceFilter{ProjectID: req.ProjectId, Filter: req.Filter},
 		svc.Pagination{PageToken: req.PageToken, PageSize: req.PageSize})
 	if err != nil {
 		return nil, err
@@ -72,11 +72,11 @@ func (h *InstanceHandler) List(ctx context.Context, req *computev1.ListInstances
 
 // Create инициирует создание Instance.
 func (h *InstanceHandler) Create(ctx context.Context, req *computev1.CreateInstanceRequest) (*operationpb.Operation, error) {
-	if err := AssertFolderOwnership(ctx, req.FolderId); err != nil {
+	if err := AssertFolderOwnership(ctx, req.ProjectId); err != nil {
 		return nil, err
 	}
 	cr := svc.CreateInstanceReq{
-		FolderID:         req.FolderId,
+		ProjectID:         req.ProjectId,
 		Name:             req.Name,
 		Description:      req.Description,
 		Labels:           req.Labels,
@@ -121,7 +121,7 @@ func (h *InstanceHandler) Update(ctx context.Context, req *computev1.UpdateInsta
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, in.FolderID); err != nil {
+	if err := AssertFolderOwnership(ctx, in.ProjectID); err != nil {
 		return nil, err
 	}
 	var mask []string
@@ -160,7 +160,7 @@ func (h *InstanceHandler) UpdateMetadata(ctx context.Context, req *computev1.Upd
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, in.FolderID); err != nil {
+	if err := AssertFolderOwnership(ctx, in.ProjectID); err != nil {
 		return nil, err
 	}
 	op, err := h.svc.UpdateMetadata(ctx, req.InstanceId, req.Delete, req.Upsert)
@@ -193,7 +193,7 @@ func (h *InstanceHandler) lifecycle(ctx context.Context, id string, fn func(cont
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, in.FolderID); err != nil {
+	if err := AssertFolderOwnership(ctx, in.ProjectID); err != nil {
 		return nil, err
 	}
 	op, err := fn(ctx, id)
@@ -212,7 +212,7 @@ func (h *InstanceHandler) AttachDisk(ctx context.Context, req *computev1.AttachI
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, in.FolderID); err != nil {
+	if err := AssertFolderOwnership(ctx, in.ProjectID); err != nil {
 		return nil, err
 	}
 	op, err := h.svc.AttachDisk(ctx, req.InstanceId, diskSourceFromSpec(req.AttachedDiskSpec))
@@ -231,7 +231,7 @@ func (h *InstanceHandler) DetachDisk(ctx context.Context, req *computev1.DetachI
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, in.FolderID); err != nil {
+	if err := AssertFolderOwnership(ctx, in.ProjectID); err != nil {
 		return nil, err
 	}
 	op, err := h.svc.DetachDisk(ctx, req.InstanceId, req.GetDiskId(), req.GetDeviceName())
@@ -250,7 +250,7 @@ func (h *InstanceHandler) AddOneToOneNat(ctx context.Context, req *computev1.Add
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, in.FolderID); err != nil {
+	if err := AssertFolderOwnership(ctx, in.ProjectID); err != nil {
 		return nil, err
 	}
 	var natSpec *svc.NatSpec
@@ -273,7 +273,7 @@ func (h *InstanceHandler) RemoveOneToOneNat(ctx context.Context, req *computev1.
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, in.FolderID); err != nil {
+	if err := AssertFolderOwnership(ctx, in.ProjectID); err != nil {
 		return nil, err
 	}
 	op, err := h.svc.RemoveOneToOneNat(ctx, req.InstanceId, req.NetworkInterfaceIndex)
@@ -292,13 +292,13 @@ func (h *InstanceHandler) Move(ctx context.Context, req *computev1.MoveInstanceR
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, in.FolderID); err != nil {
+	if err := AssertFolderOwnership(ctx, in.ProjectID); err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, req.DestinationFolderId); err != nil {
+	if err := AssertFolderOwnership(ctx, req.DestinationProjectId); err != nil {
 		return nil, err
 	}
-	op, err := h.svc.Move(ctx, req.InstanceId, req.DestinationFolderId)
+	op, err := h.svc.Move(ctx, req.InstanceId, req.DestinationProjectId)
 	if err != nil {
 		return nil, err
 	}
@@ -314,7 +314,7 @@ func (h *InstanceHandler) SimulateMaintenanceEvent(ctx context.Context, req *com
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, in.FolderID); err != nil {
+	if err := AssertFolderOwnership(ctx, in.ProjectID); err != nil {
 		return nil, err
 	}
 	op, err := h.svc.SimulateMaintenanceEvent(ctx, req.InstanceId)
@@ -333,7 +333,7 @@ func (h *InstanceHandler) Delete(ctx context.Context, req *computev1.DeleteInsta
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, in.FolderID); err != nil {
+	if err := AssertFolderOwnership(ctx, in.ProjectID); err != nil {
 		return nil, err
 	}
 	op, err := h.svc.Delete(ctx, req.InstanceId)
@@ -352,7 +352,7 @@ func (h *InstanceHandler) GetSerialPortOutput(ctx context.Context, req *computev
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, in.FolderID); err != nil {
+	if err := AssertFolderOwnership(ctx, in.ProjectID); err != nil {
 		return nil, err
 	}
 	contents, err := h.svc.GetSerialPortOutput(ctx, req.InstanceId)
@@ -371,7 +371,7 @@ func (h *InstanceHandler) ListOperations(ctx context.Context, req *computev1.Lis
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, in.FolderID); err != nil {
+	if err := AssertFolderOwnership(ctx, in.ProjectID); err != nil {
 		return nil, err
 	}
 	ops, nextToken, err := h.svc.ListOperations(ctx, req.InstanceId, svc.Pagination{PageToken: req.PageToken, PageSize: req.PageSize})

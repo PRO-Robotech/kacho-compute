@@ -23,7 +23,7 @@ type SnapshotRepo struct {
 // NewSnapshotRepo создаёт SnapshotRepo.
 func NewSnapshotRepo(pool *pgxpool.Pool) *SnapshotRepo { return &SnapshotRepo{pool: pool} }
 
-const snapshotCols = `id, folder_id, created_at, name, description, labels, storage_size, disk_size, product_ids, ` +
+const snapshotCols = `id, project_id, created_at, name, description, labels, storage_size, disk_size, product_ids, ` +
 	`status, source_disk_id, hardware_generation, kms_key`
 
 // Get возвращает снапшот по id.
@@ -45,9 +45,9 @@ func (r *SnapshotRepo) List(ctx context.Context, f service.SnapshotFilter, p ser
 	var args []any
 	var conditions []string
 	argIdx := 1
-	if f.FolderID != "" {
-		conditions = append(conditions, fmt.Sprintf("folder_id = $%d", argIdx))
-		args = append(args, f.FolderID)
+	if f.ProjectID != "" {
+		conditions = append(conditions, fmt.Sprintf("project_id = $%d", argIdx))
+		args = append(args, f.ProjectID)
 		argIdx++
 	}
 	if f.Filter != "" {
@@ -114,7 +114,7 @@ func (r *SnapshotRepo) Insert(ctx context.Context, s *domain.Snapshot) (*domain.
 		return nil, service.ErrInternal
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	const q = `INSERT INTO snapshots (id, folder_id, created_at, name, description, labels, storage_size, disk_size, product_ids,
+	const q = `INSERT INTO snapshots (id, project_id, created_at, name, description, labels, storage_size, disk_size, product_ids,
 		status, source_disk_id, hardware_generation, kms_key) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING ` + snapshotCols
 	result, err := scanSnapshot(tx.QueryRow(ctx, q, args...))
 	if err != nil {
@@ -197,7 +197,7 @@ func snapshotInsertArgs(s *domain.Snapshot) ([]any, error) {
 		return nil, err
 	}
 	return []any{
-		s.ID, s.FolderID, s.CreatedAt, s.Name, s.Description, labelsJSON, s.StorageSize, s.DiskSize, prodJSON,
+		s.ID, s.ProjectID, s.CreatedAt, s.Name, s.Description, labelsJSON, s.StorageSize, s.DiskSize, prodJSON,
 		snapshotStatusName(s.Status), s.SourceDiskID, hgJSON, kmsJSON,
 	}, nil
 }
@@ -207,7 +207,7 @@ func scanSnapshot(row scannable) (*domain.Snapshot, error) {
 	var labelsJSON, prodJSON, hgJSON, kmsJSON []byte
 	var statusName string
 	if err := row.Scan(
-		&s.ID, &s.FolderID, &s.CreatedAt, &s.Name, &s.Description, &labelsJSON, &s.StorageSize, &s.DiskSize, &prodJSON,
+		&s.ID, &s.ProjectID, &s.CreatedAt, &s.Name, &s.Description, &labelsJSON, &s.StorageSize, &s.DiskSize, &prodJSON,
 		&statusName, &s.SourceDiskID, &hgJSON, &kmsJSON,
 	); err != nil {
 		return nil, err

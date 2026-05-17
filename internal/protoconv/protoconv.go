@@ -22,7 +22,7 @@ func ts(t time.Time) *timestamppb.Timestamp { return timestamppb.New(t.Truncate(
 func Disk(d *domain.Disk) *computev1.Disk {
 	out := &computev1.Disk{
 		Id:                  d.ID,
-		FolderId:            d.FolderID,
+		ProjectId:            d.ProjectID,
 		CreatedAt:           ts(d.CreatedAt),
 		Name:                d.Name,
 		Description:         d.Description,
@@ -51,7 +51,7 @@ func Disk(d *domain.Disk) *computev1.Disk {
 func Image(i *domain.Image) *computev1.Image {
 	out := &computev1.Image{
 		Id:                 i.ID,
-		FolderId:           i.FolderID,
+		ProjectId:           i.ProjectID,
 		CreatedAt:          ts(i.CreatedAt),
 		Name:               i.Name,
 		Description:        i.Description,
@@ -79,7 +79,7 @@ func Image(i *domain.Image) *computev1.Image {
 func Snapshot(s *domain.Snapshot) *computev1.Snapshot {
 	return &computev1.Snapshot{
 		Id:                 s.ID,
-		FolderId:           s.FolderID,
+		ProjectId:           s.ProjectID,
 		CreatedAt:          ts(s.CreatedAt),
 		Name:               s.Name,
 		Description:        s.Description,
@@ -127,7 +127,7 @@ func Region(r *domain.Region) *computev1.Region {
 func Instance(in *domain.Instance) *computev1.Instance {
 	out := &computev1.Instance{
 		Id:          in.ID,
-		FolderId:    in.FolderID,
+		ProjectId:    in.ProjectID,
 		CreatedAt:   ts(in.CreatedAt),
 		Name:        in.Name,
 		Description: in.Description,

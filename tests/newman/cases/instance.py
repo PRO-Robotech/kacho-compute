@@ -7,7 +7,7 @@ GetSerialPortOutput, SimulateMaintenanceEvent.
 
 Cross-service: NIC.subnet_id / security_group_ids → kacho-vpc (нужен поднятый kacho-vpc;
 кейсы с реальным subnet помечены '# requires kacho-vpc subnet {{existingSubnetId}}').
-folder_id → kacho-resource-manager. При KACHO_COMPUTE_SKIP_PEER_VALIDATION=true cross-service
+project_id → kacho-resource-manager. При KACHO_COMPUTE_SKIP_PEER_VALIDATION=true cross-service
 existence-checks становятся no-op → NEG-SUBNET-NOTFOUND / NEG-FOLDER-NOTFOUND не сработают
 (помечены '# requires peer-validation enabled').
 
@@ -50,7 +50,7 @@ def _boot_disk_spec_inline(name_suffix="boot", size=_BOOT_SIZE, image=None):
 
 
 def _instance_body(name_suffix, boot_disk_spec=None, secondary=None, nics=None, **over):
-    b = {"folderId": "{{_suiteFolderId}}", "name": f"inst-{name_suffix}-{{{{runId}}}}",
+    b = {"projectId": "{{_suiteFolderId}}", "name": f"inst-{name_suffix}-{{{{runId}}}}",
          "zoneId": "{{existingZoneId}}", "platformId": "{{existingPlatformId}}",
          "resourcesSpec": _resources_spec(),
          "bootDiskSpec": boot_disk_spec or _boot_disk_spec_inline(name_suffix),
@@ -83,7 +83,7 @@ def _delete_instance_steps(var="instanceId"):
 def _create_disk_steps(suffix, save_as="extraDiskId", zone="{{existingZoneId}}", size=_DISK_SIZE):
     return [
         Step(name=f"cr-disk-{suffix}", method="POST", path=DISKS,
-             body={"folderId": "{{_suiteFolderId}}", "name": f"disk-{suffix}-{{{{runId}}}}",
+             body={"projectId": "{{_suiteFolderId}}", "name": f"disk-{suffix}-{{{{runId}}}}",
                    "zoneId": zone, "size": size},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
                           *save_from_response("j.metadata && j.metadata.diskId", save_as)]),
@@ -127,7 +127,7 @@ CASES.append(Case(
              test_script=[*assert_status(200),
                           "const j = pm.response.json();",
                           "pm.test('id matches & epd prefix', () => { pm.expect(j.id).to.eql(pm.environment.get('instanceId')); pm.expect(j.id).to.match(/^epd/); });",
-                          "pm.test('folderId matches', () => pm.expect(j.folderId).to.eql(pm.environment.get('_suiteFolderId')));",
+                          "pm.test('projectId matches', () => pm.expect(j.projectId).to.eql(pm.environment.get('_suiteFolderId')));",
                           "pm.test('zoneId matches', () => pm.expect(j.zoneId).to.eql(pm.environment.get('existingZoneId')));",
                           "pm.test('platformId matches', () => pm.expect(j.platformId).to.eql(pm.environment.get('existingPlatformId')));",
                           "pm.test('status RUNNING', () => pm.expect(j.status).to.eql('RUNNING'));",
@@ -147,7 +147,7 @@ CASES.append(Case(
     steps=[
         # # requires kacho-vpc subnet {{existingSubnetId}}
         Step(name="cr-image", method="POST", path=IMAGES,
-             body={"folderId": "{{_suiteFolderId}}", "name": "img-instboot-{{runId}}", "uri": _SAMPLE_URI},
+             body={"projectId": "{{_suiteFolderId}}", "name": "img-instboot-{{runId}}", "uri": _SAMPLE_URI},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
                           *save_from_response("j.metadata && j.metadata.imageId", "imageId")]),
         poll_operation_until_done(),
@@ -205,20 +205,20 @@ for fld, var, label in [
 
 CASES.append(Case(
     id="INST-CR-VAL-MISSING-FOLDER",
-    title="Create instance без folderId → 400 InvalidArgument",
+    title="Create instance без projectId → 400 InvalidArgument",
     classes=["VAL"], priority="P0",
     steps=[Step(name="cr-no-folder", method="POST", path=INSTANCES,
-                body={k: v for k, v in _instance_body("nf").items() if k != "folderId"},
+                body={k: v for k, v in _instance_body("nf").items() if k != "projectId"},
                 test_script=[*assert_status(400), *assert_grpc_code(3, "INVALID_ARGUMENT")])],
 ))
 
 CASES.append(Case(
     id="INST-CR-NEG-FOLDER-NOTFOUND",
-    title="Create instance в garbage folderId → async NOT_FOUND 'Folder ... not found'",
+    title="Create instance в garbage projectId → async NOT_FOUND 'Folder ... not found'",
     classes=["NEG"], priority="P0",
     steps=[
         # # requires peer-validation enabled
-        Step(name="cr-bad-folder", method="POST", path=INSTANCES, body=_instance_body("bf", folderId="{{garbageRmId}}"),
+        Step(name="cr-bad-folder", method="POST", path=INSTANCES, body=_instance_body("bf", projectId="{{garbageRmId}}"),
              test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
         poll_operation_until_done(),
         assert_op_error(5, "NOT_FOUND", msg_substr="folder"),
@@ -321,19 +321,19 @@ def _vpc_make_nic_steps():
     saves vpcNetId / vpcSubnetId / vpcNicId. Returns step list (poll vpc ops)."""
     return [
         Step(name="vpc-cr-net", method="POST", path=VPC_NETWORKS,
-             body={"folderId": "{{_suiteFolderId}}", "name": "nm-nicnet-{{runId}}"},
+             body={"projectId": "{{_suiteFolderId}}", "name": "nm-nicnet-{{runId}}"},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
                           *save_from_response("j.metadata && j.metadata.networkId", "vpcNetId")]),
         poll_operation_until_done(),
         Step(name="vpc-cr-subnet", method="POST", path=VPC_SUBNETS,
-             body={"folderId": "{{_suiteFolderId}}", "name": "nm-nicsub-{{runId}}",
+             body={"projectId": "{{_suiteFolderId}}", "name": "nm-nicsub-{{runId}}",
                    "networkId": "{{vpcNetId}}", "zoneId": "{{existingZoneId}}",
                    "v4CidrBlocks": ["192.168.222.0/24"]},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
                           *save_from_response("j.metadata && j.metadata.subnetId", "vpcSubnetId")]),
         poll_operation_until_done(),
         Step(name="vpc-cr-nic", method="POST", path=VPC_NICS,
-             body={"folderId": "{{_suiteFolderId}}", "name": "nm-nic-{{runId}}",
+             body={"projectId": "{{_suiteFolderId}}", "name": "nm-nic-{{runId}}",
                    "subnetId": "{{vpcSubnetId}}"},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
                           *save_from_response("j.metadata && j.metadata.networkInterfaceId", "vpcNicId")]),
@@ -434,13 +434,13 @@ CASES.append(Case(
     id="INST-LST-CRUD-OK",
     title="List instances в folder → instances array",
     classes=["CRUD"], priority="P1",
-    steps=[Step(name="list", method="GET", path=f"{INSTANCES}?folderId={{{{_suiteFolderId}}}}",
+    steps=[Step(name="list", method="GET", path=f"{INSTANCES}?projectId={{{{_suiteFolderId}}}}",
                 test_script=[*assert_status(200), "pm.test('instances is array', () => pm.expect(pm.response.json().instances || []).to.be.an('array'));"])],
 ))
 
 CASES.append(Case(
     id="INST-LST-VAL-FOLDER-REQUIRED",
-    title="List instances без folderId → 400 InvalidArgument",
+    title="List instances без projectId → 400 InvalidArgument",
     classes=["VAL", "AUTHZ"], priority="P0",
     steps=[Step(name="list-nf", method="GET", path=INSTANCES,
                 test_script=[*assert_status(400), *assert_grpc_code(3, "INVALID_ARGUMENT")])],
@@ -453,7 +453,7 @@ CASES.append(Case(
     steps=[
         # # requires kacho-vpc subnet {{existingSubnetId}}
         *_create_instance_steps("vbasic", metadata={"foo": "bar"}),
-        Step(name="list-basic", method="GET", path=f"{INSTANCES}?folderId={{{{_suiteFolderId}}}}&pageSize=1000",
+        Step(name="list-basic", method="GET", path=f"{INSTANCES}?projectId={{{{_suiteFolderId}}}}&pageSize=1000",
              test_script=[*assert_status(200),
                           "const me = (pm.response.json().instances || []).find(x => x.id === pm.environment.get('instanceId'));",
                           "pm.test('instance found in list', () => pm.expect(me).to.be.an('object'));",
@@ -1081,18 +1081,18 @@ CASES.append(Case(
 
 CASES.append(Case(
     id="INST-MV-CRUD-OK",
-    title="Move instance в другой folder → folderId в Get обновлён, status сохранён",
+    title="Move instance в другой folder → projectId в Get обновлён, status сохранён",
     classes=["CRUD", "STATE"], priority="P1",
     steps=[
         # # requires kacho-vpc subnet {{existingSubnetId}}
         *_create_instance_steps("mv"),
         Step(name="move", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}:move",
-             body={"destinationFolderId": "{{_suiteFolderCrossId}}"},
+             body={"destinationProjectId": "{{_suiteFolderCrossId}}"},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
         poll_operation_until_done(), assert_op_success(),
         Step(name="verify", method="GET", path=f"{INSTANCES}/{{{{instanceId}}}}",
              test_script=[*assert_status(200),
-                          "pm.test('folderId == cross', () => pm.expect(pm.response.json().folderId).to.eql(pm.environment.get('_suiteFolderCrossId')));",
+                          "pm.test('projectId == cross', () => pm.expect(pm.response.json().projectId).to.eql(pm.environment.get('_suiteFolderCrossId')));",
                           "pm.test('status still RUNNING', () => pm.expect(pm.response.json().status).to.eql('RUNNING'));"]),
         *_delete_instance_steps(),
     ],
@@ -1103,7 +1103,7 @@ CASES.append(Case(
     title="Move несуществующего instance → sync 404 NOT_FOUND",
     classes=["NEG", "AUTHZ"], priority="P1",
     steps=[Step(name="mv-nx", method="POST", path=f"{INSTANCES}/{{{{garbageComputeId}}}}:move",
-                body={"destinationFolderId": "{{_suiteFolderId}}"},
+                body={"destinationProjectId": "{{_suiteFolderId}}"},
                 test_script=[*assert_status(404), *assert_grpc_code(5, "NOT_FOUND")])],
 ))
 
@@ -1229,7 +1229,7 @@ CASES.append(Case(
         *_create_instance_steps("life"),
         Step(name="get-1", method="GET", path=f"{INSTANCES}/{{{{instanceId}}}}",
              test_script=[*assert_status(200), "pm.test('id', () => pm.expect(pm.response.json().id).to.eql(pm.environment.get('instanceId')));"]),
-        Step(name="lst-includes", method="GET", path=f"{INSTANCES}?folderId={{{{_suiteFolderId}}}}&pageSize=1000",
+        Step(name="lst-includes", method="GET", path=f"{INSTANCES}?projectId={{{{_suiteFolderId}}}}&pageSize=1000",
              test_script=[*assert_status(200),
                           "const ids = (pm.response.json().instances || []).map(x => x.id);",
                           "pm.test('list contains', () => pm.expect(ids).to.include(pm.environment.get('instanceId')));"]),
@@ -1246,7 +1246,7 @@ CASES.append(Case(
         Step(name="del", method="DELETE", path=f"{INSTANCES}/{{{{instanceId}}}}",
              test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
         poll_operation_until_done(),
-        Step(name="lst-excludes", method="GET", path=f"{INSTANCES}?folderId={{{{_suiteFolderId}}}}&pageSize=1000",
+        Step(name="lst-excludes", method="GET", path=f"{INSTANCES}?projectId={{{{_suiteFolderId}}}}&pageSize=1000",
              test_script=[*assert_status(200),
                           "const ids = (pm.response.json().instances || []).map(x => x.id);",
                           "pm.test('list does not contain', () => pm.expect(ids).to.not.include(pm.environment.get('instanceId')));"]),
@@ -1284,7 +1284,7 @@ CASES.extend(filter_block("INST", INSTANCES))
 CASES.extend(http_method_block("INST", INSTANCES))
 CASES.append(Case(
     id="INST-CR-VAL-EMPTY-BODY",
-    title="Create instance с пустым body → 400 (folder_id required)",
+    title="Create instance с пустым body → 400 (project_id required)",
     classes=["VAL", "NEG"], priority="P1",
     steps=[Step(name="cr-empty", method="POST", path=INSTANCES, body={},
                 test_script=[*assert_status(400), *assert_grpc_code(3, "INVALID_ARGUMENT")])],

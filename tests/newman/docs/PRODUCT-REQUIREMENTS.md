@@ -32,7 +32,7 @@
 ## A. Модель ресурсов и lifecycle (`RES`)
 
 ### REQ-RES-01 — публичные ресурсы Disk / Image / Snapshot / Instance + read-only DiskType / Zone     [P1]
-Продукт ДОЛЖЕН предоставлять ресурсы Disk, Image, Snapshot, Instance (folder-scoped, `folder_id`
+Продукт ДОЛЖЕН предоставлять ресурсы Disk, Image, Snapshot, Instance (folder-scoped, `project_id`
 обязателен в Create; поддерживают Get/List/Create/Update/Delete + ListOperations; Disk/Instance — ещё Move)
 и read-only справочники DiskType, Zone (только Get/List).
 - Validated-by: `*-LIFECYCLE-CONF`, `*-CR-CRUD-OK`, `*-GET-*`, `*-LST-CRUD-OK`, `DT-*`, `ZONE-*`
@@ -71,8 +71,8 @@ ID ресурсов: Instance/Disk — `epd`; Image/Snapshot — `fd8`. api-gate
 - Divergence: нет (паритет YC).
 
 ### REQ-RES-07 — Move в другой folder: ресурс перемещается, остальное (включая Instance.status) сохраняется   [P1]
-`Move` Disk/Instance в `destinationFolderId` ДОЛЖЕН успешно завершиться; `folder_id` обновляется;
-прочие поля (для Instance — `status`) не меняются. Move несуществующего → sync `NotFound`. Move без `destinationFolderId` → `InvalidArgument`.
+`Move` Disk/Instance в `destinationProjectId` ДОЛЖЕН успешно завершиться; `project_id` обновляется;
+прочие поля (для Instance — `status`) не меняются. Move несуществующего → sync `NotFound`. Move без `destinationProjectId` → `InvalidArgument`.
 - Validated-by: `DISK-MV-CRUD-OK`, `INST-MV-CRUD-OK`, `*-MV-AUTHZ-NF-SYNC`, `DISK-MV-NEG-DEST-NOTFOUND`, `DISK-MV-VAL-NO-DEST`
 - Agent-check: `internal/service/{disk,instance}.go` doMove.
 
@@ -90,7 +90,7 @@ lowercase/digits/`-`/`_`, длина ≤63. UPPERCASE / digit-start / hyphen-sta
 - Divergence: точный YC-контракт для empty/edge — `# probe-needed`; см. `docs/architecture/07-known-divergences.md`.
 
 ### REQ-VAL-01 — required-поля Create — sync `InvalidArgument`                                  [P0]
-До создания Operation проверяются required: `folder_id` (все), `zone_id` (Disk/Instance),
+До создания Operation проверяются required: `project_id` (все), `zone_id` (Disk/Instance),
 `size` (Disk), `disk_id` (Snapshot), `platform_id`/`resources_spec`/`boot_disk_spec`/`≥1 network_interface_spec`/`zone_id` (Instance). Отсутствие → `InvalidArgument`.
 - Validated-by: `*-CR-VAL-*-REQUIRED`, `INST-CR-VAL-MISSING-*`, `SNAP-CR-VAL-NO-DISK`, `IMG-CR-VAL-FOLDER-REQUIRED`, `*-CR-VAL-EMPTY-BODY`
 - Agent-check: начало каждого `Create` в `internal/service/*.go` (sync-checks до `operations.New`).
@@ -147,8 +147,8 @@ Verbatim YC behaviour.
 
 ## D. List / Pagination / Filter (`LIST`)
 
-### REQ-LIST-01 — folder-scoped List требует `folder_id` → `InvalidArgument` без него              [P0]
-Disk/Image/Snapshot/Instance. DiskType/Zone List — без folder_id.
+### REQ-LIST-01 — folder-scoped List требует `project_id` → `InvalidArgument` без него              [P0]
+Disk/Image/Snapshot/Instance. DiskType/Zone List — без project_id.
 - Validated-by: `*-LST-VAL-FOLDER-REQUIRED`
 - Agent-check: sync-check в `List` хендлерах folder-scoped ресурсов.
 
@@ -178,8 +178,8 @@ malformed/wrong-prefix id у реального YC → `InvalidArgument "invalid
 - Agent-check: `internal/service/*.go` mutate-методы — Get перед Operation; `internal/repo/*.go` `ErrNotFound`.
 - Divergence: malformed-id → NotFound вместо InvalidArgument; `docs/architecture/07-known-divergences.md` (паритет kacho-vpc gotcha #1).
 
-### REQ-AUTHZ-02 — duplicate name `(folder_id, name)` в Create → async `ALREADY_EXISTS`            [P1]
-Partial UNIQUE `(folder_id, name) WHERE name <> ''` для disks/images/snapshots/instances.
+### REQ-AUTHZ-02 — duplicate name `(project_id, name)` в Create → async `ALREADY_EXISTS`            [P1]
+Partial UNIQUE `(project_id, name) WHERE name <> ''` для disks/images/snapshots/instances.
 - Validated-by: `*-CR-NEG-DUP-NAME`
 - Agent-check: `internal/migrations/0001_initial.sql` partial UNIQUE; `mapRepoErr` 23505 → `ALREADY_EXISTS`.
 - Divergence: точный YC text — `# probe-needed`.
@@ -198,8 +198,8 @@ Disk / Image / Snapshot / Instance / Disk type / Zone / Operation.
 
 ## F. Cross-service refs (`REF`)
 
-### REQ-REF-01 — `folder_id` в Create/Move валидируется gRPC-вызовом к resource-manager → `NotFound` если нет   [P0]
-worker каждого Create/Move: `folderClient.Exists(folder_id)`; error → `Unavailable "folder check: ..."`; false → `NotFound "Folder with id <X> not found"`.
+### REQ-REF-01 — `project_id` в Create/Move валидируется gRPC-вызовом к resource-manager → `NotFound` если нет   [P0]
+worker каждого Create/Move: `folderClient.Exists(project_id)`; error → `Unavailable "folder check: ..."`; false → `NotFound "Folder with id <X> not found"`.
 - Validated-by: `*-CR-NEG-FOLDER-NOTFOUND`, `DISK-MV-NEG-DEST-NOTFOUND`, `OP-GET-CRUD-FAILED-OP`
 - Agent-check: `internal/clients/folder_client.go`; вызов в `do*` worker'ах. ⚠️ `KACHO_COMPUTE_SKIP_PEER_VALIDATION=true` → no-op (test-config).
 
@@ -272,7 +272,7 @@ Control-plane: uri-download мгновенный → status сразу `READY`. 
 - Validated-by: `IMG-CR-{VAL-NO-SOURCE,VAL-MULTIPLE-SOURCE,VAL-FAMILY-INVALID,CRUD-FROM-URI-OK,CRUD-FROM-IMAGE-OK,CRUD-FROM-SNAPSHOT-OK,CRUD-OK}`
 - Agent-check: sync-валидация oneof в `ImageService.Create`; `internal/service/image.go` — uri→READY.
 
-### REQ-IMG-02 — GetLatestByFamily: возвращает самый новый Image из family; family без images → `NotFound`; без folder_id → `InvalidArgument`   [P1]
+### REQ-IMG-02 — GetLatestByFamily: возвращает самый новый Image из family; family без images → `NotFound`; без project_id → `InvalidArgument`   [P1]
 - Validated-by: `IMG-GLF-{CRUD-OK,NEG-NOTFOUND,VAL-FOLDER-REQUIRED}`
 - Agent-check: `internal/service/image.go` GetLatestByFamily (ORDER BY created_at DESC LIMIT 1 в family).
 

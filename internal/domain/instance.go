@@ -93,7 +93,7 @@ type NetworkInterface struct {
 // Application) хранятся как proto-указатели; repo сериализует их в JSONB.
 type Instance struct {
 	ID                            string
-	FolderID                      string
+	ProjectID                      string
 	CreatedAt                     time.Time
 	Name                          string
 	Description                   string

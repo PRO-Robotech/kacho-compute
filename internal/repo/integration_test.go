@@ -59,7 +59,7 @@ func TestIntegration_DiskRepo_CRUD(t *testing.T) {
 
 	r := repo.NewDiskRepo(pool)
 	d := &domain.Disk{
-		ID: ids.NewID(ids.PrefixDisk), FolderID: "f1", CreatedAt: time.Now().UTC().Truncate(time.Microsecond),
+		ID: ids.NewID(ids.PrefixDisk), ProjectID: "f1", CreatedAt: time.Now().UTC().Truncate(time.Microsecond),
 		Name: "disk-a", TypeID: "network-ssd", ZoneID: "ru-central1-a", Size: 4194304, BlockSize: 4096,
 		Status: domain.DiskStatusReady, Labels: map[string]string{"env": "test"},
 	}
@@ -87,7 +87,7 @@ func TestIntegration_DiskRepo_CRUD(t *testing.T) {
 	assert.Equal(t, int64(8<<20), updated.Size)
 
 	// list.
-	list, _, err := r.List(ctx, service.DiskFilter{FolderID: "f1"}, service.Pagination{})
+	list, _, err := r.List(ctx, service.DiskFilter{ProjectID: "f1"}, service.Pagination{})
 	require.NoError(t, err)
 	assert.Len(t, list, 1)
 
@@ -113,8 +113,8 @@ func TestIntegration_ImageAndSnapshotRepo(t *testing.T) {
 	defer pool.Close()
 
 	ir := repo.NewImageRepo(pool)
-	old := &domain.Image{ID: ids.NewID(ids.PrefixImage), FolderID: "f", CreatedAt: time.Now().Add(-time.Hour).UTC().Truncate(time.Microsecond), Name: "img-old", Family: "ubuntu", Status: domain.ImageStatusReady, OsType: domain.OsTypeLinux}
-	newer := &domain.Image{ID: ids.NewID(ids.PrefixImage), FolderID: "f", CreatedAt: time.Now().UTC().Truncate(time.Microsecond), Name: "img-new", Family: "ubuntu", Status: domain.ImageStatusReady, OsType: domain.OsTypeLinux}
+	old := &domain.Image{ID: ids.NewID(ids.PrefixImage), ProjectID: "f", CreatedAt: time.Now().Add(-time.Hour).UTC().Truncate(time.Microsecond), Name: "img-old", Family: "ubuntu", Status: domain.ImageStatusReady, OsType: domain.OsTypeLinux}
+	newer := &domain.Image{ID: ids.NewID(ids.PrefixImage), ProjectID: "f", CreatedAt: time.Now().UTC().Truncate(time.Microsecond), Name: "img-new", Family: "ubuntu", Status: domain.ImageStatusReady, OsType: domain.OsTypeLinux}
 	_, err = ir.Insert(ctx, old)
 	require.NoError(t, err)
 	_, err = ir.Insert(ctx, newer)
@@ -124,7 +124,7 @@ func TestIntegration_ImageAndSnapshotRepo(t *testing.T) {
 	assert.Equal(t, newer.ID, latest.ID)
 
 	sr := repo.NewSnapshotRepo(pool)
-	s := &domain.Snapshot{ID: ids.NewID(ids.PrefixSnapshot), FolderID: "f", CreatedAt: time.Now().UTC().Truncate(time.Microsecond), Name: "snap-1", SourceDiskID: "epdd", DiskSize: 4194304, StorageSize: 4194304, Status: domain.SnapshotStatusReady}
+	s := &domain.Snapshot{ID: ids.NewID(ids.PrefixSnapshot), ProjectID: "f", CreatedAt: time.Now().UTC().Truncate(time.Microsecond), Name: "snap-1", SourceDiskID: "epdd", DiskSize: 4194304, StorageSize: 4194304, Status: domain.SnapshotStatusReady}
 	created, err := sr.Insert(ctx, s)
 	require.NoError(t, err)
 	assert.Equal(t, "snap-1", created.Name)
@@ -146,18 +146,18 @@ func TestIntegration_InstanceRepo_AttachFKCascade(t *testing.T) {
 
 	bootDiskID := ids.NewID(ids.PrefixDisk)
 	dataDiskID := ids.NewID(ids.PrefixDisk)
-	_, err = diskRepo.Insert(ctx, &domain.Disk{ID: dataDiskID, FolderID: "f", CreatedAt: time.Now().UTC().Truncate(time.Microsecond), ZoneID: "ru-central1-a", Size: 4194304, BlockSize: 4096, Status: domain.DiskStatusReady})
+	_, err = diskRepo.Insert(ctx, &domain.Disk{ID: dataDiskID, ProjectID: "f", CreatedAt: time.Now().UTC().Truncate(time.Microsecond), ZoneID: "ru-central1-a", Size: 4194304, BlockSize: 4096, Status: domain.DiskStatusReady})
 	require.NoError(t, err)
 
 	inID := ids.NewID(ids.PrefixInstance)
 	in := &domain.Instance{
-		ID: inID, FolderID: "f", CreatedAt: time.Now().UTC().Truncate(time.Microsecond), Name: "vm-1",
+		ID: inID, ProjectID: "f", CreatedAt: time.Now().UTC().Truncate(time.Microsecond), Name: "vm-1",
 		ZoneID: "ru-central1-a", PlatformID: "standard-v3", Cores: 2, Memory: 2 << 30, CoreFraction: 100,
 		Status: domain.InstanceStatusRunning, FQDN: inID + ".auto.internal", NetworkSettingsType: "STANDARD",
 		NetworkInterfaces: []domain.NetworkInterface{{Index: "0", SubnetID: "e9bsub", PrimaryV4Address: "10.0.0.10"}},
 		AttachedDisks:     []domain.AttachedDisk{{DiskID: bootDiskID, IsBoot: true, AutoDelete: true}},
 	}
-	inlineBoot := &domain.Disk{ID: bootDiskID, FolderID: "f", CreatedAt: time.Now().UTC().Truncate(time.Microsecond), ZoneID: "ru-central1-a", Size: 4194304, BlockSize: 4096, Status: domain.DiskStatusReady}
+	inlineBoot := &domain.Disk{ID: bootDiskID, ProjectID: "f", CreatedAt: time.Now().UTC().Truncate(time.Microsecond), ZoneID: "ru-central1-a", Size: 4194304, BlockSize: 4096, Status: domain.DiskStatusReady}
 	created, err := instRepo.Insert(ctx, in, []*domain.Disk{inlineBoot})
 	require.NoError(t, err)
 	require.Len(t, created.AttachedDisks, 1)

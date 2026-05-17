@@ -42,7 +42,7 @@ func maxInt64(a, b int64) int64 {
 // CreateImageReq — запрос на создание образа. source = ровно один из
 // {ImageID, DiskID, SnapshotID, URI}.
 type CreateImageReq struct {
-	FolderID           string
+	ProjectID           string
 	Name               string
 	Description        string
 	Labels             map[string]string
@@ -73,13 +73,13 @@ type ImageService struct {
 	repo         ImageRepo
 	diskRepo     DiskRepo
 	snapshotRepo SnapshotRepo
-	folderClient FolderClient
+	projectClient ProjectClient
 	opsRepo      operations.Repo
 }
 
 // NewImageService создаёт ImageService.
-func NewImageService(repo ImageRepo, diskRepo DiskRepo, snapshotRepo SnapshotRepo, folderClient FolderClient, opsRepo operations.Repo) *ImageService {
-	return &ImageService{repo: repo, diskRepo: diskRepo, snapshotRepo: snapshotRepo, folderClient: folderClient, opsRepo: opsRepo}
+func NewImageService(repo ImageRepo, diskRepo DiskRepo, snapshotRepo SnapshotRepo, projectClient ProjectClient, opsRepo operations.Repo) *ImageService {
+	return &ImageService{repo: repo, diskRepo: diskRepo, snapshotRepo: snapshotRepo, projectClient: projectClient, opsRepo: opsRepo}
 }
 
 // Get возвращает Image по ID.
@@ -94,7 +94,7 @@ func (s *ImageService) Get(ctx context.Context, id string) (*domain.Image, error
 // GetLatestByFamily возвращает самый новый Image в family внутри folder.
 func (s *ImageService) GetLatestByFamily(ctx context.Context, folderID, family string) (*domain.Image, error) {
 	if folderID == "" {
-		return nil, status.Error(codes.InvalidArgument, "folder_id required")
+		return nil, status.Error(codes.InvalidArgument, "project_id required")
 	}
 	i, err := s.repo.GetLatestByFamily(ctx, folderID, family)
 	if err != nil {
@@ -103,18 +103,18 @@ func (s *ImageService) GetLatestByFamily(ctx context.Context, folderID, family s
 	return i, nil
 }
 
-// List возвращает список образов. folder_id обязателен.
+// List возвращает список образов. project_id обязателен.
 func (s *ImageService) List(ctx context.Context, f ImageFilter, p Pagination) ([]*domain.Image, string, error) {
-	if f.FolderID == "" {
-		return nil, "", status.Error(codes.InvalidArgument, "folder_id required")
+	if f.ProjectID == "" {
+		return nil, "", status.Error(codes.InvalidArgument, "project_id required")
 	}
 	return s.repo.List(ctx, f, p)
 }
 
 // Create инициирует создание Image.
 func (s *ImageService) Create(ctx context.Context, req CreateImageReq) (*operations.Operation, error) {
-	if req.FolderID == "" {
-		return nil, status.Error(codes.InvalidArgument, "folder_id required")
+	if req.ProjectID == "" {
+		return nil, status.Error(codes.InvalidArgument, "project_id required")
 	}
 	if err := corevalidate.NameCompute("name", req.Name); err != nil {
 		return nil, err
@@ -154,7 +154,7 @@ func (s *ImageService) Create(ctx context.Context, req CreateImageReq) (*operati
 }
 
 func (s *ImageService) doCreate(ctx context.Context, imageID string, req CreateImageReq) (*anypb.Any, error) {
-	if err := s.checkFolder(ctx, req.FolderID); err != nil {
+	if err := s.checkFolder(ctx, req.ProjectID); err != nil {
 		return nil, err
 	}
 	// minDiskSize / storageSize наследуются от источника (verbatim YC: образ,
@@ -193,7 +193,7 @@ func (s *ImageService) doCreate(ctx context.Context, imageID string, req CreateI
 
 	i := &domain.Image{
 		ID:                 imageID,
-		FolderID:           req.FolderID,
+		ProjectID:           req.ProjectID,
 		CreatedAt:          time.Now().UTC(),
 		Name:               req.Name,
 		Description:        req.Description,
@@ -332,7 +332,7 @@ func (s *ImageService) ListOperations(ctx context.Context, id string, p Paginati
 }
 
 func (s *ImageService) checkFolder(ctx context.Context, folderID string) error {
-	exists, err := s.folderClient.Exists(ctx, folderID)
+	exists, err := s.projectClient.Exists(ctx, folderID)
 	if err != nil {
 		return status.Errorf(codes.Unavailable, "folder check: %v", err)
 	}

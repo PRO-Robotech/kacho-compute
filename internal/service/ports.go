@@ -36,8 +36,8 @@ type (
 	// RegionRepo — port-интерфейс репозитория регионов.
 	RegionRepo = ports.RegionRepo
 
-	// FolderClient — port для проверки существования Folder.
-	FolderClient = ports.FolderClient
+	// ProjectClient — port для проверки существования Folder.
+	ProjectClient = ports.ProjectClient
 	// VPCClient — port для cross-service взаимодействия с kacho-vpc (валидация
 	// NIC-spec + IPAM-аллокация реальных IPv4 + teardown эфемерных Address +
 	// справочник зон через InternalZoneService).

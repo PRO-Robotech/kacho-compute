@@ -23,9 +23,9 @@ type tenantCtxKey struct{}
 // TenantCtx — caller identity. Сейчас populated из gRPC metadata
 // (`x-kacho-folder-id`, `x-kacho-actor`); future — из validated IAM token.
 type TenantCtx struct {
-	// FolderIDs — folders которые caller'у разрешено читать/писать.
+	// ProjectIDs — folders которые caller'у разрешено читать/писать.
 	// Empty = full access (admin / cluster-scoped) — backward-compat без AuthN.
-	FolderIDs map[string]struct{}
+	ProjectIDs map[string]struct{}
 	// Actor — для audit log (admin@kacho, или sub-claim из JWT).
 	Actor string
 	// Admin — true если caller имеет cluster-wide read/write.
@@ -34,21 +34,21 @@ type TenantCtx struct {
 
 // HasFolderAccess — может ли caller трогать ресурс из folder'а.
 func (t TenantCtx) HasFolderAccess(folderID string) bool {
-	if t.Admin || len(t.FolderIDs) == 0 {
+	if t.Admin || len(t.ProjectIDs) == 0 {
 		return true
 	}
-	_, ok := t.FolderIDs[folderID]
+	_, ok := t.ProjectIDs[folderID]
 	return ok
 }
 
 // IsAnonymous — true если caller не предъявил identity, влияющую на AuthZ
-// (ни Admin-claim, ни FolderIDs). Actor — orthogonal audit-trail.
+// (ни Admin-claim, ни ProjectIDs). Actor — orthogonal audit-trail.
 func (t TenantCtx) IsAnonymous() bool {
-	return !t.Admin && len(t.FolderIDs) == 0
+	return !t.Admin && len(t.ProjectIDs) == 0
 }
 
 // TenantFromCtx извлекает TenantCtx из context. Если interceptor не сработал —
-// empty TenantCtx (FolderIDs=nil → backward-compat "full access").
+// empty TenantCtx (ProjectIDs=nil → backward-compat "full access").
 func TenantFromCtx(ctx context.Context) TenantCtx {
 	if v := ctx.Value(tenantCtxKey{}); v != nil {
 		if t, ok := v.(TenantCtx); ok {
@@ -147,10 +147,10 @@ func tenantFromMetadata(ctx context.Context) TenantCtx {
 		t.Admin = true
 	}
 	if folders := md.Get("x-kacho-folder-id"); len(folders) > 0 {
-		t.FolderIDs = make(map[string]struct{}, len(folders))
+		t.ProjectIDs = make(map[string]struct{}, len(folders))
 		for _, f := range folders {
 			if f != "" {
-				t.FolderIDs[f] = struct{}{}
+				t.ProjectIDs[f] = struct{}{}
 			}
 		}
 	}

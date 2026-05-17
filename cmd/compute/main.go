@@ -94,7 +94,7 @@ func runServe(cfg config.Config) error {
 
 	opsRepo := operations.NewRepo(pool, "public")
 
-	folderClient, vpcClient, closers, err := dialPeers(cfg, logger)
+	projectClient, vpcClient, closers, err := dialPeers(cfg, logger)
 	if err != nil {
 		return err
 	}
@@ -104,7 +104,7 @@ func runServe(cfg config.Config) error {
 		}
 	}()
 
-	svcs := buildServices(pool, folderClient, vpcClient, opsRepo, cfg.SkipPeerValidation)
+	svcs := buildServices(pool, projectClient, vpcClient, opsRepo, cfg.SkipPeerValidation)
 
 	// Публичный listener — requireAdmin=false; internal :9091 — requireAdmin=true
 	// (defense-in-depth поверх NetworkPolicy в helm). Зеркалит kacho-vpc.
@@ -167,8 +167,9 @@ func validateAuthMode(cfg config.Config, logger *slog.Logger) (productionMode bo
 		logger.Warn("AuthMode=production: anonymous callers will be rejected")
 	case "production-strict":
 		productionMode = true
-		if !cfg.ResourceManagerTLS || !cfg.VPCTLS {
-			return false, fmt.Errorf("production-strict mode: KACHO_COMPUTE_RESOURCE_MANAGER_TLS=true and KACHO_COMPUTE_VPC_TLS=true required")
+		// KAC-106 (E1): TLS-check switched to IAM peer; ResourceManager — legacy fallback.
+		if !cfg.IAMTLS || !cfg.VPCTLS {
+			return false, fmt.Errorf("production-strict mode: KACHO_COMPUTE_IAM_TLS=true and KACHO_COMPUTE_VPC_TLS=true required")
 		}
 		switch cfg.DBSSLMode {
 		case "require", "verify-ca", "verify-full":
@@ -180,8 +181,8 @@ func validateAuthMode(cfg config.Config, logger *slog.Logger) (productionMode bo
 		return false, fmt.Errorf("unknown KACHO_COMPUTE_AUTH_MODE=%q (allowed: dev, production, production-strict)", cfg.AuthMode)
 	}
 	if !productionMode {
-		if !cfg.ResourceManagerTLS {
-			logger.Warn("KACHO_COMPUTE_RESOURCE_MANAGER_TLS=false — cross-service gRPC plaintext (dev only)")
+		if !cfg.IAMTLS {
+			logger.Warn("KACHO_COMPUTE_IAM_TLS=false — cross-service gRPC plaintext (dev only)")
 		}
 		if cfg.DBSSLMode == "" || cfg.DBSSLMode == "disable" {
 			logger.Warn("KACHO_COMPUTE_DB_SSLMODE=disable — DB plaintext (dev only)")
@@ -190,30 +191,43 @@ func validateAuthMode(cfg config.Config, logger *slog.Logger) (productionMode bo
 	return productionMode, nil
 }
 
-// dialPeers открывает gRPC-клиенты к peer-сервисам (resource-manager, vpc — два
+// dialPeers открывает gRPC-клиенты к peer-сервисам (kacho-iam, vpc — два
 // conn'а: публичный :9090 и internal :9091 для InternalZoneService) либо
 // возвращает no-op-заглушки при KACHO_COMPUTE_SKIP_PEER_VALIDATION=true.
-func dialPeers(cfg config.Config, logger *slog.Logger) (service.FolderClient, service.VPCClient, []*grpc.ClientConn, error) {
+//
+// KAC-106 (E1): project-existence-check переключён с kacho-resource-manager
+// на kacho-iam.ProjectService.Get. ResourceManagerGRPCAddr оставлен как
+// fallback для плавного обновления helm-чартов.
+func dialPeers(cfg config.Config, logger *slog.Logger) (service.ProjectClient, service.VPCClient, []*grpc.ClientConn, error) {
 	if cfg.SkipPeerValidation {
 		logger.Warn("KACHO_COMPUTE_SKIP_PEER_VALIDATION=true — cross-service existence-check disabled (dev/test only)")
-		return clients.NoopFolderClient{}, clients.NoopVPCClient{}, nil, nil
+		return clients.NoopProjectClient{}, clients.NoopVPCClient{}, nil, nil
 	}
-	rmConn, err := dialPeer(cfg.ResourceManagerGRPCAddr, cfg.ResourceManagerTLS)
+	iamAddr := cfg.IAMGRPCAddr
+	iamTLS := cfg.IAMTLS
+	if cfg.ResourceManagerGRPCAddr != "" && iamAddr == "kacho-iam.kacho.svc.cluster.local:9090" {
+		// Backward-compat: helm not yet upgraded — caller set RM address.
+		logger.Warn("KACHO_COMPUTE_RESOURCE_MANAGER_GRPC_ADDR set; falling back to RM peer (E1 transitional)",
+			"rm_addr", cfg.ResourceManagerGRPCAddr)
+		iamAddr = cfg.ResourceManagerGRPCAddr
+		iamTLS = cfg.ResourceManagerTLS
+	}
+	iamConn, err := dialPeer(iamAddr, iamTLS)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("dial resource-manager: %w", err)
+		return nil, nil, nil, fmt.Errorf("dial iam: %w", err)
 	}
 	vpcConn, err := dialPeer(cfg.VPCGRPCAddr, cfg.VPCTLS)
 	if err != nil {
-		_ = rmConn.Close()
+		_ = iamConn.Close()
 		return nil, nil, nil, fmt.Errorf("dial vpc: %w", err)
 	}
 	vpcInternalConn, err := dialPeer(cfg.VPCInternalGRPCAddr, cfg.VPCInternalTLS)
 	if err != nil {
 		_ = vpcConn.Close()
-		_ = rmConn.Close()
+		_ = iamConn.Close()
 		return nil, nil, nil, fmt.Errorf("dial vpc internal: %w", err)
 	}
-	return clients.NewFolderClient(rmConn), clients.NewVPCClient(vpcConn, vpcInternalConn), []*grpc.ClientConn{rmConn, vpcConn, vpcInternalConn}, nil
+	return clients.NewProjectClient(iamConn), clients.NewVPCClient(vpcConn, vpcInternalConn), []*grpc.ClientConn{iamConn, vpcConn, vpcInternalConn}, nil
 }
 
 func dialPeer(addr string, useTLS bool) (*grpc.ClientConn, error) {
@@ -231,7 +245,7 @@ func dialPeer(addr string, useTLS bool) (*grpc.ClientConn, error) {
 // локальных таблиц `zones`/`regions`, никакого proxy в kacho-vpc (эпик KAC-15).
 // skipPeer (== cfg.SkipPeerValidation) теперь влияет только на VPC NIC-IPAM/SG
 // existence-check (folder/subnet/sg), но не на geography.
-func buildServices(pool *pgxpool.Pool, folderClient service.FolderClient, vpcClient service.VPCClient, opsRepo operations.Repo, skipPeer bool) *services {
+func buildServices(pool *pgxpool.Pool, projectClient service.ProjectClient, vpcClient service.VPCClient, opsRepo operations.Repo, skipPeer bool) *services {
 	diskRepo := repo.NewDiskRepo(pool)
 	imageRepo := repo.NewImageRepo(pool)
 	snapshotRepo := repo.NewSnapshotRepo(pool)
@@ -246,13 +260,13 @@ func buildServices(pool *pgxpool.Pool, folderClient service.FolderClient, vpcCli
 
 	diskTypeSvc := service.NewDiskTypeService(diskTypeRepo)
 	return &services{
-		disk:     service.NewDiskService(diskRepo, imageRepo, snapshotRepo, diskTypeRepo, zoneRegistry, folderClient, opsRepo),
-		image:    service.NewImageService(imageRepo, diskRepo, snapshotRepo, folderClient, opsRepo),
-		snapshot: service.NewSnapshotService(snapshotRepo, diskRepo, folderClient, opsRepo),
+		disk:     service.NewDiskService(diskRepo, imageRepo, snapshotRepo, diskTypeRepo, zoneRegistry, projectClient, opsRepo),
+		image:    service.NewImageService(imageRepo, diskRepo, snapshotRepo, projectClient, opsRepo),
+		snapshot: service.NewSnapshotService(snapshotRepo, diskRepo, projectClient, opsRepo),
 		diskType: diskTypeSvc,
 		zone:     service.NewZoneService(zoneRepo),
 		region:   service.NewRegionService(regionRepo),
-		instance: service.NewInstanceService(instanceRepo, diskRepo, imageRepo, snapshotRepo, zoneRegistry, folderClient, vpcClient, opsRepo, skipPeer),
+		instance: service.NewInstanceService(instanceRepo, diskRepo, imageRepo, snapshotRepo, zoneRegistry, projectClient, vpcClient, opsRepo, skipPeer),
 	}
 }
 

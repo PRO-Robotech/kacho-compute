@@ -32,7 +32,7 @@ func (h *ImageHandler) Get(ctx context.Context, req *computev1.GetImageRequest) 
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, i.FolderID); err != nil {
+	if err := AssertFolderOwnership(ctx, i.ProjectID); err != nil {
 		return nil, err
 	}
 	return protoconv.Image(i), nil
@@ -40,10 +40,10 @@ func (h *ImageHandler) Get(ctx context.Context, req *computev1.GetImageRequest) 
 
 // GetLatestByFamily возвращает самый новый Image в family.
 func (h *ImageHandler) GetLatestByFamily(ctx context.Context, req *computev1.GetImageLatestByFamilyRequest) (*computev1.Image, error) {
-	if err := AssertFolderOwnership(ctx, req.FolderId); err != nil {
+	if err := AssertFolderOwnership(ctx, req.ProjectId); err != nil {
 		return nil, err
 	}
-	i, err := h.svc.GetLatestByFamily(ctx, req.FolderId, req.Family)
+	i, err := h.svc.GetLatestByFamily(ctx, req.ProjectId, req.Family)
 	if err != nil {
 		return nil, err
 	}
@@ -52,10 +52,10 @@ func (h *ImageHandler) GetLatestByFamily(ctx context.Context, req *computev1.Get
 
 // List возвращает список образов в folder.
 func (h *ImageHandler) List(ctx context.Context, req *computev1.ListImagesRequest) (*computev1.ListImagesResponse, error) {
-	if err := AssertFolderOwnership(ctx, req.FolderId); err != nil {
+	if err := AssertFolderOwnership(ctx, req.ProjectId); err != nil {
 		return nil, err
 	}
-	imgs, nextToken, err := h.svc.List(ctx, svc.ImageFilter{FolderID: req.FolderId, Filter: req.Filter},
+	imgs, nextToken, err := h.svc.List(ctx, svc.ImageFilter{ProjectID: req.ProjectId, Filter: req.Filter},
 		svc.Pagination{PageToken: req.PageToken, PageSize: req.PageSize})
 	if err != nil {
 		return nil, err
@@ -69,11 +69,11 @@ func (h *ImageHandler) List(ctx context.Context, req *computev1.ListImagesReques
 
 // Create инициирует создание Image.
 func (h *ImageHandler) Create(ctx context.Context, req *computev1.CreateImageRequest) (*operationpb.Operation, error) {
-	if err := AssertFolderOwnership(ctx, req.FolderId); err != nil {
+	if err := AssertFolderOwnership(ctx, req.ProjectId); err != nil {
 		return nil, err
 	}
 	op, err := h.svc.Create(ctx, svc.CreateImageReq{
-		FolderID:           req.FolderId,
+		ProjectID:           req.ProjectId,
 		Name:               req.Name,
 		Description:        req.Description,
 		Labels:             req.Labels,
@@ -103,7 +103,7 @@ func (h *ImageHandler) Update(ctx context.Context, req *computev1.UpdateImageReq
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, i.FolderID); err != nil {
+	if err := AssertFolderOwnership(ctx, i.ProjectID); err != nil {
 		return nil, err
 	}
 	var mask []string
@@ -133,7 +133,7 @@ func (h *ImageHandler) Delete(ctx context.Context, req *computev1.DeleteImageReq
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, i.FolderID); err != nil {
+	if err := AssertFolderOwnership(ctx, i.ProjectID); err != nil {
 		return nil, err
 	}
 	op, err := h.svc.Delete(ctx, req.ImageId)
@@ -152,7 +152,7 @@ func (h *ImageHandler) ListOperations(ctx context.Context, req *computev1.ListIm
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, i.FolderID); err != nil {
+	if err := AssertFolderOwnership(ctx, i.ProjectID); err != nil {
 		return nil, err
 	}
 	ops, nextToken, err := h.svc.ListOperations(ctx, req.ImageId, svc.Pagination{PageToken: req.PageToken, PageSize: req.PageSize})

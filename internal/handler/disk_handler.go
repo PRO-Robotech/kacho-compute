@@ -36,7 +36,7 @@ func (h *DiskHandler) Get(ctx context.Context, req *computev1.GetDiskRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, d.FolderID); err != nil {
+	if err := AssertFolderOwnership(ctx, d.ProjectID); err != nil {
 		return nil, err
 	}
 	return protoconv.Disk(d), nil
@@ -44,10 +44,10 @@ func (h *DiskHandler) Get(ctx context.Context, req *computev1.GetDiskRequest) (*
 
 // List возвращает список дисков в folder.
 func (h *DiskHandler) List(ctx context.Context, req *computev1.ListDisksRequest) (*computev1.ListDisksResponse, error) {
-	if err := AssertFolderOwnership(ctx, req.FolderId); err != nil {
+	if err := AssertFolderOwnership(ctx, req.ProjectId); err != nil {
 		return nil, err
 	}
-	disks, nextToken, err := h.svc.List(ctx, svc.DiskFilter{FolderID: req.FolderId, Filter: req.Filter},
+	disks, nextToken, err := h.svc.List(ctx, svc.DiskFilter{ProjectID: req.ProjectId, Filter: req.Filter},
 		svc.Pagination{PageToken: req.PageToken, PageSize: req.PageSize})
 	if err != nil {
 		return nil, err
@@ -61,11 +61,11 @@ func (h *DiskHandler) List(ctx context.Context, req *computev1.ListDisksRequest)
 
 // Create инициирует создание Disk.
 func (h *DiskHandler) Create(ctx context.Context, req *computev1.CreateDiskRequest) (*operationpb.Operation, error) {
-	if err := AssertFolderOwnership(ctx, req.FolderId); err != nil {
+	if err := AssertFolderOwnership(ctx, req.ProjectId); err != nil {
 		return nil, err
 	}
 	op, err := h.svc.Create(ctx, svc.CreateDiskReq{
-		FolderID:            req.FolderId,
+		ProjectID:            req.ProjectId,
 		Name:                req.Name,
 		Description:         req.Description,
 		Labels:              req.Labels,
@@ -94,7 +94,7 @@ func (h *DiskHandler) Update(ctx context.Context, req *computev1.UpdateDiskReque
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, d.FolderID); err != nil {
+	if err := AssertFolderOwnership(ctx, d.ProjectID); err != nil {
 		return nil, err
 	}
 	var mask []string
@@ -125,7 +125,7 @@ func (h *DiskHandler) Delete(ctx context.Context, req *computev1.DeleteDiskReque
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, d.FolderID); err != nil {
+	if err := AssertFolderOwnership(ctx, d.ProjectID); err != nil {
 		return nil, err
 	}
 	op, err := h.svc.Delete(ctx, req.DiskId)
@@ -144,13 +144,13 @@ func (h *DiskHandler) Move(ctx context.Context, req *computev1.MoveDiskRequest) 
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, d.FolderID); err != nil {
+	if err := AssertFolderOwnership(ctx, d.ProjectID); err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, req.DestinationFolderId); err != nil {
+	if err := AssertFolderOwnership(ctx, req.DestinationProjectId); err != nil {
 		return nil, err
 	}
-	op, err := h.svc.Move(ctx, req.DiskId, req.DestinationFolderId)
+	op, err := h.svc.Move(ctx, req.DiskId, req.DestinationProjectId)
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +166,7 @@ func (h *DiskHandler) Relocate(ctx context.Context, req *computev1.RelocateDiskR
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, d.FolderID); err != nil {
+	if err := AssertFolderOwnership(ctx, d.ProjectID); err != nil {
 		return nil, err
 	}
 	op, err := h.svc.Relocate(ctx, req.DiskId, req.DestinationZoneId)
@@ -185,7 +185,7 @@ func (h *DiskHandler) ListOperations(ctx context.Context, req *computev1.ListDis
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, d.FolderID); err != nil {
+	if err := AssertFolderOwnership(ctx, d.ProjectID); err != nil {
 		return nil, err
 	}
 	ops, nextToken, err := h.svc.ListOperations(ctx, req.DiskId, svc.Pagination{PageToken: req.PageToken, PageSize: req.PageSize})

@@ -17,7 +17,7 @@ CASES.append(Case(
     classes=["CRUD"], priority="P1",
     steps=[
         Step(name="create-trigger", method="POST", path=DISKS,
-             body={"folderId": "{{_suiteFolderId}}", "name": "disk-opget-{{runId}}",
+             body={"projectId": "{{_suiteFolderId}}", "name": "disk-opget-{{runId}}",
                    "zoneId": "{{existingZoneId}}", "size": _DISK_SIZE},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
                           *save_from_response("j.metadata && j.metadata.diskId", "diskId")]),
@@ -43,7 +43,7 @@ CASES.append(Case(
     steps=[
         # # requires peer-validation enabled
         Step(name="create-bad", method="POST", path=DISKS,
-             body={"folderId": "{{garbageRmId}}", "name": "disk-opfail-{{runId}}",
+             body={"projectId": "{{garbageRmId}}", "name": "disk-opfail-{{runId}}",
                    "zoneId": "{{existingZoneId}}", "size": _DISK_SIZE},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
         poll_operation_until_done(),
@@ -91,7 +91,7 @@ CASES.append(Case(
     classes=["NEG", "STATE"], priority="P1",
     steps=[
         Step(name="create-trigger", method="POST", path=DISKS,
-             body={"folderId": "{{_suiteFolderId}}", "name": "disk-opcancel-{{runId}}",
+             body={"projectId": "{{_suiteFolderId}}", "name": "disk-opcancel-{{runId}}",
                    "zoneId": "{{existingZoneId}}", "size": _DISK_SIZE},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
                           *save_from_response("j.metadata && j.metadata.diskId", "diskId")]),

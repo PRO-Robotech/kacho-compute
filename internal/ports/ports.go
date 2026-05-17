@@ -23,26 +23,26 @@ type Pagination struct {
 
 // DiskFilter — фильтр для списка дисков.
 type DiskFilter struct {
-	FolderID string
+	ProjectID string
 	// Filter — raw filter expression (YC-syntax: `name="<value>"`).
 	Filter string
 }
 
 // ImageFilter — фильтр для списка образов.
 type ImageFilter struct {
-	FolderID string
+	ProjectID string
 	Filter   string
 }
 
 // SnapshotFilter — фильтр для списка снапшотов.
 type SnapshotFilter struct {
-	FolderID string
+	ProjectID string
 	Filter   string
 }
 
 // InstanceFilter — фильтр для списка ВМ.
 type InstanceFilter struct {
-	FolderID string
+	ProjectID string
 	Filter   string
 }
 
@@ -53,7 +53,7 @@ type DiskRepo interface {
 	Insert(ctx context.Context, d *domain.Disk) (*domain.Disk, error)
 	Update(ctx context.Context, d *domain.Disk) (*domain.Disk, error)
 	Delete(ctx context.Context, id string) error
-	SetFolderID(ctx context.Context, id, folderID string) (*domain.Disk, error)
+	SetProjectID(ctx context.Context, id, folderID string) (*domain.Disk, error)
 	// SetZoneID меняет zone_id (для Relocate).
 	SetZoneID(ctx context.Context, id, zoneID string) (*domain.Disk, error)
 	// IsAttached — true если есть строка attached_disks для disk_id.
@@ -97,8 +97,8 @@ type InstanceRepo interface {
 	// §«Within-service refs — DB-уровень обязателен» (KAC-91/KAC-87 G2,
 	// parity c kacho-vpc KAC-52 NIC-attach race).
 	SetStatusCAS(ctx context.Context, id string, expected, next domain.InstanceStatus) (*domain.Instance, error)
-	// SetFolderID меняет folder_id (для Move).
-	SetFolderID(ctx context.Context, id, folderID string) (*domain.Instance, error)
+	// SetProjectID меняет project_id (для Move).
+	SetProjectID(ctx context.Context, id, folderID string) (*domain.Instance, error)
 	// AttachDisk добавляет строку attached_disks. Возвращает обновлённую ВМ.
 	AttachDisk(ctx context.Context, id string, ad domain.AttachedDisk) (*domain.Instance, error)
 	// DetachDisk удаляет строку attached_disks по disk_id. Возвращает обновлённую ВМ.
@@ -143,8 +143,8 @@ type RegionRepo interface {
 	CountZones(ctx context.Context, regionID string) (int, error)
 }
 
-// FolderClient — port для проверки существования Folder в kacho-resource-manager.
-type FolderClient interface {
+// ProjectClient — port для проверки существования Folder в kacho-resource-manager.
+type ProjectClient interface {
 	Exists(ctx context.Context, folderID string) (bool, error)
 }
 
@@ -187,7 +187,7 @@ type VPCAddress struct {
 // (vpc/v1.NetworkInterfaceService.Create) при Instance.Create. Адреса
 // передаются ссылками на уже созданные Address-ресурсы (V4AddressIDs).
 type CreateNICReq struct {
-	FolderID         string
+	ProjectID         string
 	Name             string
 	SubnetID         string
 	SecurityGroupIDs []string
