@@ -1022,6 +1022,16 @@ func (r *OpsRepo) Create(_ context.Context, op operations.Operation) error {
 	return nil
 }
 
+// CreateWithPrincipal сохраняет операцию + principal (KAC-113 operations.Repo iface).
+func (r *OpsRepo) CreateWithPrincipal(_ context.Context, op operations.Operation, p operations.Principal) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cp := op
+	cp.Principal = p
+	r.ops[op.ID] = &cp
+	return nil
+}
+
 // Get возвращает shallow-копию операции.
 func (r *OpsRepo) Get(_ context.Context, id string) (*operations.Operation, error) {
 	r.mu.Lock()
