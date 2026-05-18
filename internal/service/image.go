@@ -42,7 +42,7 @@ func maxInt64(a, b int64) int64 {
 // CreateImageReq — запрос на создание образа. source = ровно один из
 // {ImageID, DiskID, SnapshotID, URI}.
 type CreateImageReq struct {
-	ProjectID           string
+	ProjectID          string
 	Name               string
 	Description        string
 	Labels             map[string]string
@@ -70,11 +70,11 @@ type UpdateImageReq struct {
 
 // ImageService — бизнес-логика управления образами.
 type ImageService struct {
-	repo         ImageRepo
-	diskRepo     DiskRepo
-	snapshotRepo SnapshotRepo
+	repo          ImageRepo
+	diskRepo      DiskRepo
+	snapshotRepo  SnapshotRepo
 	projectClient ProjectClient
-	opsRepo      operations.Repo
+	opsRepo       operations.Repo
 }
 
 // NewImageService создаёт ImageService.
@@ -193,7 +193,7 @@ func (s *ImageService) doCreate(ctx context.Context, imageID string, req CreateI
 
 	i := &domain.Image{
 		ID:                 imageID,
-		ProjectID:           req.ProjectID,
+		ProjectID:          req.ProjectID,
 		CreatedAt:          time.Now().UTC(),
 		Name:               req.Name,
 		Description:        req.Description,

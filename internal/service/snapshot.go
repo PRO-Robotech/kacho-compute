@@ -21,7 +21,7 @@ import (
 
 // CreateSnapshotReq — запрос на создание снапшота (disk_id обязателен).
 type CreateSnapshotReq struct {
-	ProjectID           string
+	ProjectID          string
 	DiskID             string
 	Name               string
 	Description        string
@@ -40,10 +40,10 @@ type UpdateSnapshotReq struct {
 
 // SnapshotService — бизнес-логика управления снапшотами.
 type SnapshotService struct {
-	repo         SnapshotRepo
-	diskRepo     DiskRepo
+	repo          SnapshotRepo
+	diskRepo      DiskRepo
 	projectClient ProjectClient
-	opsRepo      operations.Repo
+	opsRepo       operations.Repo
 }
 
 // NewSnapshotService создаёт SnapshotService.
@@ -117,7 +117,7 @@ func (s *SnapshotService) doCreate(ctx context.Context, snapID string, req Creat
 	}
 	snap := &domain.Snapshot{
 		ID:                 snapID,
-		ProjectID:           req.ProjectID,
+		ProjectID:          req.ProjectID,
 		CreatedAt:          time.Now().UTC(),
 		Name:               req.Name,
 		Description:        req.Description,

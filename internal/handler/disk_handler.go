@@ -65,7 +65,7 @@ func (h *DiskHandler) Create(ctx context.Context, req *computev1.CreateDiskReque
 		return nil, err
 	}
 	op, err := h.svc.Create(ctx, svc.CreateDiskReq{
-		ProjectID:            req.ProjectId,
+		ProjectID:           req.ProjectId,
 		Name:                req.Name,
 		Description:         req.Description,
 		Labels:              req.Labels,

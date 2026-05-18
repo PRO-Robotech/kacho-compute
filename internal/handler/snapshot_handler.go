@@ -61,7 +61,7 @@ func (h *SnapshotHandler) Create(ctx context.Context, req *computev1.CreateSnaps
 		return nil, err
 	}
 	op, err := h.svc.Create(ctx, svc.CreateSnapshotReq{
-		ProjectID:           req.ProjectId,
+		ProjectID:          req.ProjectId,
 		DiskID:             req.DiskId,
 		Name:               req.Name,
 		Description:        req.Description,
