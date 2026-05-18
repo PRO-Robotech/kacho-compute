@@ -73,7 +73,7 @@ func (h *ImageHandler) Create(ctx context.Context, req *computev1.CreateImageReq
 		return nil, err
 	}
 	op, err := h.svc.Create(ctx, svc.CreateImageReq{
-		ProjectID:           req.ProjectId,
+		ProjectID:          req.ProjectId,
 		Name:               req.Name,
 		Description:        req.Description,
 		Labels:             req.Labels,

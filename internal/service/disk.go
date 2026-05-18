@@ -30,7 +30,7 @@ const (
 
 // CreateDiskReq — запрос на создание диска.
 type CreateDiskReq struct {
-	ProjectID            string
+	ProjectID           string
 	Name                string
 	Description         string
 	Labels              map[string]string
@@ -65,9 +65,9 @@ type DiskService struct {
 	// zones — existence-check zone_id. Авторитетный источник — kacho-vpc
 	// InternalZoneService (compute зон не владеет); при SKIP_PEER_VALIDATION —
 	// fallback на локальную таблицу `zones`. Wiring — cmd/compute/main.go.
-	zones        ZoneRegistry
+	zones         ZoneRegistry
 	projectClient ProjectClient
-	opsRepo      operations.Repo
+	opsRepo       operations.Repo
 }
 
 // NewDiskService создаёт DiskService.
@@ -177,7 +177,7 @@ func (s *DiskService) doCreate(ctx context.Context, diskID string, req CreateDis
 
 	d := &domain.Disk{
 		ID:                  diskID,
-		ProjectID:            req.ProjectID,
+		ProjectID:           req.ProjectID,
 		CreatedAt:           time.Now().UTC(),
 		Name:                req.Name,
 		Description:         req.Description,

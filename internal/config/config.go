@@ -64,6 +64,18 @@ type Config struct {
 
 	// AuthMode — fail-closed гейт перед IAM merge: `dev` | `production` | `production-strict`.
 	AuthMode string `envconfig:"KACHO_COMPUTE_AUTH_MODE" default:"dev"`
+
+	// AuthZIAMGRPCAddr — gRPC адрес kacho-iam internal-port'а для Check
+	// (E3 / KAC-108). Если пуст и AuthZBreakglass=false — interceptor НЕ
+	// навешивается (graceful start без kacho-iam в dev). Обычно совпадает
+	// с IAMGRPCAddr (тот же сервис), но porт другой: 9091 (internal) vs
+	// 9090 (публичный ProjectService.Get).
+	AuthZIAMGRPCAddr string `envconfig:"KACHO_COMPUTE_AUTHZ_IAM_GRPC_ADDR" default:""`
+	// AuthZIAMTLS — TLS для AuthZ-вызовов к kacho-iam.
+	AuthZIAMTLS bool `envconfig:"KACHO_COMPUTE_AUTHZ_IAM_TLS" default:"false"`
+	// AuthZBreakglass — emergency-режим: пропускать все RPC без Check + WARN.
+	// Dev / break-glass only (см. acceptance §6 D-6).
+	AuthZBreakglass bool `envconfig:"KACHO_COMPUTE_AUTHZ_BREAKGLASS" default:"false"`
 }
 
 // baseDSN — стандартный postgres DSN без pgxpool-специфичных параметров

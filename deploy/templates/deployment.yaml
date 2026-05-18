@@ -63,6 +63,10 @@ spec:
             # KAC-106 (E1): peer for project-existence switched to kacho-iam.
             - name: KACHO_COMPUTE_IAM_GRPC_ADDR
               value: "{{ .Values.iamAddr }}"
+            {{- range $k, $v := .Values.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
             - name: KACHO_COMPUTE_RESOURCE_MANAGER_GRPC_ADDR
               value: "{{ default "" .Values.resourceManagerAddr }}"
             - name: KACHO_COMPUTE_VPC_GRPC_ADDR

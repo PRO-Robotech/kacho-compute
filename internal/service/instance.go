@@ -66,7 +66,7 @@ type DiskSourceSpec struct {
 
 // CreateInstanceReq — запрос на создание ВМ.
 type CreateInstanceReq struct {
-	ProjectID            string
+	ProjectID           string
 	Name                string
 	Description         string
 	Labels              map[string]string
@@ -116,10 +116,10 @@ type InstanceService struct {
 	// zones — existence-check zone_id. Авторитетный источник — kacho-vpc
 	// InternalZoneService (compute зон не владеет); при SKIP_PEER_VALIDATION —
 	// fallback на локальную таблицу `zones`. Wiring — cmd/compute/main.go.
-	zones        ZoneRegistry
+	zones         ZoneRegistry
 	projectClient ProjectClient
-	vpcClient    VPCClient
-	opsRepo      operations.Repo
+	vpcClient     VPCClient
+	opsRepo       operations.Repo
 	// skipIPAM — true при KACHO_COMPUTE_SKIP_PEER_VALIDATION: cross-service
 	// VPC IPAM-аллокация отключена, NIC-ам выдаются синтетические IP (synth*).
 	skipIPAM bool
@@ -254,7 +254,7 @@ func (s *InstanceService) doCreate(ctx context.Context, instanceID string, req C
 
 	in := &domain.Instance{
 		ID:                    instanceID,
-		ProjectID:              req.ProjectID,
+		ProjectID:             req.ProjectID,
 		CreatedAt:             time.Now().UTC(),
 		Name:                  req.Name,
 		Description:           req.Description,
@@ -478,7 +478,7 @@ func (s *InstanceService) materializeNICs(ctx context.Context, instanceID string
 				v4Addrs = []string{nic.PrimaryV4AddressID}
 			}
 			nicID, err := s.vpcClient.CreateNetworkInterface(ctx, CreateNICReq{
-				ProjectID:         req.ProjectID,
+				ProjectID:        req.ProjectID,
 				Name:             nicResourceName(instanceID, idx),
 				SubnetID:         spec.SubnetID,
 				SecurityGroupIDs: spec.SecurityGroupIDs,
@@ -676,7 +676,7 @@ func (s *InstanceService) resolveDiskSource(ctx context.Context, folderID, zoneI
 	}
 	d := &domain.Disk{
 		ID:               newDiskID,
-		ProjectID:         folderID,
+		ProjectID:        folderID,
 		CreatedAt:        time.Now().UTC(),
 		TypeID:           orDefault(spec.NewDiskTypeID, defaultDiskType),
 		ZoneID:           zoneID,

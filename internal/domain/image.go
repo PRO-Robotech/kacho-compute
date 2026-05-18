@@ -32,7 +32,7 @@ const (
 // source (откуда создан) — для observability; не FK.
 type Image struct {
 	ID                 string
-	ProjectID           string
+	ProjectID          string
 	CreatedAt          time.Time
 	Name               string
 	Description        string

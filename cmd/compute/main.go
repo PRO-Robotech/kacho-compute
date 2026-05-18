@@ -29,6 +29,7 @@ import (
 	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
 	operationpb "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/operation"
 
+	"github.com/PRO-Robotech/kacho-compute/internal/check"
 	"github.com/PRO-Robotech/kacho-compute/internal/clients"
 	"github.com/PRO-Robotech/kacho-compute/internal/config"
 	"github.com/PRO-Robotech/kacho-compute/internal/handler"
@@ -106,11 +107,47 @@ func runServe(cfg config.Config) error {
 
 	svcs := buildServices(pool, projectClient, vpcClient, opsRepo, cfg.SkipPeerValidation)
 
+	// authz (E3 / KAC-108): per-RPC OpenFGA Check на public listener'е.
+	// AuthZIAMGRPCAddr пуст → interceptor НЕ навешивается (graceful start без
+	// kacho-iam в dev). Breakglass=true → interceptor навешивается, но всё
+	// пропускает + emit'ит WARN-метрику (dev / emergency).
+	publicUnary := []grpc.UnaryServerInterceptor{handler.TenantUnaryInterceptor(false, productionMode)}
+	publicStream := []grpc.StreamServerInterceptor{handler.TenantStreamInterceptor(false, productionMode)}
+
+	var authzConn *grpc.ClientConn
+	if cfg.AuthZIAMGRPCAddr != "" {
+		authzConn, err = dialPeer(cfg.AuthZIAMGRPCAddr, cfg.AuthZIAMTLS)
+		if err != nil {
+			return fmt.Errorf("dial kacho-iam (authz): %w", err)
+		}
+		defer authzConn.Close()
+	}
+	authzIntr, err := check.NewInterceptor(check.Options{
+		ServiceName: "kacho-compute",
+		IAMConn:     authzConn,
+		Breakglass:  cfg.AuthZBreakglass,
+		Logger:      logger,
+	})
+	switch {
+	case err == nil && authzIntr != nil:
+		publicUnary = append(publicUnary, authzIntr.Unary())
+		publicStream = append(publicStream, authzIntr.Stream())
+		logger.Info("authz interceptor enabled",
+			"iam_endpoint", cfg.AuthZIAMGRPCAddr,
+			"breakglass", cfg.AuthZBreakglass,
+		)
+	case errors.Is(err, check.ErrIAMConnNotConfigured):
+		// Dev — продолжаем без authz-interceptor'а (scope-guard KAC-108).
+		logger.Warn("authz interceptor NOT enabled — KACHO_COMPUTE_AUTHZ_IAM_GRPC_ADDR not configured (dev mode)")
+	case err != nil:
+		return fmt.Errorf("build authz interceptor: %w", err)
+	}
+
 	// Публичный listener — requireAdmin=false; internal :9091 — requireAdmin=true
 	// (defense-in-depth поверх NetworkPolicy в helm). Зеркалит kacho-vpc.
 	grpcSrv := grpcsrv.NewServer(
-		grpc.ChainUnaryInterceptor(handler.TenantUnaryInterceptor(false, productionMode)),
-		grpc.ChainStreamInterceptor(handler.TenantStreamInterceptor(false, productionMode)),
+		grpc.ChainUnaryInterceptor(publicUnary...),
+		grpc.ChainStreamInterceptor(publicStream...),
 	)
 	internalSrv := grpcsrv.NewServer(
 		grpc.ChainUnaryInterceptor(handler.TenantUnaryInterceptor(true, productionMode)),

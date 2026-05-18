@@ -31,19 +31,19 @@ type DiskFilter struct {
 // ImageFilter — фильтр для списка образов.
 type ImageFilter struct {
 	ProjectID string
-	Filter   string
+	Filter    string
 }
 
 // SnapshotFilter — фильтр для списка снапшотов.
 type SnapshotFilter struct {
 	ProjectID string
-	Filter   string
+	Filter    string
 }
 
 // InstanceFilter — фильтр для списка ВМ.
 type InstanceFilter struct {
 	ProjectID string
-	Filter   string
+	Filter    string
 }
 
 // DiskRepo — port-интерфейс репозитория дисков.
@@ -187,7 +187,7 @@ type VPCAddress struct {
 // (vpc/v1.NetworkInterfaceService.Create) при Instance.Create. Адреса
 // передаются ссылками на уже созданные Address-ресурсы (V4AddressIDs).
 type CreateNICReq struct {
-	ProjectID         string
+	ProjectID        string
 	Name             string
 	SubnetID         string
 	SecurityGroupIDs []string

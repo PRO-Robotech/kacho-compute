@@ -23,7 +23,7 @@ const (
 // фиксируются на момент создания (= disk.size) и immutable.
 type Snapshot struct {
 	ID                 string
-	ProjectID           string
+	ProjectID          string
 	CreatedAt          time.Time
 	Name               string
 	Description        string

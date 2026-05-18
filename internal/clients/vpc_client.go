@@ -111,7 +111,7 @@ func (c *VPCClient) SecurityGroupExists(ctx context.Context, sgID string) (bool,
 func (c *VPCClient) CreateInternalAddress(ctx context.Context, folderID, name, subnetID string) (service.VPCAddress, error) {
 	req := &vpcv1.CreateAddressRequest{
 		ProjectId: folderID,
-		Name:     name,
+		Name:      name,
 		AddressSpec: &vpcv1.CreateAddressRequest_InternalIpv4AddressSpec{
 			InternalIpv4AddressSpec: &vpcv1.InternalIpv4AddressSpec{
 				Scope: &vpcv1.InternalIpv4AddressSpec_SubnetId{SubnetId: subnetID},
@@ -134,7 +134,7 @@ func (c *VPCClient) CreateInternalAddress(ctx context.Context, folderID, name, s
 func (c *VPCClient) CreateExternalAddress(ctx context.Context, folderID, name, zoneID string) (service.VPCAddress, error) {
 	req := &vpcv1.CreateAddressRequest{
 		ProjectId: folderID,
-		Name:     name,
+		Name:      name,
 		AddressSpec: &vpcv1.CreateAddressRequest_ExternalIpv4AddressSpec{
 			ExternalIpv4AddressSpec: &vpcv1.ExternalIpv4AddressSpec{ZoneId: zoneID},
 		},
@@ -268,7 +268,7 @@ func (c *VPCClient) CreateNetworkInterface(ctx context.Context, req service.Crea
 	if err := retry.OnUnavailable(ctx, func(ctx context.Context) error {
 		var rerr error
 		op, rerr = c.nics.Create(ctx, &vpcv1.CreateNetworkInterfaceRequest{
-			ProjectId:         req.ProjectID,
+			ProjectId:        req.ProjectID,
 			Name:             req.Name,
 			SubnetId:         req.SubnetID,
 			SecurityGroupIds: req.SecurityGroupIDs,
