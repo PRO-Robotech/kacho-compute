@@ -86,3 +86,23 @@ jobs:
         with: { go-version-file: kacho-compute/go.mod, cache-dependency-path: kacho-compute/go.sum }
       - run: go mod download
       - run: go test ./internal/repo/... -race -count=1 -timeout 300s
+
+  authz-deny-suite:
+    name: authz-deny suite — generate + validate (KAC-122)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with: { python-version: '3.12' }
+      - name: generate authz-deny collection
+        run: python3 tests/newman/scripts/gen.py authz-deny
+      - name: assert collection non-empty
+        run: |
+          test -s tests/newman/collections/authz-deny.postman_collection.json
+          n=$(python3 -c "import json; print(len(json.load(open('tests/newman/collections/authz-deny.postman_collection.json'))['item']))")
+          echo "authz-deny cases: $n"
+          test "$n" -ge 200
+      - uses: actions/upload-artifact@v7
+        with:
+          name: authz-deny-collection
+          path: tests/newman/collections/authz-deny.postman_collection.json
