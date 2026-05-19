@@ -120,3 +120,21 @@ for name, list_path, _ in CATALOG_READ_RESOURCES:
     for subj in SUBJECTS:
         emit(f"{name.upper()}-CR", f"Create {name} (catalog admin)", "catalog-mutate",
              "POST", list_path, {"id": f"authz-{name}-{subj[0].lower()}", "name": "authz"}, subj)
+
+
+# ---------------------------------------------------------------------------
+# Cross-domain validation (KAC-122 §5.4 CD-*)
+# ---------------------------------------------------------------------------
+
+EXPECT["cross-domain-subnet-from-victim"] = {"ANON":"DENY","NOB":"DENY","PA1":"DENY","AAA":"DENY","AAB":"DENY","INV":"DENY"}
+
+# CD-1: AAA пытается создать Instance в project-A1 со ссылкой на subnet из network-B1 (cross-account)
+# Должно DENY — peer-validation должна обнаружить что subnet принадлежит другому account.
+for subj in SUBJECTS:
+    emit("CD-INST-XACCT-SUBNET", "Create Instance с subnet из cross-account project (peer-validation)",
+         "cross-domain-subnet-from-victim", "POST", "/compute/v1/instances",
+         {"folderId":"{{projectA1Id}}","name": f"cd-{subj[0].lower()}-{{{{runId}}}}",
+          "zoneId":"ru-central1-a","platformId":"standard-v3",
+          "resourcesSpec":{"memory":"1073741824","cores":2},
+          "bootDiskSpec":{"diskSpec":{"size":"8589934592","typeId":"network-ssd"}},
+          "networkInterfaceSpecs":[{"subnetId":"{{seedNetworkB1Id}}"}]}, subj)
