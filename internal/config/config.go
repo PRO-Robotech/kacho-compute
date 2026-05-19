@@ -76,6 +76,33 @@ type Config struct {
 	// AuthZBreakglass — emergency-режим: пропускать все RPC без Check + WARN.
 	// Dev / break-glass only (см. acceptance §6 D-6).
 	AuthZBreakglass bool `envconfig:"KACHO_COMPUTE_AUTHZ_BREAKGLASS" default:"false"`
+
+	// ===== KAC-127 Phase 4: FGA-filtered List =====
+	//
+	// Все ListFilter* — production-edition: configurable, no hardcoded.
+	// Reuses AuthZIAMGRPCAddr/AuthZIAMTLS as the iam-authorize endpoint
+	// (kacho-iam internal :9091 — AuthorizeService.ListObjects).
+
+	// ListFilterEnabled — master-switch. true → handler вызывает iam.ListObjects
+	// и фильтрует List по allow-list id. false → no filter (handler bypass).
+	ListFilterEnabled bool `envconfig:"KACHO_COMPUTE_LIST_FILTER_ENABLED" default:"true"`
+
+	// ListFilterTimeoutMs — per-request deadline для iam.ListObjects.
+	// Default 500ms — exceeds nothing under SLA (p95 100ms target).
+	ListFilterTimeoutMs int `envconfig:"KACHO_COMPUTE_LIST_FILTER_TIMEOUT_MS" default:"500"`
+
+	// ListFilterCacheTTLMs — TTL in-memory decision cache. Short (5s) so что
+	// access-binding revoke виден ≤5s; lower → больше RTT к iam.
+	ListFilterCacheTTLMs int `envconfig:"KACHO_COMPUTE_LIST_FILTER_CACHE_TTL_MS" default:"5000"`
+
+	// ListFilterCacheMaxEntries — bound для cache (LRU evict при превышении).
+	// 10000 enough для ~1000 concurrent users × 10 unique (subject, type, action) keys.
+	ListFilterCacheMaxEntries int `envconfig:"KACHO_COMPUTE_LIST_FILTER_CACHE_MAX_ENTRIES" default:"10000"`
+
+	// ListFilterFailOpen — degraded mode. true → на FGA error: handler возвращает
+	// все ресурсы caller'у (без фильтра); false → Unavailable. **Default false**
+	// (fail-closed = secure). Set to true только в break-glass.
+	ListFilterFailOpen bool `envconfig:"KACHO_COMPUTE_LIST_FILTER_FAIL_OPEN" default:"false"`
 }
 
 // baseDSN — стандартный postgres DSN без pgxpool-специфичных параметров

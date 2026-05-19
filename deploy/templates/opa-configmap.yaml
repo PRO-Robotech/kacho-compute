@@ -1,0 +1,33 @@
+{{- if .Values.opa.enabled }}
+# KAC-127 Phase 4 — OPA sidecar configuration.
+# Tells OPA to pull a signed bundle from kacho-iam (BundleService) and
+# refresh every pollMinDelaySeconds..pollMaxDelaySeconds.
+#
+# When kacho-iam serves bundles over HTTPS with a signing key, OPA verifies
+# the bundle signature before activating the new policy — out-of-the-box
+# guarantee that an attacker can't push arbitrary rego into the pod.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.name }}-opa-config
+  namespace: kacho
+data:
+  opa-config.yaml: |
+    services:
+      iam-bundles:
+        url: https://{{ .Values.opa.bundleService }}:{{ .Values.opa.bundleHTTPSPort }}
+    bundles:
+      {{ .Values.opa.bundleName }}:
+        service: iam-bundles
+        resource: bundles/{{ .Values.opa.bundleName }}.tar.gz
+        polling:
+          min_delay_seconds: {{ .Values.opa.pollMinDelaySeconds }}
+          max_delay_seconds: {{ .Values.opa.pollMaxDelaySeconds }}
+        signing:
+          # Bundle signature verification key — public key fetched out-of-band
+          # from kacho-iam and pre-shared as a Kubernetes Secret (Phase 5 will
+          # automate this via SPIRE; in Phase 4 it's a manual rotate).
+          keyid: kacho-iam-bundle-signing-v1
+    decision_logs:
+      console: true
+{{- end }}

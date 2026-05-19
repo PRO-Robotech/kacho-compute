@@ -62,16 +62,41 @@ func (r *DiskRepo) Get(_ context.Context, id string) (*domain.Disk, error) {
 }
 
 // List возвращает диски по folder.
+//
+// KAC-127 Phase 4: honors AllowedIDs — if non-nil, only return ids contained
+// in the allow-list (empty allow-list → empty result, NO repo scan).
 func (r *DiskRepo) List(_ context.Context, f ports.DiskFilter, _ ports.Pagination) ([]*domain.Disk, string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if f.AllowedIDs != nil && len(f.AllowedIDs) == 0 {
+		return nil, "", nil
+	}
+	allow := allowSet(f.AllowedIDs)
 	var out []*domain.Disk
 	for _, d := range r.data {
-		if f.ProjectID == "" || d.ProjectID == f.ProjectID {
-			out = append(out, d)
+		if f.ProjectID != "" && d.ProjectID != f.ProjectID {
+			continue
 		}
+		if allow != nil {
+			if _, ok := allow[d.ID]; !ok {
+				continue
+			}
+		}
+		out = append(out, d)
 	}
 	return out, "", nil
+}
+
+// allowSet — convert []string to set; nil means "no filter".
+func allowSet(ids []string) map[string]struct{} {
+	if ids == nil {
+		return nil
+	}
+	s := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		s[id] = struct{}{}
+	}
+	return s
 }
 
 // Insert вставляет диск.
@@ -193,15 +218,25 @@ func (r *ImageRepo) GetLatestByFamily(_ context.Context, folderID, family string
 	return best, nil
 }
 
-// List возвращает образы по folder.
+// List возвращает образы по folder. Honors AllowedIDs (KAC-127 Phase 4).
 func (r *ImageRepo) List(_ context.Context, f ports.ImageFilter, _ ports.Pagination) ([]*domain.Image, string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if f.AllowedIDs != nil && len(f.AllowedIDs) == 0 {
+		return nil, "", nil
+	}
+	allow := allowSet(f.AllowedIDs)
 	var out []*domain.Image
 	for _, i := range r.data {
-		if f.ProjectID == "" || i.ProjectID == f.ProjectID {
-			out = append(out, i)
+		if f.ProjectID != "" && i.ProjectID != f.ProjectID {
+			continue
 		}
+		if allow != nil {
+			if _, ok := allow[i.ID]; !ok {
+				continue
+			}
+		}
+		out = append(out, i)
 	}
 	return out, "", nil
 }
@@ -272,15 +307,25 @@ func (r *SnapshotRepo) Get(_ context.Context, id string) (*domain.Snapshot, erro
 	return s, nil
 }
 
-// List возвращает снапшоты по folder.
+// List возвращает снапшоты по folder. Honors AllowedIDs (KAC-127 Phase 4).
 func (r *SnapshotRepo) List(_ context.Context, f ports.SnapshotFilter, _ ports.Pagination) ([]*domain.Snapshot, string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if f.AllowedIDs != nil && len(f.AllowedIDs) == 0 {
+		return nil, "", nil
+	}
+	allow := allowSet(f.AllowedIDs)
 	var out []*domain.Snapshot
 	for _, s := range r.data {
-		if f.ProjectID == "" || s.ProjectID == f.ProjectID {
-			out = append(out, s)
+		if f.ProjectID != "" && s.ProjectID != f.ProjectID {
+			continue
 		}
+		if allow != nil {
+			if _, ok := allow[s.ID]; !ok {
+				continue
+			}
+		}
+		out = append(out, s)
 	}
 	return out, "", nil
 }
@@ -362,11 +407,21 @@ func (r *InstanceRepo) Get(_ context.Context, id string) (*domain.Instance, erro
 func (r *InstanceRepo) List(_ context.Context, f ports.InstanceFilter, _ ports.Pagination) ([]*domain.Instance, string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if f.AllowedIDs != nil && len(f.AllowedIDs) == 0 {
+		return nil, "", nil
+	}
+	allow := allowSet(f.AllowedIDs)
 	var out []*domain.Instance
 	for _, in := range r.data {
-		if f.ProjectID == "" || in.ProjectID == f.ProjectID {
-			out = append(out, in)
+		if f.ProjectID != "" && in.ProjectID != f.ProjectID {
+			continue
 		}
+		if allow != nil {
+			if _, ok := allow[in.ID]; !ok {
+				continue
+			}
+		}
+		out = append(out, in)
 	}
 	return out, "", nil
 }

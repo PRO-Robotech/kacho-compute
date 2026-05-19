@@ -38,3 +38,53 @@ autoscaling:
   minReplicas: 1
   maxReplicas: 5
   targetCPUUtilizationPercentage: 70
+
+# ==========================================================================
+# KAC-127 Phase 4 — FGA-filtered List integration
+# ==========================================================================
+# All keys map 1:1 to KACHO_COMPUTE_LIST_FILTER_* env vars on the main
+# container. Disable by setting listFilter.enabled=false.
+listFilter:
+  enabled: true
+  # Per-request deadline to iam.AuthorizeService.ListObjects (ms).
+  timeoutMs: 500
+  # In-memory decision cache TTL (ms). 5s — short enough so access-binding
+  # revoke propagates in ≤5s.
+  cacheTtlMs: 5000
+  cacheMaxEntries: 10000
+  # Degraded mode: on iam error → bypass filter (insecure; default false).
+  failOpen: false
+
+# authzIam — KAC-127 Phase 4 ListObjects + KAC-108 per-RPC Check both target
+# the same kacho-iam internal listener.
+authzIam:
+  # gRPC address of kacho-iam internal port (AuthorizeService.{Check,ListObjects}).
+  # Empty string ⇒ filter + per-RPC authz disabled (dev / breakglass).
+  grpcAddr: "kacho-iam.kacho.svc.cluster.local:9091"
+  tls: false
+
+# ==========================================================================
+# KAC-127 Phase 4 — OPA sidecar for in-pod policy decisions
+# ==========================================================================
+# OPA pulls a signed bundle from kacho-iam internal (:9091, BundleService).
+# Bundle contains the FGA model + condition policies and is refreshed every
+# `pollMinDelaySeconds`. Sidecar binds to 127.0.0.1:8181 — only the main
+# container can reach it.
+opa:
+  enabled: false
+  image: openpolicyagent/opa:1.4.2-rootless
+  imagePullPolicy: IfNotPresent
+  port: 8181
+  # Bundle endpoint on kacho-iam (BundleService / signed-bundle pull).
+  bundleService: "kacho-iam.kacho.svc.cluster.local"
+  bundleHTTPSPort: "9443"
+  bundleName: "compute-policy"
+  pollMinDelaySeconds: 30
+  pollMaxDelaySeconds: 60
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi

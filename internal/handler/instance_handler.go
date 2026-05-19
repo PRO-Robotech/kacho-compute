@@ -10,6 +10,7 @@ import (
 	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
 	operationpb "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/operation"
 
+	"github.com/PRO-Robotech/kacho-compute/internal/authzfilter"
 	"github.com/PRO-Robotech/kacho-compute/internal/protoconv"
 	svc "github.com/PRO-Robotech/kacho-compute/internal/service"
 )
@@ -23,11 +24,15 @@ import (
 // (AAA-скелет). См. docs/architecture/07-known-divergences.md.
 type InstanceHandler struct {
 	computev1.UnimplementedInstanceServiceServer
-	svc *svc.InstanceService
+	svc        *svc.InstanceService
+	listFilter authzfilter.Filter
 }
 
-// NewInstanceHandler создаёт InstanceHandler.
-func NewInstanceHandler(s *svc.InstanceService) *InstanceHandler { return &InstanceHandler{svc: s} }
+// NewInstanceHandler создаёт InstanceHandler. listFilter может быть nil — тогда
+// FGA-фильтрация на List отключена (dev/breakglass).
+func NewInstanceHandler(s *svc.InstanceService, listFilter authzfilter.Filter) *InstanceHandler {
+	return &InstanceHandler{svc: s, listFilter: listFilter}
+}
 
 // Get возвращает Instance по id.
 func (h *InstanceHandler) Get(ctx context.Context, req *computev1.GetInstanceRequest) (*computev1.Instance, error) {
@@ -50,11 +55,26 @@ func (h *InstanceHandler) Get(ctx context.Context, req *computev1.GetInstanceReq
 }
 
 // List возвращает список ВМ в folder.
+//
+// KAC-127 Phase 4: вызов фильтруется через iam.AuthorizeService.ListObjects
+// (caller subject → allowed instance_ids). admin / dev-bypass → no filtering.
+// Empty grant → empty list (NOT 403 — verbatim YC behaviour для list-empty).
 func (h *InstanceHandler) List(ctx context.Context, req *computev1.ListInstancesRequest) (*computev1.ListInstancesResponse, error) {
 	if err := AssertFolderOwnership(ctx, req.ProjectId); err != nil {
 		return nil, err
 	}
-	ins, nextToken, err := h.svc.List(ctx, svc.InstanceFilter{ProjectID: req.ProjectId, Filter: req.Filter},
+	dec, err := resolveListFilter(ctx, h.listFilter, authzfilter.ResourceTypeInstance, authzfilter.ActionInstanceRead)
+	if err != nil {
+		return nil, err
+	}
+	filter := svc.InstanceFilter{ProjectID: req.ProjectId, Filter: req.Filter}
+	if !dec.bypass {
+		if len(dec.allowedIDs) == 0 {
+			return &computev1.ListInstancesResponse{}, nil
+		}
+		filter.AllowedIDs = dec.allowedIDs
+	}
+	ins, nextToken, err := h.svc.List(ctx, filter,
 		svc.Pagination{PageToken: req.PageToken, PageSize: req.PageSize})
 	if err != nil {
 		return nil, err

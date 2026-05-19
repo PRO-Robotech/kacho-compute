@@ -1,0 +1,252 @@
+package authzfilter
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sort"
+	"sync"
+	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
+)
+
+// Decision — результат фильтра для конкретного ListObjects-вызова.
+//
+//   - BypassAll=true: фильтр не применяется (public catalog, cluster-admin,
+//     fail-open recovery). repo.List возвращает все строки.
+//   - Empty=true: subject ничего не разрешено в этом resource_type — handler
+//     должен вернуть пустой response без обращения к repo.
+//   - AllowedIDs: explicit-список id, к которым subject имеет access. Используется
+//     repo как `WHERE id = ANY($allowed)`.
+type Decision struct {
+	BypassAll  bool
+	Empty      bool
+	AllowedIDs []string
+	// FromCache — true если ответ получен из cache (для observability и тестов).
+	FromCache bool
+	// FailOpen — true если решение принято в degraded-mode (FGA error + fail-open).
+	FailOpen bool
+}
+
+// IsBypass — true если фильтрация не применяется (catalog / fail-open).
+func (d Decision) IsBypass() bool { return d.BypassAll }
+
+// IsEmpty — true если allow-list пуст (handler возвращает []).
+func (d Decision) IsEmpty() bool { return d.Empty }
+
+// IDs — отсортированный allow-list (deterministic ordering for stable pagination).
+func (d Decision) IDs() []string { return d.AllowedIDs }
+
+// Filter — port интерфейс. Реализация — FGAFilter (через iam.ListObjects)
+// либо BypassFilter (public-catalog / FGA disabled).
+type Filter interface {
+	// ListAllowedIDs возвращает Decision для (subject, resourceType, action).
+	// resourceType — FGA object type ("compute_instance", "compute_disk", ...).
+	// action — semantic permission ("compute.instances.read", ...) — server-side
+	// мапит на FGA relation. subject — FGA subject string ("user:usr_alice"
+	// или "service_account:sa_xxx").
+	ListAllowedIDs(ctx context.Context, subject, resourceType, action string) (Decision, error)
+}
+
+// BypassFilter — singleton фильтр-заглушка, всегда возвращающий BypassAll=true.
+// Используется для public-catalog RPC (DiskType / Zone / Region List).
+type BypassFilter struct{}
+
+// ListAllowedIDs возвращает BypassAll=true.
+func (BypassFilter) ListAllowedIDs(_ context.Context, _, _, _ string) (Decision, error) {
+	return Decision{BypassAll: true}, nil
+}
+
+// Config — параметры FGAFilter.
+type Config struct {
+	// Enabled — master-switch. false → ListAllowedIDs возвращает BypassAll=true
+	// (no-op: filter не применяется). Для dev-кластера / graceful start без iam.
+	Enabled bool
+	// Timeout — per-request deadline к iam.ListObjects.
+	Timeout time.Duration
+	// CacheTTL — TTL одной записи в in-process decision cache.
+	CacheTTL time.Duration
+	// CacheMaxEntries — bound для cache size (LRU eviction если превышен).
+	CacheMaxEntries int
+	// FailOpen — на FGA error: true → BypassAll=true + audit-warn; false → Unavailable.
+	FailOpen bool
+}
+
+// DefaultConfig — sane defaults: filter включён, 500ms timeout, 5s TTL, 10000 entries, fail-closed.
+func DefaultConfig() Config {
+	return Config{
+		Enabled:         true,
+		Timeout:         500 * time.Millisecond,
+		CacheTTL:        5 * time.Second,
+		CacheMaxEntries: 10000,
+		FailOpen:        false,
+	}
+}
+
+// AuthorizeClient — узкий интерфейс к iam.AuthorizeService (для тестируемости).
+// Реализуется *grpcAuthorizeClient (production) либо mock (unit-tests).
+//
+// Signature deliberately matches the generated AuthorizeServiceClient.ListObjects
+// so that NewIAMAuthorizeClient is a thin pass-through.
+type AuthorizeClient interface {
+	ListObjects(ctx context.Context, in *iamv1.ListObjectsRequest, opts ...grpc.CallOption) (*iamv1.ListObjectsResponse, error)
+}
+
+// FGAFilter — продакшен-реализация Filter поверх iam.AuthorizeService.ListObjects
+// с in-memory TTL-кешем.
+type FGAFilter struct {
+	cli AuthorizeClient
+	cfg Config
+
+	mu    sync.Mutex
+	cache map[string]cacheEntry
+}
+
+type cacheEntry struct {
+	decision Decision
+	expires  time.Time
+}
+
+// NewFGAFilter создаёт фильтр. cli — обычно grpcAuthorizeClient (см. iam_authorize_client.go).
+// Если cli == nil — фильтр всегда BypassAll (graceful start без iam).
+func NewFGAFilter(cli AuthorizeClient, cfg Config) *FGAFilter {
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = 500 * time.Millisecond
+	}
+	if cfg.CacheTTL <= 0 {
+		cfg.CacheTTL = 5 * time.Second
+	}
+	if cfg.CacheMaxEntries <= 0 {
+		cfg.CacheMaxEntries = 10000
+	}
+	return &FGAFilter{
+		cli:   cli,
+		cfg:   cfg,
+		cache: make(map[string]cacheEntry, cfg.CacheMaxEntries),
+	}
+}
+
+// ListAllowedIDs — основной entry-point.
+func (f *FGAFilter) ListAllowedIDs(ctx context.Context, subject, resourceType, action string) (Decision, error) {
+	if !f.cfg.Enabled || f.cli == nil {
+		return Decision{BypassAll: true}, nil
+	}
+	if subject == "" {
+		// Anonymous caller — fail-closed (handler obtains subject from gRPC metadata).
+		return Decision{}, status.Error(codes.Unauthenticated, "list filter: subject required")
+	}
+	if resourceType == "" || action == "" {
+		return Decision{}, fmt.Errorf("authzfilter: resourceType and action required")
+	}
+
+	key := cacheKey(subject, resourceType, action)
+	if d, ok := f.getCache(key); ok {
+		d.FromCache = true
+		return d, nil
+	}
+
+	// Cache miss — call iam.ListObjects with deadline.
+	callCtx, cancel := context.WithTimeout(ctx, f.cfg.Timeout)
+	defer cancel()
+
+	resp, err := f.cli.ListObjects(callCtx, &iamv1.ListObjectsRequest{
+		Subject:      subject,
+		ResourceType: resourceType,
+		Action:       action,
+		MaxResults:   int64(f.cfg.CacheMaxEntries),
+	})
+	if err != nil {
+		return f.handleErr(err)
+	}
+
+	ids := append([]string(nil), resp.GetResourceIds()...)
+	sort.Strings(ids) // deterministic ordering for stable pagination
+
+	d := Decision{
+		AllowedIDs: ids,
+		Empty:      len(ids) == 0,
+	}
+	f.putCache(key, d)
+	return d, nil
+}
+
+// handleErr — выбор reaction по fail-open / fail-closed.
+func (f *FGAFilter) handleErr(err error) (Decision, error) {
+	if f.cfg.FailOpen {
+		return Decision{BypassAll: true, FailOpen: true}, nil
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return Decision{}, status.Errorf(codes.Unavailable, "list filter: iam.ListObjects deadline exceeded after %s", f.cfg.Timeout)
+	}
+	// Preserve gRPC status code if upstream returned one; else wrap as Unavailable.
+	if s, ok := status.FromError(err); ok && s.Code() != codes.OK && s.Code() != codes.Unknown {
+		return Decision{}, status.Errorf(codes.Unavailable, "list filter: iam.ListObjects %s: %s", s.Code(), s.Message())
+	}
+	return Decision{}, status.Errorf(codes.Unavailable, "list filter: iam.ListObjects: %v", err)
+}
+
+func cacheKey(subject, resourceType, action string) string {
+	return subject + "|" + resourceType + "|" + action
+}
+
+func (f *FGAFilter) getCache(key string) (Decision, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	e, ok := f.cache[key]
+	if !ok {
+		return Decision{}, false
+	}
+	if time.Now().After(e.expires) {
+		delete(f.cache, key)
+		return Decision{}, false
+	}
+	// Return a shallow copy with a fresh slice header to avoid caller mutation.
+	d := e.decision
+	if len(d.AllowedIDs) > 0 {
+		idsCopy := make([]string, len(d.AllowedIDs))
+		copy(idsCopy, d.AllowedIDs)
+		d.AllowedIDs = idsCopy
+	}
+	return d, true
+}
+
+func (f *FGAFilter) putCache(key string, d Decision) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.cache) >= f.cfg.CacheMaxEntries {
+		// Naive eviction: drop a random pre-existing entry (Go map iteration order).
+		// Acceptable for short TTL — entries expire within 5s anyway.
+		for k := range f.cache {
+			delete(f.cache, k)
+			break
+		}
+	}
+	f.cache[key] = cacheEntry{
+		decision: d,
+		expires:  time.Now().Add(f.cfg.CacheTTL),
+	}
+}
+
+// Size — текущий размер cache (для observability/tests).
+func (f *FGAFilter) Size() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.cache)
+}
+
+// Invalidate — удаляет запись из cache (для LISTEN/NOTIFY-driven inval).
+func (f *FGAFilter) Invalidate(subject string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	prefix := subject + "|"
+	for k := range f.cache {
+		if len(k) >= len(prefix) && k[:len(prefix)] == prefix {
+			delete(f.cache, k)
+		}
+	}
+}

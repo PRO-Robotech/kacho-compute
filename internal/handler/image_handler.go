@@ -9,6 +9,7 @@ import (
 	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
 	operationpb "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/operation"
 
+	"github.com/PRO-Robotech/kacho-compute/internal/authzfilter"
 	"github.com/PRO-Robotech/kacho-compute/internal/protoconv"
 	svc "github.com/PRO-Robotech/kacho-compute/internal/service"
 )
@@ -17,11 +18,15 @@ import (
 // access-bindings RPC наследуются из UnimplementedImageServiceServer (Unimplemented).
 type ImageHandler struct {
 	computev1.UnimplementedImageServiceServer
-	svc *svc.ImageService
+	svc        *svc.ImageService
+	listFilter authzfilter.Filter
 }
 
-// NewImageHandler создаёт ImageHandler.
-func NewImageHandler(s *svc.ImageService) *ImageHandler { return &ImageHandler{svc: s} }
+// NewImageHandler создаёт ImageHandler. listFilter может быть nil — тогда
+// FGA-фильтрация на List отключена (dev/breakglass).
+func NewImageHandler(s *svc.ImageService, listFilter authzfilter.Filter) *ImageHandler {
+	return &ImageHandler{svc: s, listFilter: listFilter}
+}
 
 // Get возвращает Image по id.
 func (h *ImageHandler) Get(ctx context.Context, req *computev1.GetImageRequest) (*computev1.Image, error) {
@@ -51,11 +56,25 @@ func (h *ImageHandler) GetLatestByFamily(ctx context.Context, req *computev1.Get
 }
 
 // List возвращает список образов в folder.
+//
+// KAC-127 Phase 4: вызов фильтруется через iam.AuthorizeService.ListObjects
+// (caller subject → allowed image_ids).
 func (h *ImageHandler) List(ctx context.Context, req *computev1.ListImagesRequest) (*computev1.ListImagesResponse, error) {
 	if err := AssertFolderOwnership(ctx, req.ProjectId); err != nil {
 		return nil, err
 	}
-	imgs, nextToken, err := h.svc.List(ctx, svc.ImageFilter{ProjectID: req.ProjectId, Filter: req.Filter},
+	dec, err := resolveListFilter(ctx, h.listFilter, authzfilter.ResourceTypeImage, authzfilter.ActionImageRead)
+	if err != nil {
+		return nil, err
+	}
+	filter := svc.ImageFilter{ProjectID: req.ProjectId, Filter: req.Filter}
+	if !dec.bypass {
+		if len(dec.allowedIDs) == 0 {
+			return &computev1.ListImagesResponse{}, nil
+		}
+		filter.AllowedIDs = dec.allowedIDs
+	}
+	imgs, nextToken, err := h.svc.List(ctx, filter,
 		svc.Pagination{PageToken: req.PageToken, PageSize: req.PageSize})
 	if err != nil {
 		return nil, err
