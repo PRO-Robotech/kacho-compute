@@ -92,6 +92,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with: { path: kacho-compute }
       - uses: actions/setup-python@v6
         with: { python-version: '3.12' }
       - name: generate authz-deny collection
@@ -105,4 +106,4 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: authz-deny-collection
-          path: tests/newman/collections/authz-deny.postman_collection.json
+          path: kacho-compute/tests/newman/collections/authz-deny.postman_collection.json
