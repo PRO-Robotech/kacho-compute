@@ -67,14 +67,32 @@ spec:
             - name: {{ $k }}
               value: {{ $v | quote }}
             {{- end }}
-            - name: KACHO_COMPUTE_RESOURCE_MANAGER_GRPC_ADDR
-              value: "{{ default "" .Values.resourceManagerAddr }}"
+            # KAC-127: KACHO_COMPUTE_RESOURCE_MANAGER_GRPC_ADDR удалён — RM-fallback убран.
             - name: KACHO_COMPUTE_VPC_GRPC_ADDR
               value: "{{ .Values.vpcAddr }}"
             - name: KACHO_COMPUTE_VPC_INTERNAL_GRPC_ADDR
               value: "{{ .Values.vpcInternalAddr }}"
             - name: KACHO_COMPUTE_SKIP_PEER_VALIDATION
               value: "{{ .Values.skipPeerValidation }}"
+            # KAC-127 Phase 4 — FGA-filtered List + per-RPC authz endpoint.
+            {{- with .Values.authzIam }}
+            - name: KACHO_COMPUTE_AUTHZ_IAM_GRPC_ADDR
+              value: "{{ .grpcAddr }}"
+            - name: KACHO_COMPUTE_AUTHZ_IAM_TLS
+              value: "{{ .tls }}"
+            {{- end }}
+            {{- with .Values.listFilter }}
+            - name: KACHO_COMPUTE_LIST_FILTER_ENABLED
+              value: "{{ .enabled }}"
+            - name: KACHO_COMPUTE_LIST_FILTER_TIMEOUT_MS
+              value: "{{ .timeoutMs }}"
+            - name: KACHO_COMPUTE_LIST_FILTER_CACHE_TTL_MS
+              value: "{{ .cacheTtlMs }}"
+            - name: KACHO_COMPUTE_LIST_FILTER_CACHE_MAX_ENTRIES
+              value: "{{ .cacheMaxEntries }}"
+            - name: KACHO_COMPUTE_LIST_FILTER_FAIL_OPEN
+              value: "{{ .failOpen }}"
+            {{- end }}
           resources:
             requests:
               cpu: {{ .Values.resources.requests.cpu }}
@@ -92,3 +110,53 @@ spec:
               port: grpc
             initialDelaySeconds: 10
             periodSeconds: 30
+        # ==================================================================
+        # KAC-127 Phase 4 — OPA sidecar for in-pod policy decisions.
+        # ==================================================================
+        # OPA pulls a signed bundle from kacho-iam (BundleService) every
+        # 30–60s; bundle contains the FGA model + condition policies. The
+        # sidecar is bound to 127.0.0.1 only — main container has loopback
+        # access; nothing outside the pod can talk to it.
+        {{- if .Values.opa.enabled }}
+        - name: opa
+          image: "{{ .Values.opa.image }}"
+          imagePullPolicy: {{ .Values.opa.imagePullPolicy }}
+          args:
+            - "run"
+            - "--server"
+            - "--addr=127.0.0.1:{{ .Values.opa.port }}"
+            - "--diagnostic-addr=0.0.0.0:8282"
+            - "--config-file=/config/opa-config.yaml"
+          ports:
+            - name: opa-diag
+              containerPort: 8282
+          volumeMounts:
+            - name: opa-config
+              mountPath: /config
+              readOnly: true
+          resources:
+            requests:
+              cpu: {{ .Values.opa.resources.requests.cpu }}
+              memory: {{ .Values.opa.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.opa.resources.limits.cpu }}
+              memory: {{ .Values.opa.resources.limits.memory }}
+          readinessProbe:
+            httpGet:
+              path: /health?bundles
+              port: opa-diag
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: opa-diag
+            initialDelaySeconds: 10
+            periodSeconds: 30
+        {{- end }}
+      {{- if .Values.opa.enabled }}
+      volumes:
+        - name: opa-config
+          configMap:
+            name: {{ .Values.name }}-opa-config
+      {{- end }}

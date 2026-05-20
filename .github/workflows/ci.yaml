@@ -28,9 +28,9 @@ jobs:
       - uses: actions/checkout@v6
         with: { path: kacho-compute }
       - uses: actions/checkout@v6
-        with: { repository: PRO-Robotech/kacho-corelib, path: kacho-corelib }
+        with: { repository: PRO-Robotech/kacho-corelib, ref: KAC-127, path: kacho-corelib }
       - uses: actions/checkout@v6
-        with: { repository: PRO-Robotech/kacho-proto, path: kacho-proto }
+        with: { repository: PRO-Robotech/kacho-proto, ref: KAC-127, path: kacho-proto }
       - uses: actions/setup-go@v6
         with: { go-version-file: kacho-compute/go.mod, cache-dependency-path: kacho-compute/go.sum }
       - run: go mod download
@@ -45,9 +45,9 @@ jobs:
       - uses: actions/checkout@v6
         with: { path: kacho-compute }
       - uses: actions/checkout@v6
-        with: { repository: PRO-Robotech/kacho-corelib, path: kacho-corelib }
+        with: { repository: PRO-Robotech/kacho-corelib, ref: KAC-127, path: kacho-corelib }
       - uses: actions/checkout@v6
-        with: { repository: PRO-Robotech/kacho-proto, path: kacho-proto }
+        with: { repository: PRO-Robotech/kacho-proto, ref: KAC-127, path: kacho-proto }
       - uses: actions/setup-go@v6
         with: { go-version-file: kacho-compute/go.mod, cache-dependency-path: kacho-compute/go.sum }
       - uses: golangci/golangci-lint-action@v7
@@ -62,9 +62,9 @@ jobs:
       - uses: actions/checkout@v6
         with: { path: kacho-compute }
       - uses: actions/checkout@v6
-        with: { repository: PRO-Robotech/kacho-corelib, path: kacho-corelib }
+        with: { repository: PRO-Robotech/kacho-corelib, ref: KAC-127, path: kacho-corelib }
       - uses: actions/checkout@v6
-        with: { repository: PRO-Robotech/kacho-proto, path: kacho-proto }
+        with: { repository: PRO-Robotech/kacho-proto, ref: KAC-127, path: kacho-proto }
       - uses: actions/setup-go@v6
         with: { go-version-file: kacho-compute/go.mod, cache-dependency-path: kacho-compute/go.sum }
       - run: |
@@ -79,9 +79,9 @@ jobs:
       - uses: actions/checkout@v6
         with: { path: kacho-compute }
       - uses: actions/checkout@v6
-        with: { repository: PRO-Robotech/kacho-corelib, path: kacho-corelib }
+        with: { repository: PRO-Robotech/kacho-corelib, ref: KAC-127, path: kacho-corelib }
       - uses: actions/checkout@v6
-        with: { repository: PRO-Robotech/kacho-proto, path: kacho-proto }
+        with: { repository: PRO-Robotech/kacho-proto, ref: KAC-127, path: kacho-proto }
       - uses: actions/setup-go@v6
         with: { go-version-file: kacho-compute/go.mod, cache-dependency-path: kacho-compute/go.sum }
       - run: go mod download

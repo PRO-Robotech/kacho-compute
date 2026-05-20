@@ -9,6 +9,7 @@ import (
 	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
 	operationpb "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/operation"
 
+	"github.com/PRO-Robotech/kacho-compute/internal/authzfilter"
 	"github.com/PRO-Robotech/kacho-compute/internal/protoconv"
 	svc "github.com/PRO-Robotech/kacho-compute/internal/service"
 )
@@ -17,11 +18,15 @@ import (
 // access-bindings RPC наследуются из UnimplementedSnapshotServiceServer (Unimplemented).
 type SnapshotHandler struct {
 	computev1.UnimplementedSnapshotServiceServer
-	svc *svc.SnapshotService
+	svc        *svc.SnapshotService
+	listFilter authzfilter.Filter
 }
 
-// NewSnapshotHandler создаёт SnapshotHandler.
-func NewSnapshotHandler(s *svc.SnapshotService) *SnapshotHandler { return &SnapshotHandler{svc: s} }
+// NewSnapshotHandler создаёт SnapshotHandler. listFilter может быть nil — тогда
+// FGA-фильтрация на List отключена (dev/breakglass).
+func NewSnapshotHandler(s *svc.SnapshotService, listFilter authzfilter.Filter) *SnapshotHandler {
+	return &SnapshotHandler{svc: s, listFilter: listFilter}
+}
 
 // Get возвращает Snapshot по id.
 func (h *SnapshotHandler) Get(ctx context.Context, req *computev1.GetSnapshotRequest) (*computev1.Snapshot, error) {
@@ -39,11 +44,25 @@ func (h *SnapshotHandler) Get(ctx context.Context, req *computev1.GetSnapshotReq
 }
 
 // List возвращает список снапшотов в folder.
+//
+// KAC-127 Phase 4: вызов фильтруется через iam.AuthorizeService.ListObjects
+// (caller subject → allowed snapshot_ids).
 func (h *SnapshotHandler) List(ctx context.Context, req *computev1.ListSnapshotsRequest) (*computev1.ListSnapshotsResponse, error) {
 	if err := AssertFolderOwnership(ctx, req.ProjectId); err != nil {
 		return nil, err
 	}
-	snaps, nextToken, err := h.svc.List(ctx, svc.SnapshotFilter{ProjectID: req.ProjectId, Filter: req.Filter},
+	dec, err := resolveListFilter(ctx, h.listFilter, authzfilter.ResourceTypeSnapshot, authzfilter.ActionSnapshotRead)
+	if err != nil {
+		return nil, err
+	}
+	filter := svc.SnapshotFilter{ProjectID: req.ProjectId, Filter: req.Filter}
+	if !dec.bypass {
+		if len(dec.allowedIDs) == 0 {
+			return &computev1.ListSnapshotsResponse{}, nil
+		}
+		filter.AllowedIDs = dec.allowedIDs
+	}
+	snaps, nextToken, err := h.svc.List(ctx, filter,
 		svc.Pagination{PageToken: req.PageToken, PageSize: req.PageSize})
 	if err != nil {
 		return nil, err

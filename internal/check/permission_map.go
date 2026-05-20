@@ -1,21 +1,17 @@
 package check
 
 import (
-	"fmt"
-
 	"github.com/PRO-Robotech/kacho-corelib/authz"
 	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
-	operationv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/operation"
 )
 
 // FGA object types для kacho-compute (FGA model E3 §4 acceptance).
 const (
-	objectTypeProject   = "project"
-	objectTypeDisk      = "compute_disk"
-	objectTypeImage     = "compute_image"
-	objectTypeSnapshot  = "compute_snapshot"
-	objectTypeInstance  = "compute_instance"
-	objectTypeOperation = "compute_operation"
+	objectTypeProject  = "project"
+	objectTypeDisk     = "compute_disk"
+	objectTypeImage    = "compute_image"
+	objectTypeSnapshot = "compute_snapshot"
+	objectTypeInstance = "compute_instance"
 
 	// DiskType / Region / Zone — глобальные read-only справочники. Доступ —
 	// "viewer on project:<project_id>" недоступен (request не несёт project_id).
@@ -377,25 +373,15 @@ func PermissionMap() authz.RPCMap {
 		// Proto-пакет — `kacho.cloud.operation` (без `.v1`); fullMethod
 		// соответственно `/kacho.cloud.operation.OperationService/*`.
 		// =========================
-		"/kacho.cloud.operation.OperationService/Get": {
-			Relation: relationViewer,
-			Extract: authz.StaticExtractor(objectTypeOperation, func(req any) (string, error) {
-				r, ok := req.(*operationv1.GetOperationRequest)
-				if !ok {
-					return "", fmt.Errorf("authz: unexpected req type for OperationService.Get: %T", req)
-				}
-				return r.GetOperationId(), nil
-			}),
-		},
-		"/kacho.cloud.operation.OperationService/Cancel": {
-			Relation: relationEditor,
-			Extract: authz.StaticExtractor(objectTypeOperation, func(req any) (string, error) {
-				r, ok := req.(*operationv1.CancelOperationRequest)
-				if !ok {
-					return "", fmt.Errorf("authz: unexpected req type for OperationService.Cancel: %T", req)
-				}
-				return r.GetOperationId(), nil
-			}),
-		},
+		// KAC-127: Operation poll is NOT gated per-RPC. The FGA model has no
+		// `compute_operation` object type and no per-operation tuples are
+		// emitted, so a `viewer on compute_operation:<id>` Check has no path
+		// and every poll — including the creating client's own poll right
+		// after a successful mutation — was denied. Operation ids are opaque
+		// and unguessable; the api-gateway already marks these `<exempt>`.
+		// Public here makes the compute interceptor consistent with the
+		// gateway (a map-miss would fail-closed with ErrUnmapped).
+		"/kacho.cloud.operation.OperationService/Get":    {Public: true},
+		"/kacho.cloud.operation.OperationService/Cancel": {Public: true},
 	}
 }

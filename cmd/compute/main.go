@@ -29,6 +29,7 @@ import (
 	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
 	operationpb "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/operation"
 
+	"github.com/PRO-Robotech/kacho-compute/internal/authzfilter"
 	"github.com/PRO-Robotech/kacho-compute/internal/check"
 	"github.com/PRO-Robotech/kacho-compute/internal/clients"
 	"github.com/PRO-Robotech/kacho-compute/internal/config"
@@ -143,6 +144,11 @@ func runServe(cfg config.Config) error {
 		return fmt.Errorf("build authz interceptor: %w", err)
 	}
 
+	// KAC-127 Phase 4: FGA-filtered List handlers. Build the filter from
+	// configurable env vars (ListFilter*). If iam-authz conn is unavailable
+	// (dev / breakglass), filter is nil → handler bypasses FGA filtering.
+	listFilter := buildListFilter(cfg, authzConn, logger)
+
 	// Публичный listener — requireAdmin=false; internal :9091 — requireAdmin=true
 	// (defense-in-depth поверх NetworkPolicy в helm). Зеркалит kacho-vpc.
 	grpcSrv := grpcsrv.NewServer(
@@ -153,7 +159,7 @@ func runServe(cfg config.Config) error {
 		grpc.ChainUnaryInterceptor(handler.TenantUnaryInterceptor(true, productionMode)),
 		grpc.ChainStreamInterceptor(handler.TenantStreamInterceptor(true, productionMode)),
 	)
-	registerPublicServices(grpcSrv, svcs, opsRepo)
+	registerPublicServices(grpcSrv, svcs, opsRepo, listFilter)
 	registerInternalServices(internalSrv, svcs, pool, cfg.MigrateDSN(), logger, cfg.WatchMaxStreams)
 
 	listener, err := net.Listen("tcp", ":"+cfg.GrpcPort)
@@ -204,7 +210,7 @@ func validateAuthMode(cfg config.Config, logger *slog.Logger) (productionMode bo
 		logger.Warn("AuthMode=production: anonymous callers will be rejected")
 	case "production-strict":
 		productionMode = true
-		// KAC-106 (E1): TLS-check switched to IAM peer; ResourceManager — legacy fallback.
+		// KAC-106 (E1): TLS-check on IAM peer (KAC-127 dropped RM legacy fallback).
 		if !cfg.IAMTLS || !cfg.VPCTLS {
 			return false, fmt.Errorf("production-strict mode: KACHO_COMPUTE_IAM_TLS=true and KACHO_COMPUTE_VPC_TLS=true required")
 		}
@@ -233,23 +239,13 @@ func validateAuthMode(cfg config.Config, logger *slog.Logger) (productionMode bo
 // возвращает no-op-заглушки при KACHO_COMPUTE_SKIP_PEER_VALIDATION=true.
 //
 // KAC-106 (E1): project-existence-check переключён с kacho-resource-manager
-// на kacho-iam.ProjectService.Get. ResourceManagerGRPCAddr оставлен как
-// fallback для плавного обновления helm-чартов.
+// на kacho-iam.ProjectService.Get. KAC-127: legacy RM-fallback удалён.
 func dialPeers(cfg config.Config, logger *slog.Logger) (service.ProjectClient, service.VPCClient, []*grpc.ClientConn, error) {
 	if cfg.SkipPeerValidation {
 		logger.Warn("KACHO_COMPUTE_SKIP_PEER_VALIDATION=true — cross-service existence-check disabled (dev/test only)")
 		return clients.NoopProjectClient{}, clients.NoopVPCClient{}, nil, nil
 	}
-	iamAddr := cfg.IAMGRPCAddr
-	iamTLS := cfg.IAMTLS
-	if cfg.ResourceManagerGRPCAddr != "" && iamAddr == "kacho-iam.kacho.svc.cluster.local:9090" {
-		// Backward-compat: helm not yet upgraded — caller set RM address.
-		logger.Warn("KACHO_COMPUTE_RESOURCE_MANAGER_GRPC_ADDR set; falling back to RM peer (E1 transitional)",
-			"rm_addr", cfg.ResourceManagerGRPCAddr)
-		iamAddr = cfg.ResourceManagerGRPCAddr
-		iamTLS = cfg.ResourceManagerTLS
-	}
-	iamConn, err := dialPeer(iamAddr, iamTLS)
+	iamConn, err := dialPeer(cfg.IAMGRPCAddr, cfg.IAMTLS)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("dial iam: %w", err)
 	}
@@ -309,15 +305,54 @@ func buildServices(pool *pgxpool.Pool, projectClient service.ProjectClient, vpcC
 
 // registerPublicServices — публичные (verbatim-YC) RPC + OperationService на
 // внешний listener (:9090, проксируется api-gateway).
-func registerPublicServices(srv *grpc.Server, svcs *services, opsRepo operations.Repo) {
-	computev1.RegisterDiskServiceServer(srv, handler.NewDiskHandler(svcs.disk))
-	computev1.RegisterImageServiceServer(srv, handler.NewImageHandler(svcs.image))
-	computev1.RegisterSnapshotServiceServer(srv, handler.NewSnapshotHandler(svcs.snapshot))
+//
+// KAC-127 Phase 4: List handlers получают listFilter (FGA filter); может быть
+// nil — тогда FGA-фильтрация на List отключена (dev/breakglass). Catalog
+// (DiskType/Zone/Region) — public read, FGA bypass not needed (handler skips).
+func registerPublicServices(srv *grpc.Server, svcs *services, opsRepo operations.Repo, listFilter authzfilter.Filter) {
+	computev1.RegisterDiskServiceServer(srv, handler.NewDiskHandler(svcs.disk, listFilter))
+	computev1.RegisterImageServiceServer(srv, handler.NewImageHandler(svcs.image, listFilter))
+	computev1.RegisterSnapshotServiceServer(srv, handler.NewSnapshotHandler(svcs.snapshot, listFilter))
 	computev1.RegisterDiskTypeServiceServer(srv, handler.NewDiskTypeHandler(svcs.diskType))
 	computev1.RegisterZoneServiceServer(srv, handler.NewZoneHandler(svcs.zone))
 	computev1.RegisterRegionServiceServer(srv, handler.NewRegionHandler(svcs.region))
-	computev1.RegisterInstanceServiceServer(srv, handler.NewInstanceHandler(svcs.instance))
+	computev1.RegisterInstanceServiceServer(srv, handler.NewInstanceHandler(svcs.instance, listFilter))
 	operationpb.RegisterOperationServiceServer(srv, handler.NewOperationHandler(opsRepo))
+}
+
+// buildListFilter — KAC-127 Phase 4. Возвращает authzfilter.Filter, готовый к
+// подвешиванию в public List handlers. Если KACHO_COMPUTE_LIST_FILTER_ENABLED=false
+// либо authzConn=nil (dev без iam) — возвращает nil, что означает «handler
+// делает bypass FGA filter и возвращает всё подряд». Production-strict
+// валидация — выше (validateAuthMode).
+func buildListFilter(cfg config.Config, authzConn *grpc.ClientConn, logger *slog.Logger) authzfilter.Filter {
+	if !cfg.ListFilterEnabled {
+		logger.Info("list filter disabled (KACHO_COMPUTE_LIST_FILTER_ENABLED=false)")
+		return nil
+	}
+	if authzConn == nil {
+		logger.Warn("list filter requested but KACHO_COMPUTE_AUTHZ_IAM_GRPC_ADDR is unset — disabled")
+		return nil
+	}
+	cli := authzfilter.NewIAMAuthorizeClient(authzConn)
+	cacheMax := cfg.ListFilterCacheMaxEntries
+	if cacheMax <= 0 {
+		cacheMax = 10000
+	}
+	fcfg := authzfilter.Config{
+		Enabled:         true,
+		Timeout:         time.Duration(cfg.ListFilterTimeoutMs) * time.Millisecond,
+		CacheTTL:        time.Duration(cfg.ListFilterCacheTTLMs) * time.Millisecond,
+		CacheMaxEntries: cacheMax,
+		FailOpen:        cfg.ListFilterFailOpen,
+	}
+	logger.Info("list filter enabled",
+		"timeout_ms", cfg.ListFilterTimeoutMs,
+		"cache_ttl_ms", cfg.ListFilterCacheTTLMs,
+		"cache_max_entries", cacheMax,
+		"fail_open", cfg.ListFilterFailOpen,
+	)
+	return authzfilter.NewFGAFilter(cli, fcfg)
 }
 
 // registerInternalServices — kacho-only/admin RPC на internal listener (:9091,

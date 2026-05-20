@@ -9,6 +9,7 @@ import (
 	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
 	operationpb "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/operation"
 
+	"github.com/PRO-Robotech/kacho-compute/internal/authzfilter"
 	"github.com/PRO-Robotech/kacho-compute/internal/protoconv"
 	svc "github.com/PRO-Robotech/kacho-compute/internal/service"
 )
@@ -21,11 +22,15 @@ import (
 // codes.Unimplemented). См. docs/architecture/07-known-divergences.md.
 type DiskHandler struct {
 	computev1.UnimplementedDiskServiceServer
-	svc *svc.DiskService
+	svc        *svc.DiskService
+	listFilter authzfilter.Filter
 }
 
-// NewDiskHandler создаёт DiskHandler.
-func NewDiskHandler(s *svc.DiskService) *DiskHandler { return &DiskHandler{svc: s} }
+// NewDiskHandler создаёт DiskHandler. listFilter может быть nil — тогда
+// FGA-фильтрация на List отключена (dev/breakglass).
+func NewDiskHandler(s *svc.DiskService, listFilter authzfilter.Filter) *DiskHandler {
+	return &DiskHandler{svc: s, listFilter: listFilter}
+}
 
 // Get возвращает Disk по id.
 func (h *DiskHandler) Get(ctx context.Context, req *computev1.GetDiskRequest) (*computev1.Disk, error) {
@@ -43,11 +48,26 @@ func (h *DiskHandler) Get(ctx context.Context, req *computev1.GetDiskRequest) (*
 }
 
 // List возвращает список дисков в folder.
+//
+// KAC-127 Phase 4: вызов фильтруется через iam.AuthorizeService.ListObjects
+// (caller subject → allowed disk_ids). admin / dev-bypass → no filtering.
 func (h *DiskHandler) List(ctx context.Context, req *computev1.ListDisksRequest) (*computev1.ListDisksResponse, error) {
 	if err := AssertFolderOwnership(ctx, req.ProjectId); err != nil {
 		return nil, err
 	}
-	disks, nextToken, err := h.svc.List(ctx, svc.DiskFilter{ProjectID: req.ProjectId, Filter: req.Filter},
+	dec, err := resolveListFilter(ctx, h.listFilter, authzfilter.ResourceTypeDisk, authzfilter.ActionDiskRead)
+	if err != nil {
+		return nil, err
+	}
+	filter := svc.DiskFilter{ProjectID: req.ProjectId, Filter: req.Filter}
+	if !dec.bypass {
+		if len(dec.allowedIDs) == 0 {
+			// Empty grant → return empty list (NOT error).
+			return &computev1.ListDisksResponse{}, nil
+		}
+		filter.AllowedIDs = dec.allowedIDs
+	}
+	disks, nextToken, err := h.svc.List(ctx, filter,
 		svc.Pagination{PageToken: req.PageToken, PageSize: req.PageSize})
 	if err != nil {
 		return nil, err

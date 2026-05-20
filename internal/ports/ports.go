@@ -26,24 +26,30 @@ type DiskFilter struct {
 	ProjectID string
 	// Filter — raw filter expression (YC-syntax: `name="<value>"`).
 	Filter string
+	// AllowedIDs — если non-nil, ограничивает выборку этим id-множеством
+	// (FGA-фильтр, KAC-127 Phase 4). nil = без фильтра (bypass).
+	AllowedIDs []string
 }
 
 // ImageFilter — фильтр для списка образов.
 type ImageFilter struct {
-	ProjectID string
-	Filter    string
+	ProjectID  string
+	Filter     string
+	AllowedIDs []string
 }
 
 // SnapshotFilter — фильтр для списка снапшотов.
 type SnapshotFilter struct {
-	ProjectID string
-	Filter    string
+	ProjectID  string
+	Filter     string
+	AllowedIDs []string
 }
 
 // InstanceFilter — фильтр для списка ВМ.
 type InstanceFilter struct {
-	ProjectID string
-	Filter    string
+	ProjectID  string
+	Filter     string
+	AllowedIDs []string
 }
 
 // DiskRepo — port-интерфейс репозитория дисков.

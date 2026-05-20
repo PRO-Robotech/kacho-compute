@@ -31,19 +31,10 @@ type Config struct {
 	WatchMaxStreams int `envconfig:"KACHO_COMPUTE_WATCH_MAX_STREAMS" default:"32"`
 
 	// IAMGRPCAddr — адрес kacho-iam (ProjectService.Get; KAC-106 E1: переключение
-	// с kacho-resource-manager на kacho-iam). Fallback ENV
-	// KACHO_COMPUTE_RESOURCE_MANAGER_GRPC_ADDR — поддерживается в main.go для
-	// плавного обновления helm-чартов.
+	// с kacho-resource-manager на kacho-iam). KAC-127: legacy RM-fallback удалён.
 	IAMGRPCAddr string `envconfig:"KACHO_COMPUTE_IAM_GRPC_ADDR" default:"kacho-iam.kacho.svc.cluster.local:9090"`
 	// IAMTLS — TLS для cross-service gRPC к kacho-iam.
 	IAMTLS bool `envconfig:"KACHO_COMPUTE_IAM_TLS" default:"false"`
-
-	// ResourceManagerGRPCAddr — DEPRECATED (KAC-106). Сохраняется как fallback
-	// для backward-compat; если IAMGRPCAddr не задан явно (== default), а
-	// ResourceManagerGRPCAddr — задан, main.go берёт ResourceManagerGRPCAddr.
-	ResourceManagerGRPCAddr string `envconfig:"KACHO_COMPUTE_RESOURCE_MANAGER_GRPC_ADDR" default:""`
-	// ResourceManagerTLS — DEPRECATED (KAC-106).
-	ResourceManagerTLS bool `envconfig:"KACHO_COMPUTE_RESOURCE_MANAGER_TLS" default:"false"`
 
 	// VPCGRPCAddr — адрес kacho-vpc (SubnetService/SecurityGroupService/AddressService.Get
 	// для валидации Instance network_interface_spec).
@@ -76,6 +67,33 @@ type Config struct {
 	// AuthZBreakglass — emergency-режим: пропускать все RPC без Check + WARN.
 	// Dev / break-glass only (см. acceptance §6 D-6).
 	AuthZBreakglass bool `envconfig:"KACHO_COMPUTE_AUTHZ_BREAKGLASS" default:"false"`
+
+	// ===== KAC-127 Phase 4: FGA-filtered List =====
+	//
+	// Все ListFilter* — production-edition: configurable, no hardcoded.
+	// Reuses AuthZIAMGRPCAddr/AuthZIAMTLS as the iam-authorize endpoint
+	// (kacho-iam internal :9091 — AuthorizeService.ListObjects).
+
+	// ListFilterEnabled — master-switch. true → handler вызывает iam.ListObjects
+	// и фильтрует List по allow-list id. false → no filter (handler bypass).
+	ListFilterEnabled bool `envconfig:"KACHO_COMPUTE_LIST_FILTER_ENABLED" default:"true"`
+
+	// ListFilterTimeoutMs — per-request deadline для iam.ListObjects.
+	// Default 500ms — exceeds nothing under SLA (p95 100ms target).
+	ListFilterTimeoutMs int `envconfig:"KACHO_COMPUTE_LIST_FILTER_TIMEOUT_MS" default:"500"`
+
+	// ListFilterCacheTTLMs — TTL in-memory decision cache. Short (5s) so что
+	// access-binding revoke виден ≤5s; lower → больше RTT к iam.
+	ListFilterCacheTTLMs int `envconfig:"KACHO_COMPUTE_LIST_FILTER_CACHE_TTL_MS" default:"5000"`
+
+	// ListFilterCacheMaxEntries — bound для cache (LRU evict при превышении).
+	// 10000 enough для ~1000 concurrent users × 10 unique (subject, type, action) keys.
+	ListFilterCacheMaxEntries int `envconfig:"KACHO_COMPUTE_LIST_FILTER_CACHE_MAX_ENTRIES" default:"10000"`
+
+	// ListFilterFailOpen — degraded mode. true → на FGA error: handler возвращает
+	// все ресурсы caller'у (без фильтра); false → Unavailable. **Default false**
+	// (fail-closed = secure). Set to true только в break-glass.
+	ListFilterFailOpen bool `envconfig:"KACHO_COMPUTE_LIST_FILTER_FAIL_OPEN" default:"false"`
 }
 
 // baseDSN — стандартный postgres DSN без pgxpool-специфичных параметров

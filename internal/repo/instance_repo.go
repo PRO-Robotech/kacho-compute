@@ -58,6 +58,14 @@ func (r *InstanceRepo) List(ctx context.Context, f service.InstanceFilter, p ser
 		args = append(args, f.ProjectID)
 		argIdx++
 	}
+	if f.AllowedIDs != nil {
+		if len(f.AllowedIDs) == 0 {
+			return nil, "", nil
+		}
+		conditions = append(conditions, fmt.Sprintf("id = ANY($%d::text[])", argIdx))
+		args = append(args, f.AllowedIDs)
+		argIdx++
+	}
 	if f.Filter != "" {
 		ast, perr := filter.Parse(f.Filter, []string{"name"})
 		if perr != nil {
