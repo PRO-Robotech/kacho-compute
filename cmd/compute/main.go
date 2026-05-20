@@ -210,7 +210,7 @@ func validateAuthMode(cfg config.Config, logger *slog.Logger) (productionMode bo
 		logger.Warn("AuthMode=production: anonymous callers will be rejected")
 	case "production-strict":
 		productionMode = true
-		// KAC-106 (E1): TLS-check switched to IAM peer; ResourceManager — legacy fallback.
+		// KAC-106 (E1): TLS-check on IAM peer (KAC-127 dropped RM legacy fallback).
 		if !cfg.IAMTLS || !cfg.VPCTLS {
 			return false, fmt.Errorf("production-strict mode: KACHO_COMPUTE_IAM_TLS=true and KACHO_COMPUTE_VPC_TLS=true required")
 		}
@@ -239,23 +239,13 @@ func validateAuthMode(cfg config.Config, logger *slog.Logger) (productionMode bo
 // возвращает no-op-заглушки при KACHO_COMPUTE_SKIP_PEER_VALIDATION=true.
 //
 // KAC-106 (E1): project-existence-check переключён с kacho-resource-manager
-// на kacho-iam.ProjectService.Get. ResourceManagerGRPCAddr оставлен как
-// fallback для плавного обновления helm-чартов.
+// на kacho-iam.ProjectService.Get. KAC-127: legacy RM-fallback удалён.
 func dialPeers(cfg config.Config, logger *slog.Logger) (service.ProjectClient, service.VPCClient, []*grpc.ClientConn, error) {
 	if cfg.SkipPeerValidation {
 		logger.Warn("KACHO_COMPUTE_SKIP_PEER_VALIDATION=true — cross-service existence-check disabled (dev/test only)")
 		return clients.NoopProjectClient{}, clients.NoopVPCClient{}, nil, nil
 	}
-	iamAddr := cfg.IAMGRPCAddr
-	iamTLS := cfg.IAMTLS
-	if cfg.ResourceManagerGRPCAddr != "" && iamAddr == "kacho-iam.kacho.svc.cluster.local:9090" {
-		// Backward-compat: helm not yet upgraded — caller set RM address.
-		logger.Warn("KACHO_COMPUTE_RESOURCE_MANAGER_GRPC_ADDR set; falling back to RM peer (E1 transitional)",
-			"rm_addr", cfg.ResourceManagerGRPCAddr)
-		iamAddr = cfg.ResourceManagerGRPCAddr
-		iamTLS = cfg.ResourceManagerTLS
-	}
-	iamConn, err := dialPeer(iamAddr, iamTLS)
+	iamConn, err := dialPeer(cfg.IAMGRPCAddr, cfg.IAMTLS)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("dial iam: %w", err)
 	}

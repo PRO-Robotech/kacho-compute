@@ -13,10 +13,7 @@ db:
   passwordSecretName: kacho-umbrella-pg-compute
   passwordSecretKey: password
 iamAddr: "kacho-iam.kacho.svc.cluster.local:9090"
-# resourceManagerAddr — DEPRECATED (KAC-106 E1). Sustained as fallback for
-# transitional helm upgrades; if iamAddr is unset and resourceManagerAddr is
-# set, compute falls back to RM at runtime.
-resourceManagerAddr: ""
+# KAC-127: resourceManagerAddr удалён — RM-fallback больше не поддерживается.
 vpcAddr: "vpc.kacho.svc.cluster.local:9090"
 # vpcInternalAddr — internal-порт kacho-vpc (:9091): InternalZoneService —
 # compute берёт справочник зон из VPC-модуля (см. docs/architecture/07-known-divergences.md §6.1).

@@ -31,19 +31,10 @@ type Config struct {
 	WatchMaxStreams int `envconfig:"KACHO_COMPUTE_WATCH_MAX_STREAMS" default:"32"`
 
 	// IAMGRPCAddr — адрес kacho-iam (ProjectService.Get; KAC-106 E1: переключение
-	// с kacho-resource-manager на kacho-iam). Fallback ENV
-	// KACHO_COMPUTE_RESOURCE_MANAGER_GRPC_ADDR — поддерживается в main.go для
-	// плавного обновления helm-чартов.
+	// с kacho-resource-manager на kacho-iam). KAC-127: legacy RM-fallback удалён.
 	IAMGRPCAddr string `envconfig:"KACHO_COMPUTE_IAM_GRPC_ADDR" default:"kacho-iam.kacho.svc.cluster.local:9090"`
 	// IAMTLS — TLS для cross-service gRPC к kacho-iam.
 	IAMTLS bool `envconfig:"KACHO_COMPUTE_IAM_TLS" default:"false"`
-
-	// ResourceManagerGRPCAddr — DEPRECATED (KAC-106). Сохраняется как fallback
-	// для backward-compat; если IAMGRPCAddr не задан явно (== default), а
-	// ResourceManagerGRPCAddr — задан, main.go берёт ResourceManagerGRPCAddr.
-	ResourceManagerGRPCAddr string `envconfig:"KACHO_COMPUTE_RESOURCE_MANAGER_GRPC_ADDR" default:""`
-	// ResourceManagerTLS — DEPRECATED (KAC-106).
-	ResourceManagerTLS bool `envconfig:"KACHO_COMPUTE_RESOURCE_MANAGER_TLS" default:"false"`
 
 	// VPCGRPCAddr — адрес kacho-vpc (SubnetService/SecurityGroupService/AddressService.Get
 	// для валидации Instance network_interface_spec).
