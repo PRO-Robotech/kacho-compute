@@ -44,11 +44,13 @@ Workflow чекаутит main-репо + siblings (`kacho-corelib`, `kacho-prot
 каталог; build context = этот каталог. Siblings пиннятся к `ref: KAC-127` —
 после merge зависимостей в `main` вернуть на `ref: main`.
 
-### self-hosted runner
+### arm64 runner (GitHub-hosted)
 
-Job `docker-build-arm64` требует `runs-on: self-hosted` arm64-раннер. Если
-arm64-раннер недоступен — образ соберётся только под amd64 (job arm64 + manifest
-push зафейлятся; amd64-тег при этом валиден).
+Job `docker-build-arm64` гоняется на GitHub-hosted native ARM64-раннере
+`runs-on: ubuntu-24.04-arm` (KAC-127). Раньше использовался `self-hosted`
+раннер — при offline/busy он вешал job в `pending` бесконечно и `build arm64`
+check никогда не зеленел. Hosted ARM64-раннер native — QEMU-эмуляция для
+`linux/arm64` не нужна (шаг `Enable QEMU emulation` в arm64-job убран).
 
 ## newman-trigger.yml — cross-repo newman-e2e gate (KAC-127)
 
