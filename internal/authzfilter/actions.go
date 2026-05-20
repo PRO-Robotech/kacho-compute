@@ -15,10 +15,10 @@ const (
 // Compute-domain action strings — server-side resolves to FGA relation.
 // Format: `<domain>.<resource>.<verb>` per IAM permission catalog (Phase 1).
 const (
-	ActionInstanceRead  = "compute.instances.read"
-	ActionDiskRead      = "compute.disks.read"
-	ActionImageRead     = "compute.images.read"
-	ActionSnapshotRead  = "compute.snapshots.read"
+	ActionInstanceRead = "compute.instances.read"
+	ActionDiskRead     = "compute.disks.read"
+	ActionImageRead    = "compute.images.read"
+	ActionSnapshotRead = "compute.snapshots.read"
 	// ActionOperationRead — used to filter ListOperations result by op-id
 	// when scope is per-resource.
 	ActionOperationRead = "compute.operations.read"

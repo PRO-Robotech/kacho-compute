@@ -7,11 +7,11 @@ import (
 
 // FGA object types для kacho-compute (FGA model E3 §4 acceptance).
 const (
-	objectTypeProject   = "project"
-	objectTypeDisk      = "compute_disk"
-	objectTypeImage     = "compute_image"
-	objectTypeSnapshot  = "compute_snapshot"
-	objectTypeInstance  = "compute_instance"
+	objectTypeProject  = "project"
+	objectTypeDisk     = "compute_disk"
+	objectTypeImage    = "compute_image"
+	objectTypeSnapshot = "compute_snapshot"
+	objectTypeInstance = "compute_instance"
 
 	// DiskType / Region / Zone — глобальные read-only справочники. Доступ —
 	// "viewer on project:<project_id>" недоступен (request не несёт project_id).
