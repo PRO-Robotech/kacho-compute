@@ -44,3 +44,11 @@ admin-assigned id (id immutable — это PK). `Update` меняет тольк
   на DB-уровне (FK RESTRICT) → `FailedPrecondition`.
 - Public/Internal split — паттерн §Запрет #6: tenant видит каталог через
   `RegionService`, правит его только оператор через `Internal*`.
+
+## Связанные заметки
+
+<!-- archgraph:links -->
+- ↑ Приклад: [[_l1-kacho-compute]]
+- ↓ Функции (call-дерево, RPC contract): [[l3-l2-regions]]
+- Переменные: [[l4-kacho-compute]]
+<!-- /archgraph:links -->

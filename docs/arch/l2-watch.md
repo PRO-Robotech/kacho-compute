@@ -49,3 +49,11 @@ cursor ORDER BY sequence_no` + PG `LISTEN/NOTIFY` для real-time wake-up,
   kacho-vpc 1.0) — здесь это internal outbox-stream, не tenant-facing Watch.
 - `payload` — `google.protobuf.Struct` (JSON-репрезентация domain-объекта),
   не строго типизированное сообщение.
+
+## Связанные заметки
+
+<!-- archgraph:links -->
+- ↑ Приклад: [[_l1-kacho-compute]]
+- ↓ Функции (call-дерево, RPC contract): [[l3-l2-watch]]
+- Переменные: [[l4-kacho-compute]]
+<!-- /archgraph:links -->

@@ -46,3 +46,11 @@ admin-assigned id и привязкой к региону. `Update` меняет
 - `status = DOWN` — сигнал недоступности зоны; новые ресурсы в неё не
   размещаются, существующие переживают деградацию грациозно.
 - `id` зоны — admin-assigned, immutable PK; `region_id` — FK RESTRICT.
+
+## Связанные заметки
+
+<!-- archgraph:links -->
+- ↑ Приклад: [[_l1-kacho-compute]]
+- ↓ Функции (call-дерево, RPC contract): [[l3-l2-zones]]
+- Переменные: [[l4-kacho-compute]]
+<!-- /archgraph:links -->

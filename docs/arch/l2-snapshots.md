@@ -51,3 +51,11 @@ CRUD моментальных снимков дисков. `Snapshot` — point-
   (crash-consistent); полная consistency — на остановленной VM.
 - Снимки расписанием создаются через snapshot-schedules (см.
   `DiskService.ListSnapshotSchedules` в `l2-disk-lifecycle`).
+
+## Связанные заметки
+
+<!-- archgraph:links -->
+- ↑ Приклад: [[_l1-kacho-compute]]
+- ↓ Функции (call-дерево, RPC contract): [[l3-l2-snapshots]]
+- Переменные: [[l4-kacho-compute]]
+<!-- /archgraph:links -->

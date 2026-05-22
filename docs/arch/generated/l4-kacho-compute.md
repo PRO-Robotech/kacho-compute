@@ -4,6 +4,18 @@
 
 Generated inventory of the repository's exported domain types, fields, variables and constants — each with its doc-comment synopsis and its structural links to the code.
 
+## Функциональности
+
+- [[l3-l2-disk-lifecycle]]
+- [[l3-l2-disk-types]]
+- [[l3-l2-images]]
+- [[l3-l2-instance-lifecycle]]
+- [[l3-l2-operations]]
+- [[l3-l2-regions]]
+- [[l3-l2-snapshots]]
+- [[l3-l2-watch]]
+- [[l3-l2-zones]]
+
 ## Types
 
 | Type | Kind | Synopsis | Fields | Used by |

@@ -46,3 +46,11 @@ DiskType фиксирует, какие классы хранилища плат
   каталог, но не может его править; admin-мутации только на internal-listener.
 - `zone_ids` — список id зон Geography; ссылается на ресурс `Zone` того же
   сервиса (within-domain).
+
+## Связанные заметки
+
+<!-- archgraph:links -->
+- ↑ Приклад: [[_l1-kacho-compute]]
+- ↓ Функции (call-дерево, RPC contract): [[l3-l2-disk-types]]
+- Переменные: [[l4-kacho-compute]]
+<!-- /archgraph:links -->

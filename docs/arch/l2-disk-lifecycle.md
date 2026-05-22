@@ -58,3 +58,11 @@ Disk отделён от Instance как самостоятельный ресу
   VM (read-only режим); ownership-инвариант — на DB-уровне kacho-compute.
 - `zone_id` — cross-domain ссылка на Geography; immutable после Create
   (смена зоны — только через `Relocate`).
+
+## Связанные заметки
+
+<!-- archgraph:links -->
+- ↑ Приклад: [[_l1-kacho-compute]]
+- ↓ Функции (call-дерево, RPC contract): [[l3-l2-disk-lifecycle]]
+- Переменные: [[l4-kacho-compute]]
+<!-- /archgraph:links -->

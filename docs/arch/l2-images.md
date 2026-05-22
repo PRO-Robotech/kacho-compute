@@ -55,3 +55,11 @@ CRUD загрузочных образов. `Image` — неизменяемый
 - `product_ids` (лицензии) наследуются дисками/инстансами, созданными из
   образа — влияет на биллинг.
 - `hardware_generation` образа форсит feature-set для boot-инстанса.
+
+## Связанные заметки
+
+<!-- archgraph:links -->
+- ↑ Приклад: [[_l1-kacho-compute]]
+- ↓ Функции (call-дерево, RPC contract): [[l3-l2-images]]
+- Переменные: [[l4-kacho-compute]]
+<!-- /archgraph:links -->

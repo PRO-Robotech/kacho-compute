@@ -46,3 +46,11 @@ source_sha: ""
 - Per-resource истории (`InstanceService.ListOperations`,
   `DiskService.ListOperations` и т.п.) — отдельные RPC своих L2-кластеров;
   здесь только generic `Get` / `Cancel`.
+
+## Связанные заметки
+
+<!-- archgraph:links -->
+- ↑ Приклад: [[_l1-kacho-compute]]
+- ↓ Функции (call-дерево, RPC contract): [[l3-l2-operations]]
+- Переменные: [[l4-kacho-compute]]
+<!-- /archgraph:links -->
