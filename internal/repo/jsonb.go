@@ -57,6 +57,7 @@ func unmarshalProtoJSONB(raw []byte, target proto.Message, field string) error {
 	return nil
 }
 
+// isNilPtr сообщает, является ли proto-сообщение nil либо typed-nil ((*Foo)(nil)).
 func isNilPtr[T proto.Message](m T) bool {
 	// proto.Message — интерфейс; m может быть typed-nil (*Foo)(nil) — отлавливаем.
 	return m.ProtoReflect() == nil || !m.ProtoReflect().IsValid()

@@ -208,6 +208,8 @@ func (s *InstanceService) Create(ctx context.Context, req CreateInstanceReq) (*o
 	return &op, nil
 }
 
+// doCreate — async-worker Instance.Create: проверяет folder, zone, NIC-spec'и
+// (subnet/SG/address через VPC), создаёт диски и ВМ, возвращает её proto-проекцию.
 func (s *InstanceService) doCreate(ctx context.Context, instanceID string, req CreateInstanceReq) (*anypb.Any, error) {
 	if err := s.checkFolder(ctx, req.ProjectID); err != nil {
 		return nil, err
@@ -762,6 +764,8 @@ func (s *InstanceService) Update(ctx context.Context, req UpdateInstanceReq) (*o
 	return &op, nil
 }
 
+// validateInstanceUpdate проверяет update-mask Instance.Update: неизвестные поля
+// и попытка изменить immutable-поле → InvalidArgument.
 func validateInstanceUpdate(req UpdateInstanceReq) error {
 	known := map[string]struct{}{
 		"name": {}, "description": {}, "labels": {}, "service_account_id": {},
@@ -882,6 +886,8 @@ func (s *InstanceService) Restart(ctx context.Context, id string) (*operations.O
 	return &op, nil
 }
 
+// lifecycle — общий шаблон lifecycle-операций (Start/Stop/Restart): создаёт
+// Operation и async-воркером переводит статус ВМ from→to при выполнении preconditions.
 func (s *InstanceService) lifecycle(ctx context.Context, id, action string, from, to domain.InstanceStatus, precondMsg string, meta protoreflectMessage) (*operations.Operation, error) {
 	if id == "" {
 		return nil, status.Error(codes.InvalidArgument, "instance_id required")
@@ -1271,6 +1277,8 @@ func (s *InstanceService) ListOperations(ctx context.Context, id string, p Pagin
 	return s.opsRepo.List(ctx, operations.ListFilter{ResourceID: id, PageSize: p.PageSize, PageToken: p.PageToken})
 }
 
+// checkFolder проверяет существование project через peer-клиент;
+// отсутствие → NotFound, недоступность → Unavailable.
 func (s *InstanceService) checkFolder(ctx context.Context, folderID string) error {
 	exists, err := s.projectClient.Exists(ctx, folderID)
 	if err != nil {
@@ -1287,6 +1295,7 @@ func (s *InstanceService) checkFolder(ctx context.Context, folderID string) erro
 // protoreflectMessage — alias для proto.Message (operations.New принимает его).
 type protoreflectMessage = proto.Message
 
+// validateResources проверяет cores/memory/core_fraction resources_spec ВМ → InvalidArgument.
 func validateResources(cores, memory, coreFraction int64) error {
 	if cores <= 0 {
 		return invalidArg("resources_spec.cores", "cores must be > 0")
@@ -1302,6 +1311,7 @@ func validateResources(cores, memory, coreFraction int64) error {
 	return nil
 }
 
+// validateDiskSourceSpec требует, чтобы было задано ровно одно из {disk_id, disk_spec} → InvalidArgument.
 func validateDiskSourceSpec(field string, spec DiskSourceSpec) error {
 	hasRef := spec.DiskID != ""
 	hasInline := spec.NewDiskSizeGiB != 0 || spec.NewDiskTypeID != "" || spec.NewSourceImage != "" || spec.NewSourceSnap != ""
@@ -1311,6 +1321,7 @@ func validateDiskSourceSpec(field string, spec DiskSourceSpec) error {
 	return nil
 }
 
+// defaultCoreFraction возвращает core_fraction, подставляя 100 для нулевого значения.
 func defaultCoreFraction(cf int64) int64 {
 	if cf == 0 {
 		return 100
@@ -1318,6 +1329,7 @@ func defaultCoreFraction(cf int64) int64 {
 	return cf
 }
 
+// findNIC ищет NIC ВМ по index; пустой index при единственном NIC возвращает его. nil — не найдено.
 func findNIC(in *domain.Instance, index string) *domain.NetworkInterface {
 	if index == "" && len(in.NetworkInterfaces) == 1 {
 		return &in.NetworkInterfaces[0]
@@ -1330,6 +1342,7 @@ func findNIC(in *domain.Instance, index string) *domain.NetworkInterface {
 	return nil
 }
 
+// fqdn строит FQDN ВМ из hostname либо из id (синтетический auto-домен).
 func fqdn(id, hostname string) string {
 	if hostname != "" {
 		return hostname + ".ru-central1.internal"
@@ -1337,14 +1350,19 @@ func fqdn(id, hostname string) string {
 	return id + ".auto.internal"
 }
 
+// synthInternalIP возвращает синтетический внутренний IPv4 для i-го NIC (control-plane-only режим).
 func synthInternalIP(i int) string { return fmt.Sprintf("10.0.0.%d", 10+i) }
+
+// synthExternalIP возвращает синтетический внешний IPv4 для i-го NIC (control-plane-only режим).
 func synthExternalIP(i int) string { return fmt.Sprintf("203.0.113.%d", 10+i) }
 
 // nicAddressName / nicNatAddressName — имена эфемерных VPC Address-ресурсов,
 // создаваемых для NIC'а. Уникальны в пределах folder (instanceID уникален) и
 // соответствуют regex имени Address (`|[a-zA-Z]([-_a-zA-Z0-9]{0,61}[a-zA-Z0-9])?`,
 // ≤63 символов): instanceID начинается с буквы `e` (prefix `epd`), длина 20.
-func nicAddressName(instanceID, idx string) string    { return instanceID + "-nic" + idx }
+func nicAddressName(instanceID, idx string) string { return instanceID + "-nic" + idx }
+
+// nicNatAddressName возвращает имя эфемерного VPC NAT-Address-ресурса для NIC'а.
 func nicNatAddressName(instanceID, idx string) string { return instanceID + "-nat" + idx }
 
 // nicResourceName — имя kacho-vpc NetworkInterface-ресурса, создаваемого для
@@ -1373,6 +1391,7 @@ func validateIPInSubnet(field, ip string, v4CidrBlocks []string) error {
 	}
 	return invalidArg(field, fmt.Sprintf("address %s is not within subnet cidr %s", ip, v4CidrBlocks[0]))
 }
+// orDefault возвращает v либо def, если v пуст.
 func orDefault(v, def string) string {
 	if v == "" {
 		return def
@@ -1380,6 +1399,7 @@ func orDefault(v, def string) string {
 	return v
 }
 
+// instanceStatusName конвертирует domain.InstanceStatus в строковое имя статуса.
 func instanceStatusName(s domain.InstanceStatus) string {
 	if v, ok := computev1.Instance_Status_name[int32(s)]; ok {
 		return v

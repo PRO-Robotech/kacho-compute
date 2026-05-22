@@ -16,6 +16,7 @@ import (
 	"github.com/PRO-Robotech/kacho-compute/internal/domain"
 )
 
+// ts конвертирует time.Time в proto Timestamp с усечением до секунд (verbatim YC precision).
 func ts(t time.Time) *timestamppb.Timestamp { return timestamppb.New(t.Truncate(time.Second)) }
 
 // Disk конвертирует domain.Disk → computev1.Disk.
@@ -176,6 +177,7 @@ func Instance(in *domain.Instance) *computev1.Instance {
 	return out
 }
 
+// attachedDisk конвертирует domain.AttachedDisk → computev1.AttachedDisk.
 func attachedDisk(ad *domain.AttachedDisk) *computev1.AttachedDisk {
 	return &computev1.AttachedDisk{
 		Mode:       computev1.AttachedDisk_Mode(ad.Mode),
@@ -185,6 +187,7 @@ func attachedDisk(ad *domain.AttachedDisk) *computev1.AttachedDisk {
 	}
 }
 
+// networkInterface конвертирует domain.NetworkInterface → computev1.NetworkInterface.
 func networkInterface(nic *domain.NetworkInterface) *computev1.NetworkInterface {
 	out := &computev1.NetworkInterface{
 		Index:            nic.Index,
@@ -208,6 +211,7 @@ func networkInterface(nic *domain.NetworkInterface) *computev1.NetworkInterface 
 	return out
 }
 
+// oneToOneNat конвертирует domain.OneToOneNat → computev1.OneToOneNat (nil → nil).
 func oneToOneNat(n *domain.OneToOneNat) *computev1.OneToOneNat {
 	if n == nil {
 		return nil
@@ -218,6 +222,8 @@ func oneToOneNat(n *domain.OneToOneNat) *computev1.OneToOneNat {
 	}
 }
 
+// networkSettingsTypeFromString парсит строковое имя в enum NetworkSettings_Type
+// (неизвестное значение → STANDARD).
 func networkSettingsTypeFromString(s string) computev1.NetworkSettings_Type {
 	if v, ok := computev1.NetworkSettings_Type_value[s]; ok {
 		return computev1.NetworkSettings_Type(v)

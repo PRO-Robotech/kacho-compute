@@ -100,6 +100,8 @@ func (s *SnapshotService) Create(ctx context.Context, req CreateSnapshotReq) (*o
 	return &op, nil
 }
 
+// doCreate — async-worker Snapshot.Create: проверяет folder и source-диск,
+// вставляет снимок и возвращает его proto-проекцию.
 func (s *SnapshotService) doCreate(ctx context.Context, snapID string, req CreateSnapshotReq) (*anypb.Any, error) {
 	exists, err := s.projectClient.Exists(ctx, req.ProjectID)
 	if err != nil {
@@ -179,6 +181,8 @@ func (s *SnapshotService) Update(ctx context.Context, req UpdateSnapshotReq) (*o
 	return &op, nil
 }
 
+// validateSnapshotUpdate проверяет update-mask Snapshot.Update: неизвестные поля
+// и попытка изменить immutable-поле → InvalidArgument.
 func validateSnapshotUpdate(req UpdateSnapshotReq) error {
 	known := map[string]struct{}{"name": {}, "description": {}, "labels": {}}
 	if err := corevalidate.UpdateMask("update_mask", req.UpdateMask, known); err != nil {

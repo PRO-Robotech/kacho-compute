@@ -19,6 +19,7 @@ type grpcAuthorizeClient struct {
 	cli iamv1.AuthorizeServiceClient
 }
 
+// ListObjects проксирует вызов в gRPC iam.AuthorizeService.ListObjects.
 func (g *grpcAuthorizeClient) ListObjects(ctx context.Context, req *iamv1.ListObjectsRequest, opts ...grpc.CallOption) (*iamv1.ListObjectsResponse, error) {
 	return g.cli.ListObjects(ctx, req, opts...)
 }

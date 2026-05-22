@@ -85,7 +85,7 @@ Generated from L2 note `l2-zones.md`.
 - `(*github.com/PRO-Robotech/kacho-compute/internal/handler.InternalZoneHandler).Update` — Update обновляет зону.
 - `(*github.com/PRO-Robotech/kacho-compute/internal/handler.ZoneHandler).Get` — Get возвращает Zone по id.
 - `(*github.com/PRO-Robotech/kacho-compute/internal/handler.ZoneHandler).List` — List возвращает все зоны.
-- `(*github.com/PRO-Robotech/kacho-compute/internal/handler.wrappedStream).Context` — (undocumented — see C4)
+- `(*github.com/PRO-Robotech/kacho-compute/internal/handler.wrappedStream).Context` — Context возвращает подменённый контекст обёрнутого server-stream'а.
 - `(*github.com/PRO-Robotech/kacho-compute/internal/repo.DiskRepo).Delete` — Delete удаляет диск (23503 → FailedPrecondition если attached) + outbox DELETED.
 - `(*github.com/PRO-Robotech/kacho-compute/internal/repo.DiskRepo).Delete$1` — (undocumented — see C4)
 - `(*github.com/PRO-Robotech/kacho-compute/internal/repo.DiskRepo).Get` — Get возвращает диск по id (+ instance_ids из attached_disks).
@@ -96,8 +96,8 @@ Generated from L2 note `l2-zones.md`.
 - `(*github.com/PRO-Robotech/kacho-compute/internal/repo.DiskRepo).SetZoneID` — SetZoneID меняет zone_id (для Relocate).
 - `(*github.com/PRO-Robotech/kacho-compute/internal/repo.DiskRepo).Update` — Update обновляет mutable поля диска + outbox-event Disk UPDATED.
 - `(*github.com/PRO-Robotech/kacho-compute/internal/repo.DiskRepo).Update$1` — (undocumented — see C4)
-- `(*github.com/PRO-Robotech/kacho-compute/internal/repo.DiskRepo).fillInstanceIDs` — (undocumented — see C4)
-- `(*github.com/PRO-Robotech/kacho-compute/internal/repo.DiskRepo).simpleSet` — (undocumented — see C4)
+- `(*github.com/PRO-Robotech/kacho-compute/internal/repo.DiskRepo).fillInstanceIDs` — fillInstanceIDs заполняет d.InstanceIDs идентификаторами инстансов, к которым диск присоединён (из таблицы attached_disks).
+- `(*github.com/PRO-Robotech/kacho-compute/internal/repo.DiskRepo).simpleSet` — simpleSet атомарно обновляет одну колонку диска и возвращает перечитанный ресурс + outbox UPDATED.
 - `(*github.com/PRO-Robotech/kacho-compute/internal/repo.DiskRepo).simpleSet$1` — (undocumented — see C4)
 - `(*github.com/PRO-Robotech/kacho-compute/internal/repo.DiskTypeRepo).Get` — Get возвращает тип диска по id.
 - `(*github.com/PRO-Robotech/kacho-compute/internal/repo.ImageRepo).Delete` — Delete удаляет образ + outbox-event Image DELETED.
@@ -126,10 +126,10 @@ Generated from L2 note `l2-zones.md`.
 - `(*github.com/PRO-Robotech/kacho-compute/internal/repo.InstanceRepo).SetStatusCAS$1` — (undocumented — see C4)
 - `(*github.com/PRO-Robotech/kacho-compute/internal/repo.InstanceRepo).Update` — Update обновляет mutable поля ВМ + status + outbox UPDATED.
 - `(*github.com/PRO-Robotech/kacho-compute/internal/repo.InstanceRepo).Update$1` — (undocumented — see C4)
-- `(*github.com/PRO-Robotech/kacho-compute/internal/repo.InstanceRepo).fillChildren` — (undocumented — see C4)
-- `(*github.com/PRO-Robotech/kacho-compute/internal/repo.InstanceRepo).fillChildrenGeneric` — (undocumented — see C4)
-- `(*github.com/PRO-Robotech/kacho-compute/internal/repo.InstanceRepo).fillChildrenTx` — (undocumented — see C4)
-- `(*github.com/PRO-Robotech/kacho-compute/internal/repo.InstanceRepo).mutateAndReload` — (undocumented — see C4)
+- `(*github.com/PRO-Robotech/kacho-compute/internal/repo.InstanceRepo).fillChildren` — fillChildren догружает NIC-и и attached_disks ВМ через пул-querier.
+- `(*github.com/PRO-Robotech/kacho-compute/internal/repo.InstanceRepo).fillChildrenGeneric` — fillChildrenGeneric читает дочерние NIC-и и attached_disks ВМ через произвольный querier.
+- `(*github.com/PRO-Robotech/kacho-compute/internal/repo.InstanceRepo).fillChildrenTx` — fillChildrenTx догружает NIC-и и attached_disks ВМ внутри транзакции.
+- `(*github.com/PRO-Robotech/kacho-compute/internal/repo.InstanceRepo).mutateAndReload` — mutateAndReload в одной транзакции проверяет существование ВМ, применяет mutate, перечитывает её с детьми и эмитит outbox-событие eventType.
 - `(*github.com/PRO-Robotech/kacho-compute/internal/repo.InstanceRepo).mutateAndReload$1` — (undocumented — see C4)
 - `(*github.com/PRO-Robotech/kacho-compute/internal/repo.SnapshotRepo).Delete` — Delete удаляет снапшот + outbox-event Snapshot DELETED.
 - `(*github.com/PRO-Robotech/kacho-compute/internal/repo.SnapshotRepo).Delete$1` — (undocumented — see C4)
@@ -149,14 +149,14 @@ Generated from L2 note `l2-zones.md`.
 - `(*github.com/PRO-Robotech/kacho-compute/internal/service.DiskService).Move$1` — (undocumented — see C4)
 - `(*github.com/PRO-Robotech/kacho-compute/internal/service.DiskService).Relocate$1` — (undocumented — see C4)
 - `(*github.com/PRO-Robotech/kacho-compute/internal/service.DiskService).Update$1` — (undocumented — see C4)
-- `(*github.com/PRO-Robotech/kacho-compute/internal/service.DiskService).checkFolder` — (undocumented — see C4)
-- `(*github.com/PRO-Robotech/kacho-compute/internal/service.DiskService).doCreate` — (undocumented — see C4)
-- `(*github.com/PRO-Robotech/kacho-compute/internal/service.DiskService).doUpdate` — (undocumented — see C4)
+- `(*github.com/PRO-Robotech/kacho-compute/internal/service.DiskService).checkFolder` — checkFolder проверяет существование project через peer-клиент; отсутствие → NotFound, недоступность → Unavailable.
+- `(*github.com/PRO-Robotech/kacho-compute/internal/service.DiskService).doCreate` — doCreate — async-worker Disk.Create: проверяет folder/zone/type/source, вставляет диск и возвращает его proto-проекцию.
+- `(*github.com/PRO-Robotech/kacho-compute/internal/service.DiskService).doUpdate` — doUpdate — async-worker Disk.Update: применяет mutable-поля по update-mask и возвращает обновлённую proto-проекцию диска.
 - `(*github.com/PRO-Robotech/kacho-compute/internal/service.ImageService).Create$1` — (undocumented — see C4)
 - `(*github.com/PRO-Robotech/kacho-compute/internal/service.ImageService).Delete$1` — (undocumented — see C4)
 - `(*github.com/PRO-Robotech/kacho-compute/internal/service.ImageService).Update$1` — (undocumented — see C4)
-- `(*github.com/PRO-Robotech/kacho-compute/internal/service.ImageService).checkFolder` — (undocumented — see C4)
-- `(*github.com/PRO-Robotech/kacho-compute/internal/service.ImageService).doCreate` — (undocumented — see C4)
+- `(*github.com/PRO-Robotech/kacho-compute/internal/service.ImageService).checkFolder` — checkFolder проверяет существование project через peer-клиент; отсутствие → NotFound, недоступность → Unavailable.
+- `(*github.com/PRO-Robotech/kacho-compute/internal/service.ImageService).doCreate` — doCreate — async-worker Image.Create: проверяет folder и source (image/snapshot/disk/uri), вставляет образ и возвращает его proto-проекцию.
 - `(*github.com/PRO-Robotech/kacho-compute/internal/service.InstanceService).AddOneToOneNat$1` — (undocumented — see C4)
 - `(*github.com/PRO-Robotech/kacho-compute/internal/service.InstanceService).AttachDisk$1` — (undocumented — see C4)
 - `(*github.com/PRO-Robotech/kacho-compute/internal/service.InstanceService).Create$1` — (undocumented — see C4)
@@ -175,10 +175,10 @@ Generated from L2 note `l2-zones.md`.
 - `(*github.com/PRO-Robotech/kacho-compute/internal/service.InstanceService).Update$1` — (undocumented — see C4)
 - `(*github.com/PRO-Robotech/kacho-compute/internal/service.InstanceService).UpdateMetadata$1` — (undocumented — see C4)
 - `(*github.com/PRO-Robotech/kacho-compute/internal/service.InstanceService).attachExistingNIC` — attachExistingNIC проверяет существование kacho-vpc NIC по id, что он не приаттачен к другому инстансу, аттачит его к instanceID@idx и собирает domain.NetworkInterface с denorm-полями из NIC-ресурса.
-- `(*github.com/PRO-Robotech/kacho-compute/internal/service.InstanceService).checkFolder` — (undocumented — see C4)
+- `(*github.com/PRO-Robotech/kacho-compute/internal/service.InstanceService).checkFolder` — checkFolder проверяет существование project через peer-клиент; отсутствие → NotFound, недоступность → Unavailable.
 - `(*github.com/PRO-Robotech/kacho-compute/internal/service.InstanceService).clearAddressReference` — clearAddressReference — best-effort ClearAddressReference на один Address (no-op если addressID пуст).
-- `(*github.com/PRO-Robotech/kacho-compute/internal/service.InstanceService).doCreate` — (undocumented — see C4)
-- `(*github.com/PRO-Robotech/kacho-compute/internal/service.InstanceService).lifecycle` — (undocumented — see C4)
+- `(*github.com/PRO-Robotech/kacho-compute/internal/service.InstanceService).doCreate` — doCreate — async-worker Instance.Create: проверяет folder, zone, NIC-spec'и (subnet/SG/address через VPC), создаёт диски и ВМ, возвращает её proto-проекцию.
+- `(*github.com/PRO-Robotech/kacho-compute/internal/service.InstanceService).lifecycle` — lifecycle — общий шаблон lifecycle-операций (Start/Stop/Restart): создаёт Operation и async-воркером переводит статус ВМ from→to при выполнении preconditions.
 - `(*github.com/PRO-Robotech/kacho-compute/internal/service.InstanceService).lifecycle$1` — (undocumented — see C4)
 - `(*github.com/PRO-Robotech/kacho-compute/internal/service.InstanceService).markEphemeralAddressInUse` — markEphemeralAddressInUse — best-effort MarkAddressEphemeralInUse на один Address (no-op если addressID пуст): reserved=false, used=true + referrer.
 - `(*github.com/PRO-Robotech/kacho-compute/internal/service.InstanceService).markNatAddress` — markNatAddress помечает one-to-one-NAT Address: эфемерный (compute создал) → MarkAddressEphemeralInUse; reserved (по address_id) → SetAddressReference.
@@ -192,7 +192,7 @@ Generated from L2 note `l2-zones.md`.
 - `(*github.com/PRO-Robotech/kacho-compute/internal/service.SnapshotService).Create$1` — (undocumented — see C4)
 - `(*github.com/PRO-Robotech/kacho-compute/internal/service.SnapshotService).Delete$1` — (undocumented — see C4)
 - `(*github.com/PRO-Robotech/kacho-compute/internal/service.SnapshotService).Update$1` — (undocumented — see C4)
-- `(*github.com/PRO-Robotech/kacho-compute/internal/service.SnapshotService).doCreate` — (undocumented — see C4)
+- `(*github.com/PRO-Robotech/kacho-compute/internal/service.SnapshotService).doCreate` — doCreate — async-worker Snapshot.Create: проверяет folder и source-диск, вставляет снимок и возвращает его proto-проекцию.
 - `(*github.com/PRO-Robotech/kacho-compute/internal/service.ZoneService).Create` — Create создаёт зону (admin-only).
 - `(*github.com/PRO-Robotech/kacho-compute/internal/service.ZoneService).Delete` — Delete удаляет зону (admin-only).
 - `(*github.com/PRO-Robotech/kacho-compute/internal/service.ZoneService).Get` — Get возвращает Zone по id.
@@ -264,7 +264,7 @@ Generated from L2 note `l2-zones.md`.
 - `github.com/PRO-Robotech/kacho-compute/internal/check.PermissionMap$9` — (undocumented — see C4)
 - `github.com/PRO-Robotech/kacho-compute/internal/check.staticSystemCatalog$1` — (undocumented — see C4)
 - `github.com/PRO-Robotech/kacho-compute/internal/clients.networkInterfaceIDFromMetadata` — networkInterfaceIDFromMetadata извлекает network_interface_id из CreateNetworkInterfaceMetadata (Operation.metadata).
-- `github.com/PRO-Robotech/kacho-compute/internal/clients.operationResult` — (undocumented — see C4)
+- `github.com/PRO-Robotech/kacho-compute/internal/clients.operationResult` — operationResult извлекает результат завершённой VPC-операции: ошибку преобразует в gRPC-статус, иначе возвращает payload ответа.
 - `github.com/PRO-Robotech/kacho-compute/internal/handler.TenantStreamInterceptor$1` — (undocumented — see C4)
 - `github.com/PRO-Robotech/kacho-compute/internal/handler.TenantUnaryInterceptor$1` — (undocumented — see C4)
 - `github.com/PRO-Robotech/kacho-compute/internal/handler.assertAdminAccess` — assertAdminAccess — internal :9091 listener gate.
@@ -275,32 +275,32 @@ Generated from L2 note `l2-zones.md`.
 - `github.com/PRO-Robotech/kacho-compute/internal/protoconv.Instance` — Instance конвертирует domain.Instance → computev1.Instance.
 - `github.com/PRO-Robotech/kacho-compute/internal/protoconv.Snapshot` — Snapshot конвертирует domain.Snapshot → computev1.Snapshot.
 - `github.com/PRO-Robotech/kacho-compute/internal/protoconv.Zone` — Zone конвертирует domain.Zone → computev1.Zone.
-- `github.com/PRO-Robotech/kacho-compute/internal/protoconv.attachedDisk` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/protoconv.networkInterface` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/protoconv.networkSettingsTypeFromString` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/protoconv.oneToOneNat` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/protoconv.ts` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.attachedDiskModeFromName` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.attachedDiskModeName` — (undocumented — see C4)
+- `github.com/PRO-Robotech/kacho-compute/internal/protoconv.attachedDisk` — attachedDisk конвертирует domain.AttachedDisk → computev1.AttachedDisk.
+- `github.com/PRO-Robotech/kacho-compute/internal/protoconv.networkInterface` — networkInterface конвертирует domain.NetworkInterface → computev1.NetworkInterface.
+- `github.com/PRO-Robotech/kacho-compute/internal/protoconv.networkSettingsTypeFromString` — networkSettingsTypeFromString парсит строковое имя в enum NetworkSettings_Type (неизвестное значение → STANDARD).
+- `github.com/PRO-Robotech/kacho-compute/internal/protoconv.oneToOneNat` — oneToOneNat конвертирует domain.OneToOneNat → computev1.OneToOneNat (nil → nil).
+- `github.com/PRO-Robotech/kacho-compute/internal/protoconv.ts` — ts конвертирует time.Time в proto Timestamp с усечением до секунд (verbatim YC precision).
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.attachedDiskModeFromName` — attachedDiskModeFromName парсит строковое имя режима диска из БД в domain.AttachedDiskMode.
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.attachedDiskModeName` — attachedDiskModeName конвертирует domain.AttachedDiskMode в строковое имя для хранения в БД.
 - `github.com/PRO-Robotech/kacho-compute/internal/repo.decodePageToken` — decodePageToken декодирует page_token обратно в (created_at, id).
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.diskInsertArgs` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.diskPayload` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.diskStatusFromName` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.diskStatusName` — (undocumented — see C4)
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.diskInsertArgs` — diskInsertArgs формирует список аргументов INSERT для domain.Disk в порядке diskCols.
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.diskPayload` — diskPayload сериализует domain.Disk в map для тела outbox-события.
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.diskStatusFromName` — diskStatusFromName парсит строковое имя статуса из БД в domain.DiskStatus.
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.diskStatusName` — diskStatusName конвертирует domain.DiskStatus в строковое имя для хранения в БД.
 - `github.com/PRO-Robotech/kacho-compute/internal/repo.domainToMap` — domainToMap конвертирует произвольный domain-объект в map[string]any через JSON round-trip.
 - `github.com/PRO-Robotech/kacho-compute/internal/repo.emitCompute` — emitCompute — обёртка над outbox.Emit с фиксированной таблицей compute_outbox.
 - `github.com/PRO-Robotech/kacho-compute/internal/repo.encodePageToken` — encodePageToken кодирует created_at + id в непрозрачный page_token.
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.imageInsertArgs` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.imagePayload` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.imageStatusFromName` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.imageStatusName` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.insertAttachedDiskTx` — (undocumented — see C4)
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.imageInsertArgs` — imageInsertArgs формирует список аргументов INSERT для domain.Image в порядке imageCols.
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.imagePayload` — imagePayload сериализует domain.Image в map для тела outbox-события.
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.imageStatusFromName` — imageStatusFromName парсит строковое имя статуса из БД в domain.ImageStatus.
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.imageStatusName` — imageStatusName конвертирует domain.ImageStatus в строковое имя для хранения в БД.
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.insertAttachedDiskTx` — insertAttachedDiskTx вставляет одну строку attached_disks внутри транзакции.
 - `github.com/PRO-Robotech/kacho-compute/internal/repo.insertDiskTx` — insertDiskTx вставляет диск внутри переданной TX (для inline-дисков Instance.Create).
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.insertNICTx` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.instanceInsertArgs` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.instancePayload` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.instanceStatusFromName` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.instanceStatusName` — (undocumented — see C4)
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.insertNICTx` — insertNICTx вставляет одну строку instance_network_interfaces внутри транзакции.
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.instanceInsertArgs` — instanceInsertArgs формирует список аргументов INSERT для domain.Instance в порядке instanceCols.
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.instancePayload` — instancePayload сериализует domain.Instance в map для тела outbox-события.
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.instanceStatusFromName` — instanceStatusFromName парсит строковое имя статуса из БД в domain.InstanceStatus.
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.instanceStatusName` — instanceStatusName конвертирует domain.InstanceStatus в строковое имя для хранения в БД.
 - `github.com/PRO-Robotech/kacho-compute/internal/repo.invalidPageTokenErr` — invalidPageTokenErr оборачивает ошибку decodePageToken в gRPC InvalidArgument (page_token — клиентский input, не leak'ать raw repo-error).
 - `github.com/PRO-Robotech/kacho-compute/internal/repo.isAttachedDisksDiskIDUniqViolation` — isAttachedDisksDiskIDUniqViolation — true если 23505 пришла именно на индекс `attached_disks_disk_id_uniq` (миграция 0007, KAC-90).
 - `github.com/PRO-Robotech/kacho-compute/internal/repo.isFKViolation` — isFKViolation — Postgres foreign_key_violation (SQLSTATE 23503).
@@ -312,50 +312,50 @@ Generated from L2 note `l2-zones.md`.
 - `github.com/PRO-Robotech/kacho-compute/internal/repo.isNilPtr[*github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1.PlacementPolicy]` — (undocumented — see C4)
 - `github.com/PRO-Robotech/kacho-compute/internal/repo.isUniqueViolation` — isUniqueViolation — Postgres unique-constraint violation (SQLSTATE 23505).
 - `github.com/PRO-Robotech/kacho-compute/internal/repo.marshalJSONB` — marshalJSONB сериализует v в JSONB-байты.
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.marshalNilable` — (undocumented — see C4)
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.marshalNilable` — marshalNilable сериализует OneToOneNat в JSONB; nil → NULL.
 - `github.com/PRO-Robotech/kacho-compute/internal/repo.marshalProtoJSONB[*github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1.Application]` — (undocumented — see C4)
 - `github.com/PRO-Robotech/kacho-compute/internal/repo.marshalProtoJSONB[*github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1.DiskPlacementPolicy]` — (undocumented — see C4)
 - `github.com/PRO-Robotech/kacho-compute/internal/repo.marshalProtoJSONB[*github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1.HardwareGeneration]` — (undocumented — see C4)
 - `github.com/PRO-Robotech/kacho-compute/internal/repo.marshalProtoJSONB[*github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1.KMSKey]` — (undocumented — see C4)
 - `github.com/PRO-Robotech/kacho-compute/internal/repo.marshalProtoJSONB[*github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1.MetadataOptions]` — (undocumented — see C4)
 - `github.com/PRO-Robotech/kacho-compute/internal/repo.marshalProtoJSONB[*github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1.PlacementPolicy]` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.orEmptyMap` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.orEmptySlice` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.osTypeFromName` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.osTypeName` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.scanDisk` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.scanImage` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.scanInstance` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.scanSnapshot` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.snapshotInsertArgs` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.snapshotPayload` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.snapshotStatusFromName` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.snapshotStatusName` — (undocumented — see C4)
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.orEmptyMap` — orEmptyMap возвращает непустую пустую map вместо nil (для стабильной JSON-сериализации).
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.orEmptySlice` — orEmptySlice возвращает непустой пустой срез вместо nil (для стабильной JSON-сериализации).
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.osTypeFromName` — osTypeFromName парсит строковое имя типа ОС из БД в domain.OsType.
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.osTypeName` — osTypeName конвертирует domain.OsType в строковое имя для хранения в БД.
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.scanDisk` — scanDisk сканирует строку результата запроса в domain.Disk.
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.scanImage` — scanImage сканирует строку результата запроса в domain.Image.
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.scanInstance` — scanInstance сканирует строку результата запроса в domain.Instance (без дочерних NIC/disks).
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.scanSnapshot` — scanSnapshot сканирует строку результата запроса в domain.Snapshot.
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.snapshotInsertArgs` — snapshotInsertArgs формирует список аргументов INSERT для domain.Snapshot в порядке snapshotCols.
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.snapshotPayload` — snapshotPayload сериализует domain.Snapshot в map для тела outbox-события.
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.snapshotStatusFromName` — snapshotStatusFromName парсит строковое имя статуса из БД в domain.SnapshotStatus.
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.snapshotStatusName` — snapshotStatusName конвертирует domain.SnapshotStatus в строковое имя для хранения в БД.
 - `github.com/PRO-Robotech/kacho-compute/internal/repo.unmarshalJSONB` — unmarshalJSONB десериализует JSONB-байты в target.
 - `github.com/PRO-Robotech/kacho-compute/internal/repo.unmarshalProtoJSONB` — unmarshalProtoJSONB десериализует JSONB-байты в proto-сообщение (target должен быть ненулевым указателем).
 - `github.com/PRO-Robotech/kacho-compute/internal/repo.wrapPgErr` — wrapPgErr классифицирует pgx-ошибку и возвращает sentinel-ошибку из service-пакета.
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.zoneStatusFromName` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/repo.zoneStatusName` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/service.defaultCoreFraction` — (undocumented — see C4)
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.zoneStatusFromName` — zoneStatusFromName парсит строковое имя статуса из БД в domain.ZoneStatus.
+- `github.com/PRO-Robotech/kacho-compute/internal/repo.zoneStatusName` — zoneStatusName конвертирует domain.ZoneStatus в строковое имя для хранения в БД.
+- `github.com/PRO-Robotech/kacho-compute/internal/service.defaultCoreFraction` — defaultCoreFraction возвращает core_fraction, подставляя 100 для нулевого значения.
 - `github.com/PRO-Robotech/kacho-compute/internal/service.ephemeralAddressIDs` — ephemeralAddressIDs возвращает id всех Address-ресурсов, которые compute создал для NIC-ей этого инстанса (internal — непустой PrimaryV4AddressID; external — PrimaryV4Nat.AddressID при Ephemeral=true).
-- `github.com/PRO-Robotech/kacho-compute/internal/service.findNIC` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/service.fqdn` — (undocumented — see C4)
+- `github.com/PRO-Robotech/kacho-compute/internal/service.findNIC` — findNIC ищет NIC ВМ по index; пустой index при единственном NIC возвращает его.
+- `github.com/PRO-Robotech/kacho-compute/internal/service.fqdn` — fqdn строит FQDN ВМ из hostname либо из id (синтетический auto-домен).
 - `github.com/PRO-Robotech/kacho-compute/internal/service.invalidArg` — invalidArg формирует gRPC InvalidArgument с FieldViolation-деталью.
 - `github.com/PRO-Robotech/kacho-compute/internal/service.mapLifecycleErr` — mapLifecycleErr маппит ошибку SetStatusCAS в gRPC-status: ErrFailedPrecondition от CAS-промаха («status != expected») транслируется в FailedPrecondition с verbatim YC-style precondMsg ("Instance is not running"/"...
 - `github.com/PRO-Robotech/kacho-compute/internal/service.mapRepoErr` — mapRepoErr — единая трансляция repo-sentinel в gRPC status (копия VPC).
 - `github.com/PRO-Robotech/kacho-compute/internal/service.mapZoneRefErr` — mapZoneRefErr транслирует ошибку existence-check zone_id (через ZoneRegistry — kacho-vpc InternalZoneService либо локальная таблица `zones`) в gRPC-status, сохраняя текущий контракт compute: неизвестная зона → InvalidArgument "Zone <id> not found" (паритет с предыдущей логикой; CLAUDE.md §4.1, §6).
-- `github.com/PRO-Robotech/kacho-compute/internal/service.maxInt64` — (undocumented — see C4)
+- `github.com/PRO-Robotech/kacho-compute/internal/service.maxInt64` — maxInt64 возвращает большее из двух int64.
 - `github.com/PRO-Robotech/kacho-compute/internal/service.nicAddressName` — nicAddressName / nicNatAddressName — имена эфемерных VPC Address-ресурсов, создаваемых для NIC'а.
-- `github.com/PRO-Robotech/kacho-compute/internal/service.nicNatAddressName` — (undocumented — see C4)
+- `github.com/PRO-Robotech/kacho-compute/internal/service.nicNatAddressName` — nicNatAddressName возвращает имя эфемерного VPC NAT-Address-ресурса для NIC'а.
 - `github.com/PRO-Robotech/kacho-compute/internal/service.nicResourceIDs` — nicResourceIDs возвращает id kacho-vpc NetworkInterface-ресурсов, на которые ссылаются NIC-и инстанса (пусто для legacy / skip-peer NIC-ей).
 - `github.com/PRO-Robotech/kacho-compute/internal/service.nicResourceName` — nicResourceName — имя kacho-vpc NetworkInterface-ресурса, создаваемого для NIC'а инстанса (уникально в пределах folder; ≤63 символов, начинается с буквы).
-- `github.com/PRO-Robotech/kacho-compute/internal/service.orDefault` — (undocumented — see C4)
+- `github.com/PRO-Robotech/kacho-compute/internal/service.orDefault` — orDefault возвращает v либо def, если v пуст.
 - `github.com/PRO-Robotech/kacho-compute/internal/service.reservedNatAddressIDs` — reservedNatAddressIDs возвращает id reserved (Ephemeral=false) external NAT-адресов, на которые ссылаются NIC-и инстанса.
 - `github.com/PRO-Robotech/kacho-compute/internal/service.stripSentinel` — stripSentinel — извлекает «полезную» часть сообщения (после «sentinel: »), чтобы выдать клиенту verbatim text без internal-обёртки sentinel-ошибки.
-- `github.com/PRO-Robotech/kacho-compute/internal/service.synthExternalIP` — (undocumented — see C4)
-- `github.com/PRO-Robotech/kacho-compute/internal/service.synthInternalIP` — (undocumented — see C4)
+- `github.com/PRO-Robotech/kacho-compute/internal/service.synthExternalIP` — synthExternalIP возвращает синтетический внешний IPv4 для i-го NIC (control-plane-only режим).
+- `github.com/PRO-Robotech/kacho-compute/internal/service.synthInternalIP` — synthInternalIP возвращает синтетический внутренний IPv4 для i-го NIC (control-plane-only режим).
 - `github.com/PRO-Robotech/kacho-compute/internal/service.validateIPInSubnet` — validateIPInSubnet проверяет, что manual IPv4 (`primary_v4_address_spec.address`) принадлежит одному из v4-CIDR-блоков подсети.
-- `github.com/PRO-Robotech/kacho-compute/internal/service.validateResources` — (undocumented — see C4)
+- `github.com/PRO-Robotech/kacho-compute/internal/service.validateResources` — validateResources проверяет cores/memory/core_fraction resources_spec ВМ → InvalidArgument.
 
 ## Exported signatures
 

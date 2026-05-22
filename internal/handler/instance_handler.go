@@ -205,6 +205,8 @@ func (h *InstanceHandler) Restart(ctx context.Context, req *computev1.RestartIns
 	return h.lifecycle(ctx, req.InstanceId, h.svc.Restart)
 }
 
+// lifecycle — общий хелпер lifecycle-RPC (Start/Stop/Restart): проверяет id,
+// сверяет folder-ownership и запускает переданную сервис-операцию.
 func (h *InstanceHandler) lifecycle(ctx context.Context, id string, fn func(context.Context, string) (*operations.Operation, error)) (*operationpb.Operation, error) {
 	if id == "" {
 		return nil, status.Error(codes.InvalidArgument, "instance_id required")
@@ -407,6 +409,8 @@ func (h *InstanceHandler) ListOperations(ctx context.Context, req *computev1.Lis
 
 // ---- conversion helpers ----
 
+// diskSourceFromSpec конвертирует proto AttachedDiskSpec в доменный
+// DiskSourceSpec (existing disk_id либо параметры нового диска).
 func diskSourceFromSpec(s *computev1.AttachedDiskSpec) svc.DiskSourceSpec {
 	if s == nil {
 		return svc.DiskSourceSpec{}
@@ -429,6 +433,7 @@ func diskSourceFromSpec(s *computev1.AttachedDiskSpec) svc.DiskSourceSpec {
 	return out
 }
 
+// nicSpecFromProto конвертирует proto NetworkInterfaceSpec в доменный NICSpec.
 func nicSpecFromProto(n *computev1.NetworkInterfaceSpec) svc.NICSpec {
 	out := svc.NICSpec{
 		SubnetID:         n.GetSubnetId(),

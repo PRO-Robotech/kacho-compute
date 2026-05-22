@@ -39,7 +39,14 @@ func domainToMap(v any) map[string]any {
 	return m
 }
 
-func diskPayload(d *domain.Disk) map[string]any          { return domainToMap(d) }
-func imagePayload(i *domain.Image) map[string]any        { return domainToMap(i) }
-func snapshotPayload(s *domain.Snapshot) map[string]any  { return domainToMap(s) }
+// diskPayload сериализует domain.Disk в map для тела outbox-события.
+func diskPayload(d *domain.Disk) map[string]any { return domainToMap(d) }
+
+// imagePayload сериализует domain.Image в map для тела outbox-события.
+func imagePayload(i *domain.Image) map[string]any { return domainToMap(i) }
+
+// snapshotPayload сериализует domain.Snapshot в map для тела outbox-события.
+func snapshotPayload(s *domain.Snapshot) map[string]any { return domainToMap(s) }
+
+// instancePayload сериализует domain.Instance в map для тела outbox-события.
 func instancePayload(in *domain.Instance) map[string]any { return domainToMap(in) }

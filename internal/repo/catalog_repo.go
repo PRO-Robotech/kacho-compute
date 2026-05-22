@@ -396,6 +396,7 @@ func (s *ZoneRepoSource) ListZones(ctx context.Context, pageSize int64, pageToke
 	return out, next, nil
 }
 
+// zoneStatusName конвертирует domain.ZoneStatus в строковое имя для хранения в БД.
 func zoneStatusName(s domain.ZoneStatus) string {
 	switch s {
 	case domain.ZoneStatusUp:
@@ -407,6 +408,7 @@ func zoneStatusName(s domain.ZoneStatus) string {
 	}
 }
 
+// zoneStatusFromName парсит строковое имя статуса из БД в domain.ZoneStatus.
 func zoneStatusFromName(s string) domain.ZoneStatus {
 	switch s {
 	case "UP":

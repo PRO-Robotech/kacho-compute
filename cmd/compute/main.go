@@ -76,6 +76,8 @@ type services struct {
 	instance *service.InstanceService
 }
 
+// runServe поднимает kacho-compute: pool, peer-клиенты, бизнес-сервисы,
+// public/internal gRPC-листенеры и Operations-worker; блокируется до SIGTERM/SIGINT.
 func runServe(cfg config.Config) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
@@ -263,6 +265,7 @@ func dialPeers(cfg config.Config, logger *slog.Logger) (service.ProjectClient, s
 	return clients.NewProjectClient(iamConn), clients.NewVPCClient(vpcConn, vpcInternalConn), []*grpc.ClientConn{iamConn, vpcConn, vpcInternalConn}, nil
 }
 
+// dialPeer открывает gRPC-соединение к peer-сервису по addr, с TLS- или insecure-креденшелами.
 func dialPeer(addr string, useTLS bool) (*grpc.ClientConn, error) {
 	var creds credentials.TransportCredentials
 	if useTLS {
@@ -364,6 +367,7 @@ func registerInternalServices(srv *grpc.Server, svcs *services, pool *pgxpool.Po
 	computev1.RegisterInternalRegionServiceServer(srv, handler.NewInternalRegionHandler(svcs.region))
 }
 
+// runMigrate применяет goose-миграции схемы kacho_compute в заданном направлении (up/down/status/...).
 func runMigrate(cfg config.Config, direction string) {
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("postgres"); err != nil {

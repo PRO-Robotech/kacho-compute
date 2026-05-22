@@ -21,7 +21,9 @@ const (
 )
 
 const (
+	// relationViewer — FGA-отношение read-only доступа к объекту.
 	relationViewer = "viewer"
+	// relationEditor — FGA-отношение доступа на изменение объекта.
 	relationEditor = "editor"
 )
 
