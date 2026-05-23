@@ -2,6 +2,7 @@ package check
 
 import (
 	"context"
+	"strings"
 
 	"google.golang.org/grpc"
 
@@ -22,6 +23,10 @@ func NewIAMCheckClient(conn grpc.ClientConnInterface) *IAMCheckClient {
 }
 
 // Check вызывает `InternalIAMService.Check`.
+//
+// Когда IAM возвращает allowed=false с reason "no path" (нет FGA-tuple для
+// объекта), Check возвращает authz.ErrNoPath — сигнал interceptor'у пропустить
+// запрос к handler'у (который вернёт NOT_FOUND из DB) вместо 403.
 func (c *IAMCheckClient) Check(ctx context.Context, subjectID, relation, object string) (bool, error) {
 	resp, err := c.cli.Check(ctx, &iamv1.CheckRequest{
 		SubjectId: subjectID,
@@ -30,6 +35,9 @@ func (c *IAMCheckClient) Check(ctx context.Context, subjectID, relation, object 
 	})
 	if err != nil {
 		return false, err
+	}
+	if !resp.GetAllowed() && strings.Contains(resp.GetReason(), "no path") {
+		return false, authz.ErrNoPath
 	}
 	return resp.GetAllowed(), nil
 }
