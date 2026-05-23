@@ -52,6 +52,23 @@ listFilter:
   # Degraded mode: on iam error → bypass filter (insecure; default false).
   failOpen: false
 
+# ==========================================================================
+# KAC-133 — write-side OpenFGA: publish hierarchy tuples after Create
+# ==========================================================================
+# When enabled=true + openfgaEndpoint + storeId are all set, each successful
+# Disk/Image/Snapshot/Instance Create worker publishes:
+#   compute_<type>:<id>#project@project:<project_id>
+# Without this tuple the per-resource Check (Get/Update/Delete) has no path
+# to the project role-binding → fail-closed DENY (authz.no_path).
+fgaTupleWrite:
+  enabled: false
+  openfgaEndpoint: ""
+  storeIdSecretName: kacho-iam-openfga-store
+  storeIdSecretKey: store_id
+  modelIdSecretName: openfga-model-id
+  modelIdSecretKey: current
+  timeoutMs: 2000
+
 # authzIam — KAC-127 Phase 4 ListObjects + KAC-108 per-RPC Check both target
 # the same kacho-iam internal listener.
 authzIam:

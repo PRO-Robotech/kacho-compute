@@ -93,6 +93,27 @@ spec:
             - name: KACHO_COMPUTE_LIST_FILTER_FAIL_OPEN
               value: "{{ .failOpen }}"
             {{- end }}
+            {{- with .Values.fgaTupleWrite }}
+            # KAC-133: write-side OpenFGA — publish hierarchy tuples after Create.
+            - name: KACHO_COMPUTE_FGA_TUPLE_WRITE_ENABLED
+              value: "{{ .enabled }}"
+            - name: KACHO_COMPUTE_FGA_ENDPOINT
+              value: "{{ .openfgaEndpoint }}"
+            - name: KACHO_COMPUTE_FGA_STORE_ID
+              valueFrom:
+                secretKeyRef:
+                  name: "{{ .storeIdSecretName }}"
+                  key: "{{ .storeIdSecretKey }}"
+                  optional: true
+            - name: KACHO_COMPUTE_FGA_MODEL_ID
+              valueFrom:
+                secretKeyRef:
+                  name: "{{ .modelIdSecretName }}"
+                  key: "{{ .modelIdSecretKey }}"
+                  optional: true
+            - name: KACHO_COMPUTE_FGA_TUPLE_WRITE_TIMEOUT_MS
+              value: "{{ .timeoutMs }}"
+            {{- end }}
           resources:
             requests:
               cpu: {{ .Values.resources.requests.cpu }}
