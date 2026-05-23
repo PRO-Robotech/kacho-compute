@@ -5,6 +5,11 @@
 // KAC-106 (E1): peer для project-existence-check переключён с
 // kacho-resource-manager.FolderService.Get на kacho-iam.ProjectService.Get.
 // File-name retained for git-history continuity.
+//
+// W1.4 (KAC-140): outgoing ctx обёрнут `auth.PropagateOutgoing` — peer-call
+// несёт `x-kacho-principal-*` MD, чтобы iam-side scope-filter увидел реального
+// caller'а (раньше — anonymous/system, NOT_FOUND, тихий fail Operation; mirror
+// of kacho-vpc KAC-127 Bug-2 + W1.4 lift to corelib).
 package clients
 
 import (
@@ -16,6 +21,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/PRO-Robotech/kacho-corelib/auth"
 	"github.com/PRO-Robotech/kacho-corelib/retry"
 	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
 )
@@ -54,7 +60,7 @@ func (c *ProjectClient) Exists(ctx context.Context, projectID string) (bool, err
 
 	var exists bool
 	err := retry.OnUnavailable(ctx, func(ctx context.Context) error {
-		_, rerr := c.cli.Get(ctx, &iamv1.GetProjectRequest{ProjectId: projectID})
+		_, rerr := c.cli.Get(auth.PropagateOutgoing(ctx), &iamv1.GetProjectRequest{ProjectId: projectID})
 		if rerr != nil {
 			st, ok := status.FromError(rerr)
 			if ok && st.Code() == codes.NotFound {

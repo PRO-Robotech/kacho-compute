@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	"github.com/PRO-Robotech/kacho-corelib/auth"
 	"github.com/PRO-Robotech/kacho-corelib/retry"
 	operationv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/operation"
 	vpcv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/vpc/v1"
@@ -67,7 +68,7 @@ func (c *VPCClient) GetSubnet(ctx context.Context, subnetID string) (service.Sub
 	var info service.SubnetInfo
 	var found bool
 	err := retry.OnUnavailable(ctx, func(ctx context.Context) error {
-		sub, rerr := c.subnets.Get(ctx, &vpcv1.GetSubnetRequest{SubnetId: subnetID})
+		sub, rerr := c.subnets.Get(auth.PropagateOutgoing(ctx), &vpcv1.GetSubnetRequest{SubnetId: subnetID})
 		if rerr != nil {
 			if st, ok := status.FromError(rerr); ok && st.Code() == codes.NotFound {
 				found = false
@@ -89,7 +90,7 @@ func (c *VPCClient) GetSubnet(ctx context.Context, subnetID string) (service.Sub
 func (c *VPCClient) SecurityGroupExists(ctx context.Context, sgID string) (bool, error) {
 	var found bool
 	err := retry.OnUnavailable(ctx, func(ctx context.Context) error {
-		_, rerr := c.sgs.Get(ctx, &vpcv1.GetSecurityGroupRequest{SecurityGroupId: sgID})
+		_, rerr := c.sgs.Get(auth.PropagateOutgoing(ctx), &vpcv1.GetSecurityGroupRequest{SecurityGroupId: sgID})
 		if rerr != nil {
 			if st, ok := status.FromError(rerr); ok && st.Code() == codes.NotFound {
 				found = false
@@ -155,7 +156,7 @@ func (c *VPCClient) GetExternalAddress(ctx context.Context, addressID string) (s
 	var out service.VPCAddress
 	var found bool
 	err := retry.OnUnavailable(ctx, func(ctx context.Context) error {
-		a, rerr := c.addrs.Get(ctx, &vpcv1.GetAddressRequest{AddressId: addressID})
+		a, rerr := c.addrs.Get(auth.PropagateOutgoing(ctx), &vpcv1.GetAddressRequest{AddressId: addressID})
 		if rerr != nil {
 			if st, ok := status.FromError(rerr); ok && st.Code() == codes.NotFound {
 				found = false
@@ -178,7 +179,7 @@ func (c *VPCClient) DeleteAddress(ctx context.Context, addressID string) error {
 	var op *operationv1.Operation
 	err := retry.OnUnavailable(ctx, func(ctx context.Context) error {
 		var rerr error
-		op, rerr = c.addrs.Delete(ctx, &vpcv1.DeleteAddressRequest{AddressId: addressID})
+		op, rerr = c.addrs.Delete(auth.PropagateOutgoing(ctx), &vpcv1.DeleteAddressRequest{AddressId: addressID})
 		if rerr != nil {
 			if st, ok := status.FromError(rerr); ok && st.Code() == codes.NotFound {
 				op = nil
@@ -209,7 +210,7 @@ func (c *VPCClient) DeleteAddress(ctx context.Context, addressID string) error {
 // best-effort (warn + continue — IP уже выделен).
 func (c *VPCClient) SetAddressReference(ctx context.Context, addressID, referrerType, referrerID, referrerName string) error {
 	return retry.OnUnavailable(ctx, func(ctx context.Context) error {
-		_, rerr := c.internalAddrs.SetAddressReference(ctx, &vpcv1.SetAddressReferenceRequest{
+		_, rerr := c.internalAddrs.SetAddressReference(auth.PropagateOutgoing(ctx), &vpcv1.SetAddressReferenceRequest{
 			AddressId:    addressID,
 			ReferrerType: referrerType,
 			ReferrerId:   referrerID,
@@ -226,7 +227,7 @@ func (c *VPCClient) SetAddressReference(ctx context.Context, addressID, referrer
 // (адрес уже удалён) → трактуется как успех (нечего снимать).
 func (c *VPCClient) ClearAddressReference(ctx context.Context, addressID string) error {
 	return retry.OnUnavailable(ctx, func(ctx context.Context) error {
-		_, rerr := c.internalAddrs.ClearAddressReference(ctx, &vpcv1.ClearAddressReferenceRequest{AddressId: addressID})
+		_, rerr := c.internalAddrs.ClearAddressReference(auth.PropagateOutgoing(ctx), &vpcv1.ClearAddressReferenceRequest{AddressId: addressID})
 		if rerr != nil {
 			if st, ok := status.FromError(rerr); ok && st.Code() == codes.NotFound {
 				return nil
@@ -247,7 +248,7 @@ func (c *VPCClient) ClearAddressReference(ctx context.Context, addressID string)
 // best-effort (warn + continue — IP уже выделен).
 func (c *VPCClient) MarkAddressEphemeralInUse(ctx context.Context, addressID, referrerType, referrerID, referrerName string) error {
 	return retry.OnUnavailable(ctx, func(ctx context.Context) error {
-		_, rerr := c.internalAddrs.MarkAddressEphemeralInUse(ctx, &vpcv1.MarkAddressEphemeralInUseRequest{
+		_, rerr := c.internalAddrs.MarkAddressEphemeralInUse(auth.PropagateOutgoing(ctx), &vpcv1.MarkAddressEphemeralInUseRequest{
 			AddressId:    addressID,
 			ReferrerType: referrerType,
 			ReferrerId:   referrerID,
@@ -267,7 +268,7 @@ func (c *VPCClient) CreateNetworkInterface(ctx context.Context, req service.Crea
 	var op *operationv1.Operation
 	if err := retry.OnUnavailable(ctx, func(ctx context.Context) error {
 		var rerr error
-		op, rerr = c.nics.Create(ctx, &vpcv1.CreateNetworkInterfaceRequest{
+		op, rerr = c.nics.Create(auth.PropagateOutgoing(ctx), &vpcv1.CreateNetworkInterfaceRequest{
 			ProjectId:        req.ProjectID,
 			Name:             req.Name,
 			SubnetId:         req.SubnetID,
@@ -296,7 +297,7 @@ func (c *VPCClient) GetNetworkInterface(ctx context.Context, nicID string) (serv
 	var info service.NICInfo
 	var found bool
 	err := retry.OnUnavailable(ctx, func(ctx context.Context) error {
-		ni, rerr := c.nics.Get(ctx, &vpcv1.GetNetworkInterfaceRequest{NetworkInterfaceId: nicID})
+		ni, rerr := c.nics.Get(auth.PropagateOutgoing(ctx), &vpcv1.GetNetworkInterfaceRequest{NetworkInterfaceId: nicID})
 		if rerr != nil {
 			if st, ok := status.FromError(rerr); ok && st.Code() == codes.NotFound {
 				found = false
@@ -326,7 +327,7 @@ func (c *VPCClient) GetNetworkInterface(ctx context.Context, nicID string) (serv
 // AttachNetworkInterface привязывает NIC к инстансу (поллит Operation).
 func (c *VPCClient) AttachNetworkInterface(ctx context.Context, nicID, instanceID, index string) error {
 	return c.runNICOp(ctx, func(ctx context.Context) (*operationv1.Operation, error) {
-		return c.nics.AttachToInstance(ctx, &vpcv1.AttachNetworkInterfaceRequest{
+		return c.nics.AttachToInstance(auth.PropagateOutgoing(ctx), &vpcv1.AttachNetworkInterfaceRequest{
 			NetworkInterfaceId: nicID, InstanceId: instanceID, Index: index,
 		})
 	})
@@ -335,14 +336,14 @@ func (c *VPCClient) AttachNetworkInterface(ctx context.Context, nicID, instanceI
 // DetachNetworkInterface отвязывает NIC от инстанса (best-effort; NotFound = успех).
 func (c *VPCClient) DetachNetworkInterface(ctx context.Context, nicID string) error {
 	return c.runNICOpTolerant(ctx, func(ctx context.Context) (*operationv1.Operation, error) {
-		return c.nics.DetachFromInstance(ctx, &vpcv1.DetachNetworkInterfaceRequest{NetworkInterfaceId: nicID})
+		return c.nics.DetachFromInstance(auth.PropagateOutgoing(ctx), &vpcv1.DetachNetworkInterfaceRequest{NetworkInterfaceId: nicID})
 	})
 }
 
 // DeleteNetworkInterface удаляет NIC-ресурс (best-effort; NotFound = успех).
 func (c *VPCClient) DeleteNetworkInterface(ctx context.Context, nicID string) error {
 	return c.runNICOpTolerant(ctx, func(ctx context.Context) (*operationv1.Operation, error) {
-		return c.nics.Delete(ctx, &vpcv1.DeleteNetworkInterfaceRequest{NetworkInterfaceId: nicID})
+		return c.nics.Delete(auth.PropagateOutgoing(ctx), &vpcv1.DeleteNetworkInterfaceRequest{NetworkInterfaceId: nicID})
 	})
 }
 
@@ -409,7 +410,7 @@ func (c *VPCClient) createAddressAndWait(ctx context.Context, req *vpcv1.CreateA
 	var op *operationv1.Operation
 	if err := retry.OnUnavailable(ctx, func(ctx context.Context) error {
 		var rerr error
-		op, rerr = c.addrs.Create(ctx, req)
+		op, rerr = c.addrs.Create(auth.PropagateOutgoing(ctx), req)
 		return rerr
 	}); err != nil {
 		return nil, err
@@ -448,7 +449,7 @@ func (c *VPCClient) waitOperation(ctx context.Context, op *operationv1.Operation
 		var got *operationv1.Operation
 		if err := retry.OnUnavailable(ctx, func(ctx context.Context) error {
 			var rerr error
-			got, rerr = c.ops.Get(ctx, &operationv1.GetOperationRequest{OperationId: id})
+			got, rerr = c.ops.Get(auth.PropagateOutgoing(ctx), &operationv1.GetOperationRequest{OperationId: id})
 			return rerr
 		}); err != nil {
 			return nil, err
