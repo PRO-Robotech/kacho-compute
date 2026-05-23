@@ -67,7 +67,7 @@ func (c *VPCClient) GetSubnet(ctx context.Context, subnetID string) (service.Sub
 	var info service.SubnetInfo
 	var found bool
 	err := retry.OnUnavailable(ctx, func(ctx context.Context) error {
-		sub, rerr := c.subnets.Get(ctx, &vpcv1.GetSubnetRequest{SubnetId: subnetID})
+		sub, rerr := c.subnets.Get(withPrincipalMD(ctx), &vpcv1.GetSubnetRequest{SubnetId: subnetID})
 		if rerr != nil {
 			if st, ok := status.FromError(rerr); ok && st.Code() == codes.NotFound {
 				found = false
@@ -89,7 +89,7 @@ func (c *VPCClient) GetSubnet(ctx context.Context, subnetID string) (service.Sub
 func (c *VPCClient) SecurityGroupExists(ctx context.Context, sgID string) (bool, error) {
 	var found bool
 	err := retry.OnUnavailable(ctx, func(ctx context.Context) error {
-		_, rerr := c.sgs.Get(ctx, &vpcv1.GetSecurityGroupRequest{SecurityGroupId: sgID})
+		_, rerr := c.sgs.Get(withPrincipalMD(ctx), &vpcv1.GetSecurityGroupRequest{SecurityGroupId: sgID})
 		if rerr != nil {
 			if st, ok := status.FromError(rerr); ok && st.Code() == codes.NotFound {
 				found = false
@@ -118,7 +118,7 @@ func (c *VPCClient) CreateInternalAddress(ctx context.Context, folderID, name, s
 			},
 		},
 	}
-	addr, err := c.createAddressAndWait(ctx, req)
+	addr, err := c.createAddressAndWait(withPrincipalMD(ctx), req)
 	if err != nil {
 		return service.VPCAddress{}, err
 	}
@@ -139,7 +139,7 @@ func (c *VPCClient) CreateExternalAddress(ctx context.Context, folderID, name, z
 			ExternalIpv4AddressSpec: &vpcv1.ExternalIpv4AddressSpec{ZoneId: zoneID},
 		},
 	}
-	addr, err := c.createAddressAndWait(ctx, req)
+	addr, err := c.createAddressAndWait(withPrincipalMD(ctx), req)
 	if err != nil {
 		return service.VPCAddress{}, err
 	}
@@ -155,7 +155,7 @@ func (c *VPCClient) GetExternalAddress(ctx context.Context, addressID string) (s
 	var out service.VPCAddress
 	var found bool
 	err := retry.OnUnavailable(ctx, func(ctx context.Context) error {
-		a, rerr := c.addrs.Get(ctx, &vpcv1.GetAddressRequest{AddressId: addressID})
+		a, rerr := c.addrs.Get(withPrincipalMD(ctx), &vpcv1.GetAddressRequest{AddressId: addressID})
 		if rerr != nil {
 			if st, ok := status.FromError(rerr); ok && st.Code() == codes.NotFound {
 				found = false
@@ -178,7 +178,7 @@ func (c *VPCClient) DeleteAddress(ctx context.Context, addressID string) error {
 	var op *operationv1.Operation
 	err := retry.OnUnavailable(ctx, func(ctx context.Context) error {
 		var rerr error
-		op, rerr = c.addrs.Delete(ctx, &vpcv1.DeleteAddressRequest{AddressId: addressID})
+		op, rerr = c.addrs.Delete(withPrincipalMD(ctx), &vpcv1.DeleteAddressRequest{AddressId: addressID})
 		if rerr != nil {
 			if st, ok := status.FromError(rerr); ok && st.Code() == codes.NotFound {
 				op = nil
@@ -267,7 +267,7 @@ func (c *VPCClient) CreateNetworkInterface(ctx context.Context, req service.Crea
 	var op *operationv1.Operation
 	if err := retry.OnUnavailable(ctx, func(ctx context.Context) error {
 		var rerr error
-		op, rerr = c.nics.Create(ctx, &vpcv1.CreateNetworkInterfaceRequest{
+		op, rerr = c.nics.Create(withPrincipalMD(ctx), &vpcv1.CreateNetworkInterfaceRequest{
 			ProjectId:        req.ProjectID,
 			Name:             req.Name,
 			SubnetId:         req.SubnetID,
@@ -296,7 +296,7 @@ func (c *VPCClient) GetNetworkInterface(ctx context.Context, nicID string) (serv
 	var info service.NICInfo
 	var found bool
 	err := retry.OnUnavailable(ctx, func(ctx context.Context) error {
-		ni, rerr := c.nics.Get(ctx, &vpcv1.GetNetworkInterfaceRequest{NetworkInterfaceId: nicID})
+		ni, rerr := c.nics.Get(withPrincipalMD(ctx), &vpcv1.GetNetworkInterfaceRequest{NetworkInterfaceId: nicID})
 		if rerr != nil {
 			if st, ok := status.FromError(rerr); ok && st.Code() == codes.NotFound {
 				found = false
@@ -326,7 +326,7 @@ func (c *VPCClient) GetNetworkInterface(ctx context.Context, nicID string) (serv
 // AttachNetworkInterface привязывает NIC к инстансу (поллит Operation).
 func (c *VPCClient) AttachNetworkInterface(ctx context.Context, nicID, instanceID, index string) error {
 	return c.runNICOp(ctx, func(ctx context.Context) (*operationv1.Operation, error) {
-		return c.nics.AttachToInstance(ctx, &vpcv1.AttachNetworkInterfaceRequest{
+		return c.nics.AttachToInstance(withPrincipalMD(ctx), &vpcv1.AttachNetworkInterfaceRequest{
 			NetworkInterfaceId: nicID, InstanceId: instanceID, Index: index,
 		})
 	})
@@ -335,14 +335,14 @@ func (c *VPCClient) AttachNetworkInterface(ctx context.Context, nicID, instanceI
 // DetachNetworkInterface отвязывает NIC от инстанса (best-effort; NotFound = успех).
 func (c *VPCClient) DetachNetworkInterface(ctx context.Context, nicID string) error {
 	return c.runNICOpTolerant(ctx, func(ctx context.Context) (*operationv1.Operation, error) {
-		return c.nics.DetachFromInstance(ctx, &vpcv1.DetachNetworkInterfaceRequest{NetworkInterfaceId: nicID})
+		return c.nics.DetachFromInstance(withPrincipalMD(ctx), &vpcv1.DetachNetworkInterfaceRequest{NetworkInterfaceId: nicID})
 	})
 }
 
 // DeleteNetworkInterface удаляет NIC-ресурс (best-effort; NotFound = успех).
 func (c *VPCClient) DeleteNetworkInterface(ctx context.Context, nicID string) error {
 	return c.runNICOpTolerant(ctx, func(ctx context.Context) (*operationv1.Operation, error) {
-		return c.nics.Delete(ctx, &vpcv1.DeleteNetworkInterfaceRequest{NetworkInterfaceId: nicID})
+		return c.nics.Delete(withPrincipalMD(ctx), &vpcv1.DeleteNetworkInterfaceRequest{NetworkInterfaceId: nicID})
 	})
 }
 
@@ -409,7 +409,7 @@ func (c *VPCClient) createAddressAndWait(ctx context.Context, req *vpcv1.CreateA
 	var op *operationv1.Operation
 	if err := retry.OnUnavailable(ctx, func(ctx context.Context) error {
 		var rerr error
-		op, rerr = c.addrs.Create(ctx, req)
+		op, rerr = c.addrs.Create(withPrincipalMD(ctx), req)
 		return rerr
 	}); err != nil {
 		return nil, err
