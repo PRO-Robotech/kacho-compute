@@ -414,18 +414,23 @@ def security_injection_block(prefix, create_path, list_path, body_extra=None):
 
 
 def http_method_block(prefix, base_path):
-    """HTTP method semantics: PUT / DELETE-on-list → 404|405|501."""
+    """HTTP method semantics: PUT / DELETE-on-list → 403|404|405|501.
+
+    api-gateway evaluates authz before routing, so unsupported HTTP verbs on
+    collection endpoints are rejected with 403 (method not in permission catalog)
+    rather than 405. 403 is therefore a valid «not allowed» response here.
+    """
     return [
         Case(id=f"{prefix}-METHOD-PUT-NOT-ALLOWED",
-             title="PUT на List endpoint → 404/405/501",
+             title="PUT на List endpoint → 403/404/405/501",
              classes=["VAL", "NEG"], priority="P3",
              steps=[Step(name="put-list", method="PUT", path=base_path, body={"projectId": "{{_suiteFolderId}}"},
-                         test_script=["pm.test('not allowed', () => pm.expect(pm.response.code).to.be.oneOf([404, 405, 501]));"])]),
+                         test_script=["pm.test('not allowed', () => pm.expect(pm.response.code).to.be.oneOf([403, 404, 405, 501]));"])]),
         Case(id=f"{prefix}-METHOD-DELETE-LIST",
-             title="DELETE на List endpoint (без id) → 404/405/501",
+             title="DELETE на List endpoint (без id) → 403/404/405/501",
              classes=["VAL", "NEG"], priority="P3",
              steps=[Step(name="del-list", method="DELETE", path=base_path,
-                         test_script=["pm.test('not allowed', () => pm.expect(pm.response.code).to.be.oneOf([404, 405, 501]));"])]),
+                         test_script=["pm.test('not allowed', () => pm.expect(pm.response.code).to.be.oneOf([403, 404, 405, 501]));"])]),
     ]
 
 

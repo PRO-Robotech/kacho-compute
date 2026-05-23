@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "a45e140d-29e4-4584-af2f-22e3ca2e69fd",
+    "_postman_id": "3894d4e2-1dc9-4e67-aeee-cf98046dd12f",
     "name": "kacho-compute / newman / snapshot",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -6327,7 +6327,7 @@
       ]
     },
     {
-      "name": "SNAP-METHOD-PUT-NOT-ALLOWED — PUT на List endpoint → 404/405/501",
+      "name": "SNAP-METHOD-PUT-NOT-ALLOWED — PUT на List endpoint → 403/404/405/501",
       "description": "class:VAL | class:NEG | priority:P3",
       "item": [
         {
@@ -6367,7 +6367,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('not allowed', () => pm.expect(pm.response.code).to.be.oneOf([404, 405, 501]));"
+                  "pm.test('not allowed', () => pm.expect(pm.response.code).to.be.oneOf([403, 404, 405, 501]));"
                 ]
               }
             }
@@ -6376,7 +6376,7 @@
       ]
     },
     {
-      "name": "SNAP-METHOD-DELETE-LIST — DELETE на List endpoint (без id) → 404/405/501",
+      "name": "SNAP-METHOD-DELETE-LIST — DELETE на List endpoint (без id) → 403/404/405/501",
       "description": "class:VAL | class:NEG | priority:P3",
       "item": [
         {
@@ -6407,7 +6407,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('not allowed', () => pm.expect(pm.response.code).to.be.oneOf([404, 405, 501]));"
+                  "pm.test('not allowed', () => pm.expect(pm.response.code).to.be.oneOf([403, 404, 405, 501]));"
                 ]
               }
             }

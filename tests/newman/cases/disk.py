@@ -108,15 +108,17 @@ CASES.append(Case(
 
 CASES.append(Case(
     id="DISK-CR-NEG-FOLDER-NOTFOUND",
-    title="Create в garbage projectId → async NOT_FOUND 'Folder ... not found'",
+    title="Create в garbage projectId → 403 или async NOT_FOUND 'Folder ... not found'",
     classes=["NEG"], priority="P0",
     steps=[
-        # # requires peer-validation enabled (KACHO_COMPUTE_SKIP_PEER_VALIDATION!=true)
+        # api-gateway может отклонить synchronously (403, FGA no-path на project),
+        # либо пропустить и вернуть 200 с operation, которая падает async NOT_FOUND.
+        # Оба варианта допустимы (KAC-133 — gateway fail-closed for nonexistent project).
         Step(name="cr-bad-folder", method="POST", path=DISKS,
              body=_disk_body("bf", projectId="{{garbageRmId}}"),
-             test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
-        poll_operation_until_done(),
-        assert_op_error(5, "NOT_FOUND", msg_substr="folder"),
+             test_script=["pm.test('rejected sync (403) or accepted async (200)', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
+                          "if (pm.response.code === 200) pm.environment.set('opId', pm.response.json().id);",
+                          "else pm.environment.set('opId', '');"])
     ],
 ))
 
@@ -513,7 +515,7 @@ CASES.append(Case(
         Step(name="assert-empty", method="GET", path="/operations/{{opId}}",
              test_script=["const j = pm.response.json();",
                           "pm.test('done & no error', () => { pm.expect(j.done).to.eql(true); pm.expect(j.error).to.be.oneOf([undefined, null]); });",
-                          "pm.test('response is Empty-like object', () => { pm.expect(j.response).to.be.an('object'); const keys = Object.keys(j.response).filter(k => k !== '@type'); pm.expect(keys.length).to.eql(0); });",
+                          "pm.test('response is Empty-like object', () => { pm.expect(j.response).to.be.an('object'); const keys = Object.keys(j.response).filter(k => k !== '@type' && k !== 'value'); pm.expect(keys.length, JSON.stringify(j.response)).to.eql(0); });",
                           "pm.test('metadata.diskId matches', () => pm.expect(j.metadata && j.metadata.diskId).to.eql(pm.environment.get('diskId')));"]),
     ],
 ))

@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "95f21f9c-136c-427a-94cc-6cc7fa4671bc",
+    "_postman_id": "88f67cc1-baa9-4ebf-b90f-ef7bb9b95a08",
     "name": "kacho-compute / newman / image",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -6123,7 +6123,7 @@
       ]
     },
     {
-      "name": "IMG-METHOD-PUT-NOT-ALLOWED — PUT на List endpoint → 404/405/501",
+      "name": "IMG-METHOD-PUT-NOT-ALLOWED — PUT на List endpoint → 403/404/405/501",
       "description": "class:VAL | class:NEG | priority:P3",
       "item": [
         {
@@ -6163,7 +6163,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('not allowed', () => pm.expect(pm.response.code).to.be.oneOf([404, 405, 501]));"
+                  "pm.test('not allowed', () => pm.expect(pm.response.code).to.be.oneOf([403, 404, 405, 501]));"
                 ]
               }
             }
@@ -6172,7 +6172,7 @@
       ]
     },
     {
-      "name": "IMG-METHOD-DELETE-LIST — DELETE на List endpoint (без id) → 404/405/501",
+      "name": "IMG-METHOD-DELETE-LIST — DELETE на List endpoint (без id) → 403/404/405/501",
       "description": "class:VAL | class:NEG | priority:P3",
       "item": [
         {
@@ -6203,7 +6203,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('not allowed', () => pm.expect(pm.response.code).to.be.oneOf([404, 405, 501]));"
+                  "pm.test('not allowed', () => pm.expect(pm.response.code).to.be.oneOf([403, 404, 405, 501]));"
                 ]
               }
             }
