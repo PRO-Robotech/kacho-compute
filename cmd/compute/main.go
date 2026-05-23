@@ -112,8 +112,20 @@ func runServe(cfg config.Config) error {
 	// AuthZIAMGRPCAddr пуст → interceptor НЕ навешивается (graceful start без
 	// kacho-iam в dev). Breakglass=true → interceptor навешивается, но всё
 	// пропускает + emit'ит WARN-метрику (dev / emergency).
-	publicUnary := []grpc.UnaryServerInterceptor{handler.TenantUnaryInterceptor(false, productionMode)}
-	publicStream := []grpc.StreamServerInterceptor{handler.TenantStreamInterceptor(false, productionMode)}
+	//
+	// KAC-133: UnaryPrincipalExtract / StreamPrincipalExtract MUST come first —
+	// they read x-kacho-principal-* metadata headers injected by the api-gateway
+	// auth-interceptor and store the real caller Principal in ctx. Without them
+	// the authz interceptor sees the system fallback "user:bootstrap" and denies
+	// every request. Mirrors kacho-vpc/cmd/vpc/main.go (KAC-127 bug-3 fix).
+	publicUnary := []grpc.UnaryServerInterceptor{
+		grpcsrv.UnaryPrincipalExtract(),
+		handler.TenantUnaryInterceptor(false, productionMode),
+	}
+	publicStream := []grpc.StreamServerInterceptor{
+		grpcsrv.StreamPrincipalExtract(),
+		handler.TenantStreamInterceptor(false, productionMode),
+	}
 
 	var authzConn *grpc.ClientConn
 	if cfg.AuthZIAMGRPCAddr != "" {
