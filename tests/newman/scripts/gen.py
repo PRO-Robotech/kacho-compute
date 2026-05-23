@@ -73,6 +73,13 @@ PRE_GLOBAL = [
     "}",
     "pm.environment.set('_suiteFolderId', pm.environment.get('existingProjectId'));",
     "pm.environment.set('_suiteFolderCrossId', pm.environment.get('existingProjectCrossId'));",
+    # KAC-133: inject default JWT (jwtProjectAdminA1) for requests that have no
+    # per-step auth override; mirrors the VPC suite behaviour. Steps that need a
+    # different principal call auth_header() explicitly in their pre_script.
+    "const __defaultJwt = pm.environment.get('jwtProjectAdminA1') || pm.variables.get('jwtProjectAdminA1') || '';",
+    "if (__defaultJwt && !pm.request.headers.has('Authorization')) {",
+    "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __defaultJwt});",
+    "}",
 ]
 
 
