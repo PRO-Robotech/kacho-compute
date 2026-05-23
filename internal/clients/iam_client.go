@@ -14,11 +14,35 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
+	"github.com/PRO-Robotech/kacho-corelib/grpcsrv"
+	"github.com/PRO-Robotech/kacho-corelib/operations"
 	"github.com/PRO-Robotech/kacho-corelib/retry"
 	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
 )
+
+// withPrincipalMD propagates the caller's principal onto the outgoing gRPC
+// metadata (KAC-133, mirrors kacho-vpc/internal/clients/iam_client.go KAC-127 Bug-2).
+//
+// kacho-iam's public ProjectService.Get carries a tenant scope-filter: it
+// returns NOT_FOUND unless the caller is the owning Account's owner. The
+// compute Operation worker validates the project via ProjectService.Get; without
+// forwarding the principal the peer sees an anonymous/system call, returns
+// NOT_FOUND, and Create fails its project-exists check — causing the Operation
+// to error asynchronously so the resource is never persisted.
+func withPrincipalMD(ctx context.Context) context.Context {
+	p := operations.PrincipalFromContext(ctx)
+	if p.ID == "" || p.Type == "" {
+		return ctx
+	}
+	return metadata.AppendToOutgoingContext(ctx,
+		grpcsrv.MDKeyPrincipalType, p.Type,
+		grpcsrv.MDKeyPrincipalID, p.ID,
+		grpcsrv.MDKeyPrincipalDisplay, p.DisplayName,
+	)
+}
 
 // projectExistsTTL — TTL положительного результата Exists.
 const projectExistsTTL = 30 * time.Second
@@ -54,7 +78,7 @@ func (c *ProjectClient) Exists(ctx context.Context, projectID string) (bool, err
 
 	var exists bool
 	err := retry.OnUnavailable(ctx, func(ctx context.Context) error {
-		_, rerr := c.cli.Get(ctx, &iamv1.GetProjectRequest{ProjectId: projectID})
+		_, rerr := c.cli.Get(withPrincipalMD(ctx), &iamv1.GetProjectRequest{ProjectId: projectID})
 		if rerr != nil {
 			st, ok := status.FromError(rerr)
 			if ok && (st.Code() == codes.NotFound || st.Code() == codes.InvalidArgument) {
