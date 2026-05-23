@@ -341,31 +341,31 @@ func PermissionMap() authz.RPCMap {
 		},
 
 		// =========================
-		// DiskType / Zone / Region — read-only catalog (viewer on system:catalog)
+		// DiskType / Zone / Region — read-only catalog (KAC-133: Public=true)
 		// =========================
 		"/kacho.cloud.compute.v1.DiskTypeService/Get": {
-			Relation: relationViewer,
-			Extract:  staticSystemCatalog(),
+			Public: true,
 		},
 		"/kacho.cloud.compute.v1.DiskTypeService/List": {
-			Relation: relationViewer,
-			Extract:  staticSystemCatalog(),
+			Public: true,
 		},
+		// KAC-133: Zone/Region/DiskType catalog reads are public read-only data.
+		// These are also called internally from kacho-vpc (ZoneService/Get for
+		// zone_id validation on Subnet.Create) using system/bootstrap identity
+		// which has no FGA tuples. Making them Public avoids the system:catalog
+		// FGA check while keeping the existing user-facing API accessible without
+		// auth. The FGA audit-trail trade-off is acceptable for catalog reads.
 		"/kacho.cloud.compute.v1.ZoneService/Get": {
-			Relation: relationViewer,
-			Extract:  staticSystemCatalog(),
+			Public: true,
 		},
 		"/kacho.cloud.compute.v1.ZoneService/List": {
-			Relation: relationViewer,
-			Extract:  staticSystemCatalog(),
+			Public: true,
 		},
 		"/kacho.cloud.compute.v1.RegionService/Get": {
-			Relation: relationViewer,
-			Extract:  staticSystemCatalog(),
+			Public: true,
 		},
 		"/kacho.cloud.compute.v1.RegionService/List": {
-			Relation: relationViewer,
-			Extract:  staticSystemCatalog(),
+			Public: true,
 		},
 
 		// =========================
