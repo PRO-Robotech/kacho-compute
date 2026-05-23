@@ -5,6 +5,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/PRO-Robotech/kacho-corelib/auth"
 	"github.com/PRO-Robotech/kacho-corelib/authz"
 	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
 )
@@ -22,8 +23,13 @@ func NewIAMCheckClient(conn grpc.ClientConnInterface) *IAMCheckClient {
 }
 
 // Check вызывает `InternalIAMService.Check`.
+//
+// W1.4 (KAC-140): outgoing ctx обёрнут `auth.PropagateOutgoing`, чтобы iam-side
+// `grpcsrv.UnaryPrincipalExtract` увидел реального caller'а, а не SystemPrincipal()
+// = user:bootstrap. Mirror of kacho-vpc fix. См.
+// `docs/specs/sub-phase-W1.4-principal-propagation-acceptance.md`.
 func (c *IAMCheckClient) Check(ctx context.Context, subjectID, relation, object string) (bool, error) {
-	resp, err := c.cli.Check(ctx, &iamv1.CheckRequest{
+	resp, err := c.cli.Check(auth.PropagateOutgoing(ctx), &iamv1.CheckRequest{
 		SubjectId: subjectID,
 		Relation:  relation,
 		Object:    object,
