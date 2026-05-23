@@ -23,7 +23,7 @@ func TestDiskHandler_CRUD(t *testing.T) {
 	diskRepo := portmock.NewDiskRepo()
 	ops := portmock.NewOpsRepo()
 	svc := service.NewDiskService(diskRepo, portmock.NewImageRepo(), portmock.NewSnapshotRepo(),
-		portmock.NewDiskTypeRepo(), portmock.NewZoneRepo(), &portmock.ProjectClient{OK: true}, ops)
+		portmock.NewDiskTypeRepo(), portmock.NewZoneRepo(), &portmock.ProjectClient{OK: true}, ops, nil, nil)
 	h := NewDiskHandler(svc, nil)
 	ctx := context.Background()
 

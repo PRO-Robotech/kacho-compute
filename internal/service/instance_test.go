@@ -23,7 +23,7 @@ func newInstanceSvc(t *testing.T, folderOK bool) (*InstanceService, *portmock.In
 	instanceRepo := portmock.NewInstanceRepo().WithDiskRepo(diskRepo)
 	ops := portmock.NewOpsRepo()
 	svc := NewInstanceService(instanceRepo, diskRepo, imgRepo, snapRepo, portmock.NewZoneRepo(),
-		&portmock.ProjectClient{OK: folderOK}, &portmock.VPCClient{SubnetFound: true, SubnetZone: "", SGFound: true, AddrFound: true}, ops, false)
+		&portmock.ProjectClient{OK: folderOK}, &portmock.VPCClient{SubnetFound: true, SubnetZone: "", SGFound: true, AddrFound: true}, ops, false, nil, nil)
 	return svc, instanceRepo, diskRepo, imgRepo, ops
 }
 
@@ -95,7 +95,7 @@ func TestInstance_Create_SubnetNotFound(t *testing.T) {
 	instanceRepo := portmock.NewInstanceRepo().WithDiskRepo(diskRepo)
 	ops := portmock.NewOpsRepo()
 	svc := NewInstanceService(instanceRepo, diskRepo, imgRepo, portmock.NewSnapshotRepo(), portmock.NewZoneRepo(),
-		&portmock.ProjectClient{OK: true}, &portmock.VPCClient{SubnetFound: false}, ops, false)
+		&portmock.ProjectClient{OK: true}, &portmock.VPCClient{SubnetFound: false}, ops, false, nil, nil)
 	op, err := svc.Create(context.Background(), baseCreateReq())
 	require.NoError(t, err)
 	done := portmock.AwaitOpDone(t, ops, op.ID)
@@ -108,7 +108,7 @@ func TestInstance_Create_SubnetZoneMismatch(t *testing.T) {
 	instanceRepo := portmock.NewInstanceRepo().WithDiskRepo(diskRepo)
 	ops := portmock.NewOpsRepo()
 	svc := NewInstanceService(instanceRepo, diskRepo, portmock.NewImageRepo(), portmock.NewSnapshotRepo(), portmock.NewZoneRepo(),
-		&portmock.ProjectClient{OK: true}, &portmock.VPCClient{SubnetFound: true, SubnetZone: "ru-central1-b"}, ops, false)
+		&portmock.ProjectClient{OK: true}, &portmock.VPCClient{SubnetFound: true, SubnetZone: "ru-central1-b"}, ops, false, nil, nil)
 	op, err := svc.Create(context.Background(), baseCreateReq())
 	require.NoError(t, err)
 	done := portmock.AwaitOpDone(t, ops, op.ID)
@@ -281,7 +281,7 @@ func newInstanceSvcVPC(t *testing.T, vpc *portmock.VPCClient) (*InstanceService,
 	instanceRepo := portmock.NewInstanceRepo().WithDiskRepo(diskRepo)
 	ops := portmock.NewOpsRepo()
 	svc := NewInstanceService(instanceRepo, diskRepo, portmock.NewImageRepo(), portmock.NewSnapshotRepo(), portmock.NewZoneRepo(),
-		&portmock.ProjectClient{OK: true}, vpc, ops, false)
+		&portmock.ProjectClient{OK: true}, vpc, ops, false, nil, nil)
 	return svc, instanceRepo, diskRepo, ops
 }
 
@@ -554,7 +554,7 @@ func TestInstance_Create_ZoneFromVPCSource(t *testing.T) {
 		Zones: map[string]string{"ru-central1-a": "ru-central1"},
 	}
 	svc := NewInstanceService(instanceRepo, diskRepo, portmock.NewImageRepo(), portmock.NewSnapshotRepo(),
-		vpcSource, &portmock.ProjectClient{OK: true}, vpcSource, ops, false)
+		vpcSource, &portmock.ProjectClient{OK: true}, vpcSource, ops, false, nil, nil)
 
 	// known vpc zone → success.
 	op, err := svc.Create(context.Background(), baseCreateReq())

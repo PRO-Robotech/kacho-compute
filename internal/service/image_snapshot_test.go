@@ -22,7 +22,7 @@ func newImageSvc(t *testing.T, folderOK bool) (*ImageService, *portmock.ImageRep
 	diskRepo := portmock.NewDiskRepo()
 	snapRepo := portmock.NewSnapshotRepo()
 	ops := portmock.NewOpsRepo()
-	return NewImageService(imgRepo, diskRepo, snapRepo, &portmock.ProjectClient{OK: folderOK}, ops), imgRepo, diskRepo, snapRepo, ops
+	return NewImageService(imgRepo, diskRepo, snapRepo, &portmock.ProjectClient{OK: folderOK}, ops, nil, nil), imgRepo, diskRepo, snapRepo, ops
 }
 
 func imageFromOp(t *testing.T, op *operations.Operation) *computev1.Image {
@@ -100,7 +100,7 @@ func newSnapshotSvc(t *testing.T, folderOK bool) (*SnapshotService, *portmock.Sn
 	snapRepo := portmock.NewSnapshotRepo()
 	diskRepo := portmock.NewDiskRepo()
 	ops := portmock.NewOpsRepo()
-	return NewSnapshotService(snapRepo, diskRepo, &portmock.ProjectClient{OK: folderOK}, ops), snapRepo, diskRepo, ops
+	return NewSnapshotService(snapRepo, diskRepo, &portmock.ProjectClient{OK: folderOK}, ops, nil, nil), snapRepo, diskRepo, ops
 }
 
 func snapshotFromOp(t *testing.T, op *operations.Operation) *computev1.Snapshot {

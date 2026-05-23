@@ -22,7 +22,7 @@ func newDiskSvc(t *testing.T, folderOK bool) (*DiskService, *portmock.DiskRepo, 
 	snapRepo := portmock.NewSnapshotRepo()
 	ops := portmock.NewOpsRepo()
 	svc := NewDiskService(diskRepo, imgRepo, snapRepo, portmock.NewDiskTypeRepo(), portmock.NewZoneRepo(),
-		&portmock.ProjectClient{OK: folderOK}, ops)
+		&portmock.ProjectClient{OK: folderOK}, ops, nil, nil)
 	return svc, diskRepo, imgRepo, snapRepo, ops
 }
 
@@ -192,7 +192,7 @@ func TestDisk_Create_ZoneFromVPCSource(t *testing.T) {
 	ops := portmock.NewOpsRepo()
 	vpcSource := &portmock.VPCClient{Zones: map[string]string{"ru-central1-a": "ru-central1"}}
 	svc := NewDiskService(diskRepo, portmock.NewImageRepo(), portmock.NewSnapshotRepo(),
-		portmock.NewDiskTypeRepo(), vpcSource, &portmock.ProjectClient{OK: true}, ops)
+		portmock.NewDiskTypeRepo(), vpcSource, &portmock.ProjectClient{OK: true}, ops, nil, nil)
 
 	// known vpc zone → success.
 	op, err := svc.Create(context.Background(), CreateDiskReq{ProjectID: "f", Name: "ok", ZoneID: "ru-central1-a", Size: diskSizeMin})

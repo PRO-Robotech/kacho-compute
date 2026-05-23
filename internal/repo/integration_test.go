@@ -220,7 +220,7 @@ func TestIntegration_CatalogRepo(t *testing.T) {
 	zr := repo.NewZoneRepo(pool)
 	zones, _, err := zr.List(ctx, service.Pagination{})
 	require.NoError(t, err)
-	require.Len(t, zones, 3)
+	require.Len(t, zones, 4) // ru-central1-{a,b,c,d} — `c` added in migration 0010
 	z, err := zr.Get(ctx, "ru-central1-a")
 	require.NoError(t, err)
 	require.Equal(t, domain.ZoneStatusUp, z.Status)

@@ -103,6 +103,8 @@ func setupDiskHandler(t *testing.T, filter authzfilter.Filter) (*DiskHandler, *p
 		portmock.NewZoneRepo(),
 		&portmock.ProjectClient{OK: true},
 		ops,
+		nil,
+		nil,
 	)
 	return NewDiskHandler(svc, filter), ops
 }
@@ -203,7 +205,7 @@ func TestImageHandler_List_AllowedSubset(t *testing.T) {
 	ops := portmock.NewOpsRepo()
 	imgRepo := portmock.NewImageRepo()
 	svc := service.NewImageService(imgRepo, portmock.NewDiskRepo(), portmock.NewSnapshotRepo(),
-		&portmock.ProjectClient{OK: true}, ops)
+		&portmock.ProjectClient{OK: true}, ops, nil, nil)
 	h := NewImageHandler(svc, newFilter(t, cli))
 
 	// Create 2 images (oneof Source = uri).
@@ -286,6 +288,8 @@ func TestInstanceHandler_List_AllowedSubset(t *testing.T) {
 		&portmock.VPCClient{},
 		ops,
 		true, // skipIPAM
+		nil,
+		nil,
 	)
 	h := NewInstanceHandler(svc, newFilter(t, cli))
 
