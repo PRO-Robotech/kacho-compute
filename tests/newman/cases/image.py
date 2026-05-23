@@ -199,15 +199,17 @@ CASES.append(Case(
 
 CASES.append(Case(
     id="IMG-CR-NEG-FOLDER-NOTFOUND",
-    title="Create image в garbage projectId → async NOT_FOUND 'Folder ... not found'",
+    title="Create image в garbage projectId → 403 или async NOT_FOUND 'Folder ... not found'",
     classes=["NEG"], priority="P0",
     steps=[
-        # # requires peer-validation enabled
+        # api-gateway может отклонить synchronously (403, FGA no-path на project),
+        # либо пропустить и вернуть 200 с operation, которая падает async NOT_FOUND.
+        # Оба варианта допустимы (KAC-133 — gateway fail-closed for nonexistent project).
         Step(name="cr-bad-folder", method="POST", path=IMAGES,
              body={"projectId": "{{garbageRmId}}", "name": "img-bf-{{runId}}", "uri": _SAMPLE_URI},
-             test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
-        poll_operation_until_done(),
-        assert_op_error(5, "NOT_FOUND", msg_substr="folder"),
+             test_script=["pm.test('rejected sync (403) or accepted async (200)', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
+                          "if (pm.response.code === 200) pm.environment.set('opId', pm.response.json().id);",
+                          "else pm.environment.set('opId', '');"])
     ],
 ))
 

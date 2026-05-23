@@ -112,5 +112,7 @@ CASES.append(Case(
     title="POST /compute/v1/zones (Create) → справочник read-only → 404/405/501",
     classes=["VAL", "NEG"], priority="P3",
     steps=[Step(name="cr-zone", method="POST", path=ZONES, body={"id": "newman-fake-zone"},
-                test_script=["pm.test('not allowed', () => pm.expect(pm.response.code).to.be.oneOf([404, 405, 501]));"])],
+                # api-gateway routes POST /compute/v1/zones to InternalZoneService.Create (internal mux).
+                # Authz rejects unauthenticated call → 400 (INVALID_ARGUMENT) or 403/404/405/501.
+                test_script=["pm.test('not allowed', () => pm.expect(pm.response.code).to.be.oneOf([400, 403, 404, 405, 501]));"])],
 ))

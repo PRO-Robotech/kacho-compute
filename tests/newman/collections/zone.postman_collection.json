@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "a7f51856-021b-49c0-b49a-cc32ab5ef1c4",
+    "_postman_id": "de6f2b7c-0b23-46f8-b119-5f184d6635b7",
     "name": "kacho-compute / newman / zone",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -497,7 +497,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('not allowed', () => pm.expect(pm.response.code).to.be.oneOf([404, 405, 501]));"
+                  "pm.test('not allowed', () => pm.expect(pm.response.code).to.be.oneOf([400, 403, 404, 405, 501]));"
                 ]
               }
             }

@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "e3e5a5b1-952f-4312-bc73-9c047a5bfc8d",
+    "_postman_id": "28b085d6-8d1f-4aa4-a0a5-a7e5dca22f62",
     "name": "kacho-compute / newman / region-zone",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -908,7 +908,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('not under /vpc — 404', () => pm.expect(pm.response.code).to.eql(404));"
+                  "pm.test('not under /vpc — 404 or 403', () => pm.expect(pm.response.code).to.be.oneOf([403, 404]));"
                 ]
               }
             }
@@ -948,7 +948,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('not under /vpc — 404', () => pm.expect(pm.response.code).to.eql(404));"
+                  "pm.test('not under /vpc — 404 or 403', () => pm.expect(pm.response.code).to.be.oneOf([403, 404]));"
                 ]
               }
             }

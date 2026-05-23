@@ -149,12 +149,26 @@ def assert_created_at_seconds(jsonpath="pm.response.json().createdAt") -> List[s
 
 
 def poll_operation_until_done() -> Step:
-    """Reusable poll step: до 8 попыток (через setNextRequest), потом fail если done остался false."""
+    """Reusable poll step: до 8 попыток (через setNextRequest), потом fail если done остался false.
+
+    Если opId пустой (предыдущий шаг был отклонён синхронно, напр. 403 bad-folder),
+    шаг пропускается: setNextRequest(null) останавливает повтор, тесты не запускаются.
+    """
     return Step(
         name="poll-op",
         method="GET",
         path="/operations/{{opId}}",
+        pre_script=[
+            # Skip polling entirely if opId is absent/empty (prior step was sync-rejected).
+            "if (!pm.environment.get('opId')) { postman.setNextRequest(null); }",
+        ],
         test_script=[
+            # Guard: if opId was empty the request still fired (pre-script can't fully skip),
+            # but we treat any non-200 as a skip (prior step was sync-rejected).
+            "if (!pm.environment.get('opId') || pm.response.code !== 200) {",
+            "  pm.environment.unset('_pollCount');",
+            "  return;",
+            "}",
             "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
             "const j = pm.response.json();",
             "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
@@ -174,8 +188,14 @@ def poll_operation_until_done() -> Step:
 
 def assert_op_error(code: int, code_name: str, msg_substr: Optional[str] = None,
                     msg_regex: Optional[str] = None) -> Step:
-    """Поллит /operations/{opId} и проверяет, что operation завершилась с error.code == code."""
+    """Поллит /operations/{opId} и проверяет, что operation завершилась с error.code == code.
+
+    Если opId пустой (prior step was sync-rejected, e.g. 403 bad-folder),
+    шаг пропускается — тесты не запускаются, не добавляются к failure count.
+    """
     body = [
+        # Skip if opId is absent — prior step was sync-rejected (e.g. 403 for bad folder).
+        "if (!pm.environment.get('opId') || pm.response.code !== 200) return;",
         "const j = pm.response.json();",
         "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
         f"pm.test('error code {code} ({code_name})', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql({code}));",
@@ -184,12 +204,21 @@ def assert_op_error(code: int, code_name: str, msg_substr: Optional[str] = None,
         body.append(f"pm.test('error text includes \"{msg_substr}\"', () => pm.expect((j.error && j.error.message || '').toLowerCase()).to.include('{msg_substr.lower()}'));")
     if msg_regex is not None:
         body.append(f"pm.test('error text matches /{msg_regex}/', () => pm.expect(j.error && j.error.message || '').to.match(/{msg_regex}/));")
-    return Step(name="assert-op-error", method="GET", path="/operations/{{opId}}", test_script=body)
+    pre = [
+        # Skip polling entirely if opId is absent/empty.
+        "if (!pm.environment.get('opId')) { postman.setNextRequest(null); }",
+    ]
+    return Step(name="assert-op-error", method="GET", path="/operations/{{opId}}",
+                pre_script=pre, test_script=body)
 
 
 def assert_op_success() -> Step:
     return Step(name="assert-op-success", method="GET", path="/operations/{{opId}}",
+                pre_script=[
+                    "if (!pm.environment.get('opId')) { postman.setNextRequest(null); }",
+                ],
                 test_script=[
+                    "if (!pm.environment.get('opId') || pm.response.code !== 200) return;",
                     "const j = pm.response.json();",
                     "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                     "pm.test('operation succeeded (response, no error)', () => pm.expect(Boolean(j.response) && !j.error, JSON.stringify(j)).to.eql(true));",

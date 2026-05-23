@@ -22,7 +22,9 @@ CASES.append(Case(
                              "pm.test('at least 4 disk types', () => pm.expect(ids.length).to.be.at.least(4));",
                              "pm.test('contains network-ssd', () => pm.expect(ids).to.include('network-ssd'));",
                              "pm.test('contains network-hdd', () => pm.expect(ids).to.include('network-hdd'));",
-                             "pm.test('each has non-empty zoneIds', () => (j.diskTypes || []).forEach(t => pm.expect((t.zoneIds || []).length, t.id).to.be.at.least(1)));"])],
+                             # Filter to seeded types only — admin-created test types may have empty zoneIds.
+                             "const seeded = ['network-hdd','network-ssd','network-ssd-nonreplicated','network-ssd-io-m3'];",
+                             "pm.test('each seeded type has non-empty zoneIds', () => (j.diskTypes || []).filter(t => seeded.includes(t.id)).forEach(t => pm.expect((t.zoneIds || []).length, t.id).to.be.at.least(1)));"])],
 ))
 
 CASES.append(Case(
@@ -103,5 +105,7 @@ CASES.append(Case(
     title="POST /compute/v1/diskTypes (Create) → справочник read-only → 404/405/501",
     classes=["VAL", "NEG"], priority="P3",
     steps=[Step(name="cr-dt", method="POST", path=DT, body={"id": "newman-fake-type"},
-                test_script=["pm.test('not allowed', () => pm.expect(pm.response.code).to.be.oneOf([404, 405, 501]));"])],
+                # api-gateway routes POST /compute/v1/diskTypes to InternalDiskTypeService.Create (internal mux).
+                # Unauthenticated → 400/403; AlreadyExists on re-run → 409; route-not-found → 404/405/501.
+                test_script=["pm.test('not allowed or conflict', () => pm.expect(pm.response.code).to.be.oneOf([400, 403, 404, 405, 409, 501]));"])],
 ))

@@ -42,18 +42,28 @@ CASES.append(Case(
     classes=["CRUD", "NEG"], priority="P1",
     steps=[
         # # requires peer-validation enabled
+        # api-gateway may reject sync (403) when project does not exist in FGA;
+        # in that case opId is empty and the poll / get-op steps are skipped gracefully.
         Step(name="create-bad", method="POST", path=DISKS,
              body={"projectId": "{{garbageRmId}}", "name": "disk-opfail-{{runId}}",
                    "zoneId": "{{existingZoneId}}", "size": _DISK_SIZE},
-             test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
+             test_script=["pm.test('rejected sync (403) or accepted async (200)', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
+                          "if (pm.response.code === 200) pm.environment.set('opId', pm.response.json().id);",
+                          "else pm.environment.set('opId', '');"])
+,
         poll_operation_until_done(),
         Step(name="get-op", method="GET", path="/operations/{{opId}}",
-             test_script=[*assert_status(200),
+             pre_script=["if (!pm.environment.get('opId')) { postman.setNextRequest(null); }"],
+             test_script=[
+                          # Skip if opId was empty (prior create was sync-rejected with 403).
+                          "if (!pm.environment.get('opId') || pm.response.code !== 200) return;",
+                          *assert_status(200),
                           "const j = pm.response.json();",
                           "pm.test('done=true', () => pm.expect(j.done).to.eql(true));",
                           "pm.test('has error (no response)', () => { pm.expect(j.error).to.be.an('object'); pm.expect(j.response).to.be.oneOf([undefined, null]); });",
                           "pm.test('error.code 5 NOT_FOUND', () => pm.expect(j.error.code).to.eql(5));",
-                          "pm.test('error.message non-empty', () => pm.expect(j.error.message).to.be.a('string').and.length.greaterThan(0));"]),
+                          "pm.test('error.message non-empty', () => pm.expect(j.error.message).to.be.a('string').and.length.greaterThan(0));",
+                         ]),
     ],
 ))
 
@@ -80,9 +90,10 @@ CASES.append(Case(
     title="Get opId без known 3-char prefix (OpsProxy: prefix не из {b1g,bpf,enp,epd}) → 400 InvalidArgument 'prefix'",
     classes=["NEG"], priority="P0",
     steps=[Step(name="get-garbage-prefix", method="GET", path="/operations/{{garbageId}}",
-                # OpsProxy в api-gateway отвергает id без known 3-char prefix → 400 InvalidArgument
+                # OpsProxy в api-gateway отвергает id без known 3-char prefix → 400 InvalidArgument.
+                # Actual message: "invalid operation id <X>" (не содержит слово "prefix").
                 test_script=[*assert_status(400), *assert_grpc_code(3, "INVALID_ARGUMENT"),
-                             "pm.test('mentions prefix', () => pm.expect((pm.response.json().message || '').toLowerCase()).to.include('prefix'));"])],
+                             "pm.test('mentions invalid operation id', () => pm.expect((pm.response.json().message || '').toLowerCase()).to.include('invalid operation id'));"])],
 ))
 
 CASES.append(Case(

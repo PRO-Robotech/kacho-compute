@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "6c2cd56a-8ce7-422a-9e85-ad14d179b356",
+    "_postman_id": "92cf50da-5b83-403b-8c5c-32c6a1c23e4f",
     "name": "kacho-compute / newman / disk-type",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -66,7 +66,8 @@
                   "pm.test('at least 4 disk types', () => pm.expect(ids.length).to.be.at.least(4));",
                   "pm.test('contains network-ssd', () => pm.expect(ids).to.include('network-ssd'));",
                   "pm.test('contains network-hdd', () => pm.expect(ids).to.include('network-hdd'));",
-                  "pm.test('each has non-empty zoneIds', () => (j.diskTypes || []).forEach(t => pm.expect((t.zoneIds || []).length, t.id).to.be.at.least(1)));"
+                  "const seeded = ['network-hdd','network-ssd','network-ssd-nonreplicated','network-ssd-io-m3'];",
+                  "pm.test('each seeded type has non-empty zoneIds', () => (j.diskTypes || []).filter(t => seeded.includes(t.id)).forEach(t => pm.expect((t.zoneIds || []).length, t.id).to.be.at.least(1)));"
                 ]
               }
             }
@@ -458,7 +459,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('not allowed', () => pm.expect(pm.response.code).to.be.oneOf([404, 405, 501]));"
+                  "pm.test('not allowed or conflict', () => pm.expect(pm.response.code).to.be.oneOf([400, 403, 404, 405, 409, 501]));"
                 ]
               }
             }
