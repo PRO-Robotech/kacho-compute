@@ -12,12 +12,6 @@ const (
 	objectTypeImage    = "compute_image"
 	objectTypeSnapshot = "compute_snapshot"
 	objectTypeInstance = "compute_instance"
-
-	// DiskType / Region / Zone — глобальные read-only справочники. Доступ —
-	// "viewer on project:<project_id>" недоступен (request не несёт project_id).
-	// Решение: справочники видимы всем authenticated principal'ам на
-	// глобальном объекте "system" (паттерн `viewer on system:catalog`).
-	objectTypeSystem = "system"
 )
 
 const (
@@ -25,19 +19,11 @@ const (
 	relationEditor = "editor"
 )
 
-// systemCatalogID — общий FGA object для read-only справочников
-// (DiskType/Zone/Region.Get/List). FGA-модель E3 должна выдать всем
-// authenticated principal'ам `viewer on system:catalog`. Альтернатива —
-// помечать Public=true в RPCEntry, но тогда нет audit-trail в kacho-iam.
-const systemCatalogID = "catalog"
-
-// staticSystemCatalog — extractor, всегда возвращающий (system, catalog).
-// Используется для DiskType/Zone/Region read-only RPC.
-func staticSystemCatalog() authz.ObjectExtractor {
-	return func(req any) (string, string, error) {
-		return objectTypeSystem, systemCatalogID, nil
-	}
-}
+// DiskType / Region / Zone catalog reads are exposed as `Public: true` in
+// PermissionMap (see below) — no `system:<catalog>` FGA object is required.
+// Earlier revisions used a `staticSystemCatalog` extractor that resolved to
+// `viewer on system:catalog`; that path was removed in KAC-133 when the
+// catalog RPC's were marked Public, see comments on ZoneService.Get below.
 
 // PermissionMap — карта RPC → required relation+extract.
 //
