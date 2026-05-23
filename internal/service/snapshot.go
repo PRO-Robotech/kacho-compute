@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -16,6 +17,7 @@ import (
 	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
 
 	"github.com/PRO-Robotech/kacho-compute/internal/domain"
+	"github.com/PRO-Robotech/kacho-compute/internal/fgawrite"
 	"github.com/PRO-Robotech/kacho-compute/internal/protoconv"
 )
 
@@ -44,11 +46,15 @@ type SnapshotService struct {
 	diskRepo      DiskRepo
 	projectClient ProjectClient
 	opsRepo       operations.Repo
+	// fgaWriter — write-side OpenFGA: publishes compute_snapshot hierarchy tuple
+	// after Create. nil = FGA write disabled (dev/no-config). KAC-133.
+	fgaWriter fgawrite.HierarchyTupleWriter
+	logger    *slog.Logger
 }
 
 // NewSnapshotService создаёт SnapshotService.
-func NewSnapshotService(repo SnapshotRepo, diskRepo DiskRepo, projectClient ProjectClient, opsRepo operations.Repo) *SnapshotService {
-	return &SnapshotService{repo: repo, diskRepo: diskRepo, projectClient: projectClient, opsRepo: opsRepo}
+func NewSnapshotService(repo SnapshotRepo, diskRepo DiskRepo, projectClient ProjectClient, opsRepo operations.Repo, fgaWriter fgawrite.HierarchyTupleWriter, logger *slog.Logger) *SnapshotService {
+	return &SnapshotService{repo: repo, diskRepo: diskRepo, projectClient: projectClient, opsRepo: opsRepo, fgaWriter: fgaWriter, logger: logger}
 }
 
 // Get возвращает Snapshot по ID.
@@ -132,6 +138,9 @@ func (s *SnapshotService) doCreate(ctx context.Context, snapID string, req Creat
 	if err != nil {
 		return nil, mapRepoErr(err)
 	}
+	// KAC-133: publish FGA hierarchy tuple so per-resource Check (Get/Update/Delete)
+	// can cascade from compute_snapshot:<id>#project to project:<project_id>.
+	fgawrite.Emit(ctx, s.fgaWriter, s.logger, "compute_snapshot", created.ID, created.ProjectID)
 	return anypb.New(protoconv.Snapshot(created))
 }
 

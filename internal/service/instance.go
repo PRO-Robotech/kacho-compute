@@ -22,6 +22,7 @@ import (
 	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
 
 	"github.com/PRO-Robotech/kacho-compute/internal/domain"
+	"github.com/PRO-Robotech/kacho-compute/internal/fgawrite"
 	"github.com/PRO-Robotech/kacho-compute/internal/protoconv"
 )
 
@@ -123,16 +124,20 @@ type InstanceService struct {
 	// skipIPAM — true при KACHO_COMPUTE_SKIP_PEER_VALIDATION: cross-service
 	// VPC IPAM-аллокация отключена, NIC-ам выдаются синтетические IP (synth*).
 	skipIPAM bool
+	// fgaWriter — write-side OpenFGA: publishes compute_instance hierarchy tuple
+	// after Create. nil = FGA write disabled (dev/no-config). KAC-133.
+	fgaWriter fgawrite.HierarchyTupleWriter
+	logger    *slog.Logger
 }
 
 // NewInstanceService создаёт InstanceService. skipIPAM=true (зеркалит
 // KACHO_COMPUTE_SKIP_PEER_VALIDATION) → NIC-ам выдаются синтетические IP вместо
 // реальных, выделенных через kacho-vpc IPAM (для unit/newman/load без VPC).
-func NewInstanceService(repo InstanceRepo, diskRepo DiskRepo, imageRepo ImageRepo, snapshotRepo SnapshotRepo, zones ZoneRegistry, projectClient ProjectClient, vpcClient VPCClient, opsRepo operations.Repo, skipIPAM bool) *InstanceService {
+func NewInstanceService(repo InstanceRepo, diskRepo DiskRepo, imageRepo ImageRepo, snapshotRepo SnapshotRepo, zones ZoneRegistry, projectClient ProjectClient, vpcClient VPCClient, opsRepo operations.Repo, skipIPAM bool, fgaWriter fgawrite.HierarchyTupleWriter, logger *slog.Logger) *InstanceService {
 	return &InstanceService{
 		repo: repo, diskRepo: diskRepo, imageRepo: imageRepo, snapshotRepo: snapshotRepo,
 		zones: zones, projectClient: projectClient, vpcClient: vpcClient, opsRepo: opsRepo,
-		skipIPAM: skipIPAM,
+		skipIPAM: skipIPAM, fgaWriter: fgaWriter, logger: logger,
 	}
 }
 
@@ -293,6 +298,9 @@ func (s *InstanceService) doCreate(ctx context.Context, instanceID string, req C
 	// flag and just get a referrer via SetAddressReference. Best-effort — the IPs
 	// are already allocated; a missing reference must not fail the instance create.
 	s.setNICAddressReferences(ctx, created)
+	// KAC-133: publish FGA hierarchy tuple so per-resource Check (Get/Update/Delete)
+	// can cascade from compute_instance:<id>#project to project:<project_id>.
+	fgawrite.Emit(ctx, s.fgaWriter, s.logger, "compute_instance", created.ID, created.ProjectID)
 	return anypb.New(protoconv.Instance(created))
 }
 

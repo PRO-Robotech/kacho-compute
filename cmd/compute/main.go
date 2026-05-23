@@ -33,6 +33,7 @@ import (
 	"github.com/PRO-Robotech/kacho-compute/internal/check"
 	"github.com/PRO-Robotech/kacho-compute/internal/clients"
 	"github.com/PRO-Robotech/kacho-compute/internal/config"
+	"github.com/PRO-Robotech/kacho-compute/internal/fgawrite"
 	"github.com/PRO-Robotech/kacho-compute/internal/handler"
 	"github.com/PRO-Robotech/kacho-compute/internal/migrations"
 	"github.com/PRO-Robotech/kacho-compute/internal/repo"
@@ -106,7 +107,13 @@ func runServe(cfg config.Config) error {
 		}
 	}()
 
-	svcs := buildServices(pool, projectClient, vpcClient, opsRepo, cfg.SkipPeerValidation)
+	// KAC-133: build write-side FGA client. When KACHO_COMPUTE_FGA_TUPLE_WRITE_ENABLED
+	// is false (default) or endpoint/store-id are unset, fgaWriter is nil —
+	// fgawrite.Emit is a no-op. Wired into disk/image/snapshot/instance services
+	// to publish hierarchy tuples after each Create so per-resource Check resolves.
+	fgaWriter := buildFGAWriter(cfg, logger)
+
+	svcs := buildServices(pool, projectClient, vpcClient, opsRepo, cfg.SkipPeerValidation, fgaWriter, logger)
 
 	// authz (E3 / KAC-108): per-RPC OpenFGA Check на public listener'е.
 	// AuthZIAMGRPCAddr пуст → interceptor НЕ навешивается (graceful start без
@@ -290,7 +297,7 @@ func dialPeer(addr string, useTLS bool) (*grpc.ClientConn, error) {
 // локальных таблиц `zones`/`regions`, никакого proxy в kacho-vpc (эпик KAC-15).
 // skipPeer (== cfg.SkipPeerValidation) теперь влияет только на VPC NIC-IPAM/SG
 // existence-check (folder/subnet/sg), но не на geography.
-func buildServices(pool *pgxpool.Pool, projectClient service.ProjectClient, vpcClient service.VPCClient, opsRepo operations.Repo, skipPeer bool) *services {
+func buildServices(pool *pgxpool.Pool, projectClient service.ProjectClient, vpcClient service.VPCClient, opsRepo operations.Repo, skipPeer bool, fgaWriter fgawrite.HierarchyTupleWriter, logger *slog.Logger) *services {
 	diskRepo := repo.NewDiskRepo(pool)
 	imageRepo := repo.NewImageRepo(pool)
 	snapshotRepo := repo.NewSnapshotRepo(pool)
@@ -305,13 +312,40 @@ func buildServices(pool *pgxpool.Pool, projectClient service.ProjectClient, vpcC
 
 	diskTypeSvc := service.NewDiskTypeService(diskTypeRepo)
 	return &services{
-		disk:     service.NewDiskService(diskRepo, imageRepo, snapshotRepo, diskTypeRepo, zoneRegistry, projectClient, opsRepo),
-		image:    service.NewImageService(imageRepo, diskRepo, snapshotRepo, projectClient, opsRepo),
-		snapshot: service.NewSnapshotService(snapshotRepo, diskRepo, projectClient, opsRepo),
+		disk:     service.NewDiskService(diskRepo, imageRepo, snapshotRepo, diskTypeRepo, zoneRegistry, projectClient, opsRepo, fgaWriter, logger),
+		image:    service.NewImageService(imageRepo, diskRepo, snapshotRepo, projectClient, opsRepo, fgaWriter, logger),
+		snapshot: service.NewSnapshotService(snapshotRepo, diskRepo, projectClient, opsRepo, fgaWriter, logger),
 		diskType: diskTypeSvc,
 		zone:     service.NewZoneService(zoneRepo),
 		region:   service.NewRegionService(regionRepo),
-		instance: service.NewInstanceService(instanceRepo, diskRepo, imageRepo, snapshotRepo, zoneRegistry, projectClient, vpcClient, opsRepo, skipPeer),
+		instance: service.NewInstanceService(instanceRepo, diskRepo, imageRepo, snapshotRepo, zoneRegistry, projectClient, vpcClient, opsRepo, skipPeer, fgaWriter, logger),
+	}
+}
+
+// buildFGAWriter — KAC-133. Returns non-nil only when all three conditions are
+// met: KACHO_COMPUTE_FGA_TUPLE_WRITE_ENABLED=true, FGAEndpoint and FGAStoreID
+// non-empty. A nil writer makes fgawrite.Emit a no-op (safe in dev/no-openfga).
+func buildFGAWriter(cfg config.Config, logger *slog.Logger) fgawrite.HierarchyTupleWriter {
+	if !cfg.FGATupleWriteEnabled {
+		logger.Info("FGA tuple write disabled (KACHO_COMPUTE_FGA_TUPLE_WRITE_ENABLED=false)")
+		return nil
+	}
+	if cfg.FGAEndpoint == "" || cfg.FGAStoreID == "" {
+		logger.Warn("FGA tuple write requested but endpoint/store-id not set — disabled",
+			"endpoint", cfg.FGAEndpoint, "store_id", cfg.FGAStoreID)
+		return nil
+	}
+	timeout := time.Duration(cfg.FGATupleWriteTimeoutMs) * time.Millisecond
+	if timeout <= 0 {
+		timeout = 2 * time.Second
+	}
+	logger.Info("FGA tuple write enabled",
+		"endpoint", cfg.FGAEndpoint, "store_id", cfg.FGAStoreID, "model_id", cfg.FGAModelID)
+	return &clients.OpenFGAWriteClient{
+		Endpoint: cfg.FGAEndpoint,
+		StoreID:  cfg.FGAStoreID,
+		ModelID:  cfg.FGAModelID,
+		Timeout:  timeout,
 	}
 }
 

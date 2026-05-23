@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -16,6 +17,7 @@ import (
 	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
 
 	"github.com/PRO-Robotech/kacho-compute/internal/domain"
+	"github.com/PRO-Robotech/kacho-compute/internal/fgawrite"
 	"github.com/PRO-Robotech/kacho-compute/internal/protoconv"
 )
 
@@ -68,13 +70,18 @@ type DiskService struct {
 	zones         ZoneRegistry
 	projectClient ProjectClient
 	opsRepo       operations.Repo
+	// fgaWriter — write-side OpenFGA: publishes compute_disk hierarchy tuple
+	// after Create. nil = FGA write disabled (dev/no-config). KAC-133.
+	fgaWriter fgawrite.HierarchyTupleWriter
+	logger    *slog.Logger
 }
 
 // NewDiskService создаёт DiskService.
-func NewDiskService(repo DiskRepo, imageRepo ImageRepo, snapshotRepo SnapshotRepo, diskTypeRepo DiskTypeRepo, zones ZoneRegistry, projectClient ProjectClient, opsRepo operations.Repo) *DiskService {
+func NewDiskService(repo DiskRepo, imageRepo ImageRepo, snapshotRepo SnapshotRepo, diskTypeRepo DiskTypeRepo, zones ZoneRegistry, projectClient ProjectClient, opsRepo operations.Repo, fgaWriter fgawrite.HierarchyTupleWriter, logger *slog.Logger) *DiskService {
 	return &DiskService{
 		repo: repo, imageRepo: imageRepo, snapshotRepo: snapshotRepo,
 		diskTypeRepo: diskTypeRepo, zones: zones, projectClient: projectClient, opsRepo: opsRepo,
+		fgaWriter: fgaWriter, logger: logger,
 	}
 }
 
@@ -196,6 +203,9 @@ func (s *DiskService) doCreate(ctx context.Context, diskID string, req CreateDis
 	if err != nil {
 		return nil, mapRepoErr(err)
 	}
+	// KAC-133: publish FGA hierarchy tuple so per-resource Check (Get/Update/Delete)
+	// can cascade from compute_disk:<id>#project to project:<project_id>.
+	fgawrite.Emit(ctx, s.fgaWriter, s.logger, "compute_disk", created.ID, created.ProjectID)
 	return anypb.New(protoconv.Disk(created))
 }
 

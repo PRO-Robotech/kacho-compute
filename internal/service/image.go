@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
 
 	"github.com/PRO-Robotech/kacho-compute/internal/domain"
+	"github.com/PRO-Robotech/kacho-compute/internal/fgawrite"
 	"github.com/PRO-Robotech/kacho-compute/internal/protoconv"
 )
 
@@ -75,11 +77,15 @@ type ImageService struct {
 	snapshotRepo  SnapshotRepo
 	projectClient ProjectClient
 	opsRepo       operations.Repo
+	// fgaWriter — write-side OpenFGA: publishes compute_image hierarchy tuple
+	// after Create. nil = FGA write disabled (dev/no-config). KAC-133.
+	fgaWriter fgawrite.HierarchyTupleWriter
+	logger    *slog.Logger
 }
 
 // NewImageService создаёт ImageService.
-func NewImageService(repo ImageRepo, diskRepo DiskRepo, snapshotRepo SnapshotRepo, projectClient ProjectClient, opsRepo operations.Repo) *ImageService {
-	return &ImageService{repo: repo, diskRepo: diskRepo, snapshotRepo: snapshotRepo, projectClient: projectClient, opsRepo: opsRepo}
+func NewImageService(repo ImageRepo, diskRepo DiskRepo, snapshotRepo SnapshotRepo, projectClient ProjectClient, opsRepo operations.Repo, fgaWriter fgawrite.HierarchyTupleWriter, logger *slog.Logger) *ImageService {
+	return &ImageService{repo: repo, diskRepo: diskRepo, snapshotRepo: snapshotRepo, projectClient: projectClient, opsRepo: opsRepo, fgaWriter: fgaWriter, logger: logger}
 }
 
 // Get возвращает Image по ID.
@@ -223,6 +229,9 @@ func (s *ImageService) doCreate(ctx context.Context, imageID string, req CreateI
 	if err != nil {
 		return nil, mapRepoErr(err)
 	}
+	// KAC-133: publish FGA hierarchy tuple so per-resource Check (Get/Update/Delete)
+	// can cascade from compute_image:<id>#project to project:<project_id>.
+	fgawrite.Emit(ctx, s.fgaWriter, s.logger, "compute_image", created.ID, created.ProjectID)
 	return anypb.New(protoconv.Image(created))
 }
 

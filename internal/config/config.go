@@ -94,6 +94,30 @@ type Config struct {
 	// все ресурсы caller'у (без фильтра); false → Unavailable. **Default false**
 	// (fail-closed = secure). Set to true только в break-glass.
 	ListFilterFailOpen bool `envconfig:"KACHO_COMPUTE_LIST_FILTER_FAIL_OPEN" default:"false"`
+
+	// ===== KAC-133: FGA tuple write (write-side OpenFGA) =====
+	//
+	// When KACHO_COMPUTE_FGA_TUPLE_WRITE_ENABLED=true the compute Operation
+	// workers publish `compute_<type>:<id>#project@project:<project_id>` tuples
+	// to OpenFGA after each successful resource Create. Without these tuples the
+	// per-resource FGA Check (Get/Update/Delete) has no path to the project
+	// role-binding → fail-closed DENY (authz.no_path).
+
+	// FGATupleWriteEnabled — master switch. When false (default), no tuple is
+	// written and the write client is nil (fgawrite.Emit is a no-op).
+	FGATupleWriteEnabled bool `envconfig:"KACHO_COMPUTE_FGA_TUPLE_WRITE_ENABLED" default:"false"`
+
+	// FGAEndpoint — host:port of the OpenFGA HTTP API (e.g. "kacho-umbrella-openfga:8080").
+	FGAEndpoint string `envconfig:"KACHO_COMPUTE_FGA_ENDPOINT" default:""`
+
+	// FGAStoreID — OpenFGA store id (shared with kacho-iam).
+	FGAStoreID string `envconfig:"KACHO_COMPUTE_FGA_STORE_ID" default:""`
+
+	// FGAModelID — pinned authorization_model_id. Empty → store default.
+	FGAModelID string `envconfig:"KACHO_COMPUTE_FGA_MODEL_ID" default:""`
+
+	// FGATupleWriteTimeoutMs — per-call deadline for OpenFGA write. 0 → 2000ms.
+	FGATupleWriteTimeoutMs int `envconfig:"KACHO_COMPUTE_FGA_TUPLE_WRITE_TIMEOUT_MS" default:"2000"`
 }
 
 // baseDSN — стандартный postgres DSN без pgxpool-специфичных параметров
