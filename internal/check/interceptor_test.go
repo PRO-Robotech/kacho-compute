@@ -114,11 +114,13 @@ func TestInterceptor_Unary_Unavailable_FailClosed(t *testing.T) {
 	require.Equal(t, codes.PermissionDenied, st.Code())
 }
 
-func TestInterceptor_Unary_DiskTypeList_SystemCatalog(t *testing.T) {
+func TestInterceptor_Unary_DiskTypeList_ClusterCatalog(t *testing.T) {
+	// KAC-178 §3: catalog object switched from "system:catalog" → "cluster:cluster_kacho_root"
+	// — FGA model имеет `type cluster` с user:* viewer cascade, тип `system` нет.
 	intr, _ := newTestInterceptor(t, func(_ context.Context, subject, relation, object string) (bool, error) {
 		require.Equal(t, "user:usr_alice", subject)
 		require.Equal(t, "viewer", relation)
-		require.Equal(t, "system:catalog", object, "DiskType/Zone/Region — viewer on system:catalog")
+		require.Equal(t, "cluster:cluster_kacho_root", object, "DiskType/Zone/Region — viewer on cluster:cluster_kacho_root")
 		return true, nil
 	})
 	uIntr := intr.Unary()
