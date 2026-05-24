@@ -1,4 +1,4 @@
-FROM golang:1.25-alpine AS builder
+FROM mirror.gcr.io/library/golang:1.25-alpine AS builder
 WORKDIR /src
 
 COPY kacho-corelib /src/kacho-corelib
@@ -9,7 +9,7 @@ WORKDIR /src/kacho-compute
 RUN go mod download
 RUN CGO_ENABLED=0 go build -o /kacho-compute ./cmd/compute
 
-FROM alpine:3.20
+FROM mirror.gcr.io/library/alpine:3.20
 RUN apk add --no-cache ca-certificates
 COPY --from=builder /kacho-compute /usr/local/bin/kacho-compute
 USER 65532
