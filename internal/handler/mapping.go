@@ -16,6 +16,9 @@ func operationToProto(op *operations.Operation) *operationpb.Operation {
 		ModifiedAt:  timestamppb.New(op.ModifiedAt),
 		Done:        op.Done,
 		Metadata:    op.Metadata,
+		PrincipalType:        op.Principal.Type,
+		PrincipalId:          op.Principal.ID,
+		PrincipalDisplayName: op.Principal.DisplayName,
 	}
 	if op.Error != nil {
 		p.Result = &operationpb.Operation_Error{Error: op.Error}
