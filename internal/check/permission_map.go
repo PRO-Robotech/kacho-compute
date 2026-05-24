@@ -16,8 +16,15 @@ const (
 	// DiskType / Region / Zone — глобальные read-only справочники. Доступ —
 	// "viewer on project:<project_id>" недоступен (request не несёт project_id).
 	// Решение: справочники видимы всем authenticated principal'ам на
-	// глобальном объекте "system" (паттерн `viewer on system:catalog`).
-	objectTypeSystem = "system"
+	// cluster singleton (паттерн `viewer on cluster:cluster_kacho_root`).
+	// KAC-178 §3: switched from "system:catalog" → "cluster:cluster_kacho_root"
+	// — FGA model имеет `type cluster` с `viewer: [user, user:*] or ...`,
+	// type `system` не определён → старая семантика всегда deny. Mirror
+	// api-gateway permission catalog (compute.zones/regions Get/List scope
+	// на cluster). cluster_kacho_root — singleton (kacho-iam ClusterSingletonID),
+	// один на весь deploy.
+	objectTypeCluster      = "cluster"
+	clusterSingletonObject = "cluster_kacho_root"
 )
 
 const (
@@ -25,17 +32,12 @@ const (
 	relationEditor = "editor"
 )
 
-// systemCatalogID — общий FGA object для read-only справочников
-// (DiskType/Zone/Region.Get/List). FGA-модель E3 должна выдать всем
-// authenticated principal'ам `viewer on system:catalog`. Альтернатива —
-// помечать Public=true в RPCEntry, но тогда нет audit-trail в kacho-iam.
-const systemCatalogID = "catalog"
-
-// staticSystemCatalog — extractor, всегда возвращающий (system, catalog).
-// Используется для DiskType/Zone/Region read-only RPC.
-func staticSystemCatalog() authz.ObjectExtractor {
+// staticClusterCatalog — extractor, всегда возвращающий (cluster, cluster_kacho_root).
+// Используется для DiskType/Zone/Region read-only RPC. KAC-178 §3 — заменил
+// staticClusterCatalog (`system:catalog`).
+func staticClusterCatalog() authz.ObjectExtractor {
 	return func(req any) (string, string, error) {
-		return objectTypeSystem, systemCatalogID, nil
+		return objectTypeCluster, clusterSingletonObject, nil
 	}
 }
 
@@ -345,27 +347,27 @@ func PermissionMap() authz.RPCMap {
 		// =========================
 		"/kacho.cloud.compute.v1.DiskTypeService/Get": {
 			Relation: relationViewer,
-			Extract:  staticSystemCatalog(),
+			Extract:  staticClusterCatalog(),
 		},
 		"/kacho.cloud.compute.v1.DiskTypeService/List": {
 			Relation: relationViewer,
-			Extract:  staticSystemCatalog(),
+			Extract:  staticClusterCatalog(),
 		},
 		"/kacho.cloud.compute.v1.ZoneService/Get": {
 			Relation: relationViewer,
-			Extract:  staticSystemCatalog(),
+			Extract:  staticClusterCatalog(),
 		},
 		"/kacho.cloud.compute.v1.ZoneService/List": {
 			Relation: relationViewer,
-			Extract:  staticSystemCatalog(),
+			Extract:  staticClusterCatalog(),
 		},
 		"/kacho.cloud.compute.v1.RegionService/Get": {
 			Relation: relationViewer,
-			Extract:  staticSystemCatalog(),
+			Extract:  staticClusterCatalog(),
 		},
 		"/kacho.cloud.compute.v1.RegionService/List": {
 			Relation: relationViewer,
-			Extract:  staticSystemCatalog(),
+			Extract:  staticClusterCatalog(),
 		},
 
 		// =========================
