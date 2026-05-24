@@ -108,12 +108,27 @@ func runServe(cfg config.Config) error {
 
 	svcs := buildServices(pool, projectClient, vpcClient, opsRepo, cfg.SkipPeerValidation)
 
+	// KAC-178 §2 (W1.4 mirror of kacho-vpc): principal-extract ОБЯЗАН стоять
+	// ПЕРВЫМ в public-цепочке — без него operations.PrincipalFromContext(ctx)
+	// возвращает SystemPrincipal() = user:bootstrap для каждого request'а,
+	// независимо от того, что api-gateway форвардит x-kacho-principal-* через
+	// gRPC metadata. UnaryPrincipalExtract читает headers и кладёт реальный
+	// operations.Principal в ctx → authz-interceptor + use-case'ы, пишущие
+	// operations.principal_* колонки (Operation.created_by), видят верного
+	// principal'а вместо anonymous/bootstrap. Mirror of kacho-vpc/cmd/vpc/main.go.
+	//
 	// authz (E3 / KAC-108): per-RPC OpenFGA Check на public listener'е.
 	// AuthZIAMGRPCAddr пуст → interceptor НЕ навешивается (graceful start без
 	// kacho-iam в dev). Breakglass=true → interceptor навешивается, но всё
 	// пропускает + emit'ит WARN-метрику (dev / emergency).
-	publicUnary := []grpc.UnaryServerInterceptor{handler.TenantUnaryInterceptor(false, productionMode)}
-	publicStream := []grpc.StreamServerInterceptor{handler.TenantStreamInterceptor(false, productionMode)}
+	publicUnary := []grpc.UnaryServerInterceptor{
+		grpcsrv.UnaryPrincipalExtract(),
+		handler.TenantUnaryInterceptor(false, productionMode),
+	}
+	publicStream := []grpc.StreamServerInterceptor{
+		grpcsrv.StreamPrincipalExtract(),
+		handler.TenantStreamInterceptor(false, productionMode),
+	}
 
 	var authzConn *grpc.ClientConn
 	if cfg.AuthZIAMGRPCAddr != "" {
