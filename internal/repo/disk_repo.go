@@ -23,6 +23,7 @@ type DiskRepo struct {
 // NewDiskRepo создаёт DiskRepo.
 func NewDiskRepo(pool *pgxpool.Pool) *DiskRepo { return &DiskRepo{pool: pool} }
 
+// diskCols — список колонок таблицы disks для SELECT/INSERT в порядке scanDisk.
 const diskCols = `id, project_id, created_at, name, description, labels, type_id, zone_id, size, block_size, ` +
 	`product_ids, status, source_image_id, source_snapshot_id, disk_placement_policy, hardware_generation, kms_key`
 
@@ -189,6 +190,7 @@ func (r *DiskRepo) SetZoneID(ctx context.Context, id, zoneID string) (*domain.Di
 	return r.simpleSet(ctx, id, "zone_id", zoneID)
 }
 
+// simpleSet атомарно обновляет одну колонку диска и возвращает перечитанный ресурс + outbox UPDATED.
 func (r *DiskRepo) simpleSet(ctx context.Context, id, col, val string) (*domain.Disk, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -245,6 +247,8 @@ func (r *DiskRepo) IsAttached(ctx context.Context, id string) (bool, error) {
 	return exists, nil
 }
 
+// fillInstanceIDs заполняет d.InstanceIDs идентификаторами инстансов,
+// к которым диск присоединён (из таблицы attached_disks).
 func (r *DiskRepo) fillInstanceIDs(ctx context.Context, d *domain.Disk) error {
 	rows, err := r.pool.Query(ctx, `SELECT instance_id FROM attached_disks WHERE disk_id = $1 ORDER BY instance_id`, d.ID)
 	if err != nil {
@@ -263,6 +267,7 @@ func (r *DiskRepo) fillInstanceIDs(ctx context.Context, d *domain.Disk) error {
 
 // ---- scan / args ----
 
+// diskInsertArgs формирует список аргументов INSERT для domain.Disk в порядке diskCols.
 func diskInsertArgs(d *domain.Disk) ([]any, error) {
 	labelsJSON, err := marshalJSONB(d.Labels, "Disk.labels")
 	if err != nil {
@@ -290,6 +295,7 @@ func diskInsertArgs(d *domain.Disk) ([]any, error) {
 	}, nil
 }
 
+// scanDisk сканирует строку результата запроса в domain.Disk.
 func scanDisk(row scannable) (*domain.Disk, error) {
 	var d domain.Disk
 	var labelsJSON, prodJSON, dppJSON, hgJSON, kmsJSON []byte
@@ -328,6 +334,7 @@ func scanDisk(row scannable) (*domain.Disk, error) {
 	return &d, nil
 }
 
+// diskStatusName конвертирует domain.DiskStatus в строковое имя для хранения в БД.
 func diskStatusName(s domain.DiskStatus) string {
 	switch s {
 	case domain.DiskStatusCreating:
@@ -343,6 +350,7 @@ func diskStatusName(s domain.DiskStatus) string {
 	}
 }
 
+// diskStatusFromName парсит строковое имя статуса из БД в domain.DiskStatus.
 func diskStatusFromName(s string) domain.DiskStatus {
 	switch s {
 	case "CREATING":
@@ -358,6 +366,7 @@ func diskStatusFromName(s string) domain.DiskStatus {
 	}
 }
 
+// orEmptySlice возвращает непустой пустой срез вместо nil (для стабильной JSON-сериализации).
 func orEmptySlice(s []string) []string {
 	if s == nil {
 		return []string{}

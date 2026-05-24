@@ -463,6 +463,8 @@ func (c *VPCClient) waitOperation(ctx context.Context, op *operationv1.Operation
 	}
 }
 
+// operationResult извлекает результат завершённой VPC-операции:
+// ошибку преобразует в gRPC-статус, иначе возвращает payload ответа.
 func operationResult(op *operationv1.Operation) (*anypb.Any, error) {
 	if e := op.GetError(); e != nil {
 		return nil, status.ErrorProto(e)

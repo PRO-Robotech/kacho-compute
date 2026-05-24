@@ -190,10 +190,13 @@ func (f *FGAFilter) handleErr(err error) (Decision, error) {
 	return Decision{}, status.Errorf(codes.Unavailable, "list filter: iam.ListObjects: %v", err)
 }
 
+// cacheKey строит ключ кэша решений из subject, типа ресурса и действия.
 func cacheKey(subject, resourceType, action string) string {
 	return subject + "|" + resourceType + "|" + action
 }
 
+// getCache возвращает закэшированное решение по ключу; протухшая запись
+// удаляется и считается промахом. AllowedIDs копируется во избежание мутации вызывающим.
 func (f *FGAFilter) getCache(key string) (Decision, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -215,6 +218,8 @@ func (f *FGAFilter) getCache(key string) (Decision, bool) {
 	return d, true
 }
 
+// putCache сохраняет решение в кэш под ключом key; при переполнении
+// вытесняет произвольную существующую запись.
 func (f *FGAFilter) putCache(key string, d Decision) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

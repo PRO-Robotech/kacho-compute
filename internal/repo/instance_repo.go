@@ -26,6 +26,7 @@ type InstanceRepo struct {
 // NewInstanceRepo создаёт InstanceRepo.
 func NewInstanceRepo(pool *pgxpool.Pool) *InstanceRepo { return &InstanceRepo{pool: pool} }
 
+// instanceCols — список колонок таблицы instances для SELECT/INSERT в порядке scanInstance.
 const instanceCols = `id, project_id, created_at, name, description, labels, zone_id, platform_id, cores, memory, core_fraction, gpus, ` +
 	`status, metadata, metadata_options, service_account_id, hostname, fqdn, network_settings_type, scheduling_preemptible, ` +
 	`placement_policy, serial_port_ssh_authorization, gpu_cluster_id, hardware_generation, maintenance_policy, ` +
@@ -352,6 +353,8 @@ func (r *InstanceRepo) Delete(ctx context.Context, id string, autoDeleteDiskIDs 
 
 // ---- internal helpers ----
 
+// mutateAndReload в одной транзакции проверяет существование ВМ, применяет
+// mutate, перечитывает её с детьми и эмитит outbox-событие eventType.
 func (r *InstanceRepo) mutateAndReload(ctx context.Context, id, eventType string, mutate func(context.Context, pgx.Tx) error) (*domain.Instance, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -401,14 +404,17 @@ type querier interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
+// fillChildren догружает NIC-и и attached_disks ВМ через пул-querier.
 func (r *InstanceRepo) fillChildren(ctx context.Context, q querier, in *domain.Instance) error {
 	return r.fillChildrenGeneric(ctx, q, in)
 }
 
+// fillChildrenTx догружает NIC-и и attached_disks ВМ внутри транзакции.
 func (r *InstanceRepo) fillChildrenTx(ctx context.Context, tx pgx.Tx, in *domain.Instance) error {
 	return r.fillChildrenGeneric(ctx, tx, in)
 }
 
+// fillChildrenGeneric читает дочерние NIC-и и attached_disks ВМ через произвольный querier.
 func (r *InstanceRepo) fillChildrenGeneric(ctx context.Context, q querier, in *domain.Instance) error {
 	// NIC-и.
 	nicRows, err := q.Query(ctx, `SELECT idx, nic_id, mac_address, subnet_id, primary_v4_address, primary_v4_address_id, primary_v4_nat, primary_v6_address, primary_v6_nat, security_group_ids
@@ -464,6 +470,7 @@ func (r *InstanceRepo) fillChildrenGeneric(ctx context.Context, q querier, in *d
 	return nil
 }
 
+// insertNICTx вставляет одну строку instance_network_interfaces внутри транзакции.
 func insertNICTx(ctx context.Context, tx pgx.Tx, instanceID string, nic domain.NetworkInterface) error {
 	v4NatJSON, err := marshalNilable(nic.PrimaryV4Nat, "NIC.primary_v4_nat")
 	if err != nil {
@@ -484,6 +491,7 @@ func insertNICTx(ctx context.Context, tx pgx.Tx, instanceID string, nic domain.N
 	return err
 }
 
+// insertAttachedDiskTx вставляет одну строку attached_disks внутри транзакции.
 func insertAttachedDiskTx(ctx context.Context, tx pgx.Tx, instanceID string, ad domain.AttachedDisk) error {
 	at := ad.AttachedAt
 	if at.IsZero() {
@@ -512,6 +520,7 @@ func insertDiskTx(ctx context.Context, tx pgx.Tx, d *domain.Disk) error {
 
 // ---- scan / args ----
 
+// instanceInsertArgs формирует список аргументов INSERT для domain.Instance в порядке instanceCols.
 func instanceInsertArgs(in *domain.Instance) ([]any, error) {
 	labelsJSON, err := marshalJSONB(orEmptyMap(in.Labels), "Instance.labels")
 	if err != nil {
@@ -545,6 +554,7 @@ func instanceInsertArgs(in *domain.Instance) ([]any, error) {
 	}, nil
 }
 
+// scanInstance сканирует строку результата запроса в domain.Instance (без дочерних NIC/disks).
 func scanInstance(row scannable) (*domain.Instance, error) {
 	var in domain.Instance
 	var labelsJSON, mdJSON, mdOptJSON, ppJSON, hgJSON, appJSON []byte
@@ -591,6 +601,7 @@ func scanInstance(row scannable) (*domain.Instance, error) {
 	return &in, nil
 }
 
+// instanceStatusName конвертирует domain.InstanceStatus в строковое имя для хранения в БД.
 func instanceStatusName(s domain.InstanceStatus) string {
 	if v, ok := computev1.Instance_Status_name[int32(s)]; ok {
 		return v
@@ -598,6 +609,7 @@ func instanceStatusName(s domain.InstanceStatus) string {
 	return "STATUS_UNSPECIFIED"
 }
 
+// instanceStatusFromName парсит строковое имя статуса из БД в domain.InstanceStatus.
 func instanceStatusFromName(s string) domain.InstanceStatus {
 	if v, ok := computev1.Instance_Status_value[s]; ok {
 		return domain.InstanceStatus(v)
@@ -605,6 +617,7 @@ func instanceStatusFromName(s string) domain.InstanceStatus {
 	return domain.InstanceStatusUnspecified
 }
 
+// attachedDiskModeName конвертирует domain.AttachedDiskMode в строковое имя для хранения в БД.
 func attachedDiskModeName(m domain.AttachedDiskMode) string {
 	switch m {
 	case domain.AttachedDiskModeReadOnly:
@@ -616,6 +629,7 @@ func attachedDiskModeName(m domain.AttachedDiskMode) string {
 	}
 }
 
+// attachedDiskModeFromName парсит строковое имя режима диска из БД в domain.AttachedDiskMode.
 func attachedDiskModeFromName(s string) domain.AttachedDiskMode {
 	switch s {
 	case "READ_ONLY":
@@ -627,6 +641,7 @@ func attachedDiskModeFromName(s string) domain.AttachedDiskMode {
 	}
 }
 
+// marshalNilable сериализует OneToOneNat в JSONB; nil → NULL.
 func marshalNilable(v *domain.OneToOneNat, field string) ([]byte, error) {
 	if v == nil {
 		return nil, nil
@@ -634,6 +649,7 @@ func marshalNilable(v *domain.OneToOneNat, field string) ([]byte, error) {
 	return marshalJSONB(v, field)
 }
 
+// orEmptyMap возвращает непустую пустую map вместо nil (для стабильной JSON-сериализации).
 func orEmptyMap(m map[string]string) map[string]string {
 	if m == nil {
 		return map[string]string{}

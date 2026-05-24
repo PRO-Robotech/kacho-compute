@@ -137,6 +137,8 @@ func (s *DiskService) Create(ctx context.Context, req CreateDiskReq) (*operation
 	return &op, nil
 }
 
+// doCreate — async-worker Disk.Create: проверяет folder/zone/type/source,
+// вставляет диск и возвращает его proto-проекцию.
 func (s *DiskService) doCreate(ctx context.Context, diskID string, req CreateDiskReq) (*anypb.Any, error) {
 	if err := s.checkFolder(ctx, req.ProjectID); err != nil {
 		return nil, err
@@ -221,6 +223,8 @@ func (s *DiskService) Update(ctx context.Context, req UpdateDiskReq) (*operation
 	return &op, nil
 }
 
+// doUpdate — async-worker Disk.Update: применяет mutable-поля по update-mask
+// и возвращает обновлённую proto-проекцию диска.
 func (s *DiskService) doUpdate(ctx context.Context, req UpdateDiskReq) (*anypb.Any, error) {
 	d, err := s.repo.Get(ctx, req.DiskID)
 	if err != nil {
@@ -261,6 +265,8 @@ func (s *DiskService) doUpdate(ctx context.Context, req UpdateDiskReq) (*anypb.A
 	return anypb.New(protoconv.Disk(updated))
 }
 
+// validateDiskUpdate проверяет update-mask Disk.Update: неизвестные поля и
+// попытка изменить immutable-поле → InvalidArgument.
 func validateDiskUpdate(req UpdateDiskReq) error {
 	known := map[string]struct{}{
 		"name": {}, "description": {}, "labels": {}, "size": {}, "disk_placement_policy": {},
@@ -391,6 +397,8 @@ func (s *DiskService) ListOperations(ctx context.Context, id string, p Paginatio
 	return s.opsRepo.List(ctx, operations.ListFilter{ResourceID: id, PageSize: p.PageSize, PageToken: p.PageToken})
 }
 
+// checkFolder проверяет существование project через peer-клиент;
+// отсутствие → NotFound, недоступность → Unavailable.
 func (s *DiskService) checkFolder(ctx context.Context, folderID string) error {
 	exists, err := s.projectClient.Exists(ctx, folderID)
 	if err != nil {

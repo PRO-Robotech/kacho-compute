@@ -32,6 +32,7 @@ func validateImageFamily(family string) error {
 	return nil
 }
 
+// maxInt64 возвращает большее из двух int64.
 func maxInt64(a, b int64) int64 {
 	if a > b {
 		return a
@@ -153,6 +154,8 @@ func (s *ImageService) Create(ctx context.Context, req CreateImageReq) (*operati
 	return &op, nil
 }
 
+// doCreate — async-worker Image.Create: проверяет folder и source
+// (image/snapshot/disk/uri), вставляет образ и возвращает его proto-проекцию.
 func (s *ImageService) doCreate(ctx context.Context, imageID string, req CreateImageReq) (*anypb.Any, error) {
 	if err := s.checkFolder(ctx, req.ProjectID); err != nil {
 		return nil, err
@@ -275,6 +278,8 @@ func (s *ImageService) Update(ctx context.Context, req UpdateImageReq) (*operati
 	return &op, nil
 }
 
+// validateImageUpdate проверяет update-mask Image.Update: неизвестные поля и
+// попытка изменить immutable-поле → InvalidArgument.
 func validateImageUpdate(req UpdateImageReq) error {
 	known := map[string]struct{}{"name": {}, "description": {}, "labels": {}, "min_disk_size": {}}
 	if err := corevalidate.UpdateMask("update_mask", req.UpdateMask, known); err != nil {
@@ -331,6 +336,8 @@ func (s *ImageService) ListOperations(ctx context.Context, id string, p Paginati
 	return s.opsRepo.List(ctx, operations.ListFilter{ResourceID: id, PageSize: p.PageSize, PageToken: p.PageToken})
 }
 
+// checkFolder проверяет существование project через peer-клиент;
+// отсутствие → NotFound, недоступность → Unavailable.
 func (s *ImageService) checkFolder(ctx context.Context, folderID string) error {
 	exists, err := s.projectClient.Exists(ctx, folderID)
 	if err != nil {

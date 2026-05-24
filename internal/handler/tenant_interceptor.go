@@ -131,6 +131,7 @@ type wrappedStream struct {
 	ctx context.Context
 }
 
+// Context возвращает подменённый контекст обёрнутого server-stream'а.
 func (w *wrappedStream) Context() context.Context { return w.ctx }
 
 // tenantFromMetadata — internal helper, извлекает TenantCtx из gRPC md.

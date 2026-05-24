@@ -62,6 +62,7 @@ func SubjectFromCtx(ctx context.Context) (subject string, admin bool) {
 	return "", admin
 }
 
+// first возвращает первый элемент среза или пустую строку, если срез пуст.
 func first(s []string) string {
 	if len(s) > 0 {
 		return s[0]

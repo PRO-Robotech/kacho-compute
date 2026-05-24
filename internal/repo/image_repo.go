@@ -23,6 +23,7 @@ type ImageRepo struct {
 // NewImageRepo создаёт ImageRepo.
 func NewImageRepo(pool *pgxpool.Pool) *ImageRepo { return &ImageRepo{pool: pool} }
 
+// imageCols — список колонок таблицы images для SELECT/INSERT в порядке scanImage.
 const imageCols = `id, project_id, created_at, name, description, labels, family, storage_size, min_disk_size, product_ids, ` +
 	`status, os_type, os_nvidia_driver, pooled, hardware_generation, kms_key, source_image_id, source_snapshot_id, source_disk_id, source_uri`
 
@@ -198,6 +199,7 @@ func (r *ImageRepo) Delete(ctx context.Context, id string) error {
 
 // ---- scan / args ----
 
+// imageInsertArgs формирует список аргументов INSERT для domain.Image в порядке imageCols.
 func imageInsertArgs(i *domain.Image) ([]any, error) {
 	labelsJSON, err := marshalJSONB(i.Labels, "Image.labels")
 	if err != nil {
@@ -222,6 +224,7 @@ func imageInsertArgs(i *domain.Image) ([]any, error) {
 	}, nil
 }
 
+// scanImage сканирует строку результата запроса в domain.Image.
 func scanImage(row scannable) (*domain.Image, error) {
 	var i domain.Image
 	var labelsJSON, prodJSON, hgJSON, kmsJSON []byte
@@ -256,6 +259,7 @@ func scanImage(row scannable) (*domain.Image, error) {
 	return &i, nil
 }
 
+// imageStatusName конвертирует domain.ImageStatus в строковое имя для хранения в БД.
 func imageStatusName(s domain.ImageStatus) string {
 	switch s {
 	case domain.ImageStatusCreating:
@@ -271,6 +275,7 @@ func imageStatusName(s domain.ImageStatus) string {
 	}
 }
 
+// imageStatusFromName парсит строковое имя статуса из БД в domain.ImageStatus.
 func imageStatusFromName(s string) domain.ImageStatus {
 	switch s {
 	case "CREATING":
@@ -286,6 +291,7 @@ func imageStatusFromName(s string) domain.ImageStatus {
 	}
 }
 
+// osTypeName конвертирует domain.OsType в строковое имя для хранения в БД.
 func osTypeName(t domain.OsType) string {
 	switch t {
 	case domain.OsTypeLinux:
@@ -297,6 +303,7 @@ func osTypeName(t domain.OsType) string {
 	}
 }
 
+// osTypeFromName парсит строковое имя типа ОС из БД в domain.OsType.
 func osTypeFromName(s string) domain.OsType {
 	switch s {
 	case "LINUX":

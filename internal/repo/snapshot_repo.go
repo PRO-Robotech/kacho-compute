@@ -23,6 +23,7 @@ type SnapshotRepo struct {
 // NewSnapshotRepo создаёт SnapshotRepo.
 func NewSnapshotRepo(pool *pgxpool.Pool) *SnapshotRepo { return &SnapshotRepo{pool: pool} }
 
+// snapshotCols — список колонок таблицы snapshots для SELECT/INSERT в порядке scanSnapshot.
 const snapshotCols = `id, project_id, created_at, name, description, labels, storage_size, disk_size, product_ids, ` +
 	`status, source_disk_id, hardware_generation, kms_key`
 
@@ -187,6 +188,7 @@ func (r *SnapshotRepo) Delete(ctx context.Context, id string) error {
 
 // ---- scan / args ----
 
+// snapshotInsertArgs формирует список аргументов INSERT для domain.Snapshot в порядке snapshotCols.
 func snapshotInsertArgs(s *domain.Snapshot) ([]any, error) {
 	labelsJSON, err := marshalJSONB(s.Labels, "Snapshot.labels")
 	if err != nil {
@@ -210,6 +212,7 @@ func snapshotInsertArgs(s *domain.Snapshot) ([]any, error) {
 	}, nil
 }
 
+// scanSnapshot сканирует строку результата запроса в domain.Snapshot.
 func scanSnapshot(row scannable) (*domain.Snapshot, error) {
 	var s domain.Snapshot
 	var labelsJSON, prodJSON, hgJSON, kmsJSON []byte
@@ -242,6 +245,7 @@ func scanSnapshot(row scannable) (*domain.Snapshot, error) {
 	return &s, nil
 }
 
+// snapshotStatusName конвертирует domain.SnapshotStatus в строковое имя для хранения в БД.
 func snapshotStatusName(s domain.SnapshotStatus) string {
 	switch s {
 	case domain.SnapshotStatusCreating:
@@ -257,6 +261,7 @@ func snapshotStatusName(s domain.SnapshotStatus) string {
 	}
 }
 
+// snapshotStatusFromName парсит строковое имя статуса из БД в domain.SnapshotStatus.
 func snapshotStatusFromName(s string) domain.SnapshotStatus {
 	switch s {
 	case "CREATING":
