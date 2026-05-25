@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -16,6 +17,7 @@ import (
 	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
 
 	"github.com/PRO-Robotech/kacho-compute/internal/domain"
+	"github.com/PRO-Robotech/kacho-compute/internal/fgawrite"
 	"github.com/PRO-Robotech/kacho-compute/internal/protoconv"
 )
 
@@ -68,6 +70,13 @@ type DiskService struct {
 	zones         ZoneRegistry
 	projectClient ProjectClient
 	opsRepo       operations.Repo
+
+	// fgaWriter / logger — KAC-188 follow-up: after the Disk row is committed,
+	// publish `compute_disk:<id>#project@project:<project_id>` so a per-resource
+	// Get/Update/Delete Check resolves through the `<rel> from project` cascade.
+	// nil → no-op.
+	fgaWriter fgawrite.HierarchyTupleWriter
+	logger    *slog.Logger
 }
 
 // NewDiskService создаёт DiskService.
@@ -76,6 +85,15 @@ func NewDiskService(repo DiskRepo, imageRepo ImageRepo, snapshotRepo SnapshotRep
 		repo: repo, imageRepo: imageRepo, snapshotRepo: snapshotRepo,
 		diskTypeRepo: diskTypeRepo, zones: zones, projectClient: projectClient, opsRepo: opsRepo,
 	}
+}
+
+// WithFGAWriter wires the OpenFGA hierarchy-tuple writer (KAC-188 follow-up).
+// Without it a created Disk has no `compute_disk:<id>#project@project` tuple
+// and every per-resource Check is FGA `no path` (403 AUTHZ_DENY).
+func (s *DiskService) WithFGAWriter(w fgawrite.HierarchyTupleWriter, logger *slog.Logger) *DiskService {
+	s.fgaWriter = w
+	s.logger = logger
+	return s
 }
 
 // Get возвращает Disk по ID.
@@ -196,6 +214,10 @@ func (s *DiskService) doCreate(ctx context.Context, diskID string, req CreateDis
 	if err != nil {
 		return nil, mapRepoErr(err)
 	}
+	// KAC-188 follow-up: publish the compute_disk→project hierarchy tuple so a
+	// per-resource Get/Update/Delete Check resolves through the
+	// `<rel> from project` cascade. Best-effort + non-fatal (row committed).
+	fgawrite.Emit(ctx, s.fgaWriter, s.logger, "compute_disk", created.ID, created.ProjectID)
 	return anypb.New(protoconv.Disk(created))
 }
 

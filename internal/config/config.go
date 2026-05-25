@@ -94,6 +94,36 @@ type Config struct {
 	// все ресурсы caller'у (без фильтра); false → Unavailable. **Default false**
 	// (fail-closed = secure). Set to true только в break-glass.
 	ListFilterFailOpen bool `envconfig:"KACHO_COMPUTE_LIST_FILTER_FAIL_OPEN" default:"false"`
+
+	// ===== KAC-188 follow-up: write-side FGA (hierarchy-tuple write) =====
+	//
+	// Каждый успешный resource Create (Instance/Disk/Image/Snapshot) публикует в
+	// shared OpenFGA store tuple `compute_<resource>:<id>#project@project:<project_id>`,
+	// чтобы per-resource Check (Get/Update/Delete) резолвился через cascade
+	// `<rel> from project`. Без этого tuple Check возвращает fail-closed DENY
+	// "no path" (the bug that motivated KAC-188 follow-up).
+	//
+	// Parity с kacho-vpc cfg.AuthZ.TupleWrite / kacho-nlb fgawrite.
+
+	// AuthZTupleWriteEnabled — master-switch. true → fgawrite.Emit публикует
+	// hierarchy tuple после каждого Create. false → no-op (dev/degraded).
+	AuthZTupleWriteEnabled bool `envconfig:"KACHO_COMPUTE_AUTHZ_TUPLE_WRITE_ENABLED" default:"false"`
+
+	// AuthZTupleWriteOpenFGAEndpoint — host:port OpenFGA HTTP API (например
+	// `kacho-umbrella-openfga:8080`). Тот же store, в который kacho-iam пишет
+	// account/project tuples. Empty → tuple-write disabled even if Enabled=true.
+	AuthZTupleWriteOpenFGAEndpoint string `envconfig:"KACHO_COMPUTE_AUTHZ_TUPLE_WRITE_OPENFGA_ENDPOINT" default:""`
+
+	// AuthZTupleWriteStoreID — OpenFGA store-id. Заполняется openfga-bootstrap-job
+	// в Secret и пробрасывается как env через valueFrom.secretKeyRef. Empty →
+	// tuple-write disabled.
+	AuthZTupleWriteStoreID string `envconfig:"KACHO_COMPUTE_AUTHZ_TUPLE_WRITE_STORE_ID" default:""`
+
+	// AuthZTupleWriteModelID — pinned authorization_model_id. Empty → store default.
+	AuthZTupleWriteModelID string `envconfig:"KACHO_COMPUTE_AUTHZ_TUPLE_WRITE_MODEL_ID" default:""`
+
+	// AuthZTupleWriteTimeoutMs — per-call deadline для OpenFGA write. Default 2000ms.
+	AuthZTupleWriteTimeoutMs int `envconfig:"KACHO_COMPUTE_AUTHZ_TUPLE_WRITE_TIMEOUT_MS" default:"2000"`
 }
 
 // baseDSN — стандартный postgres DSN без pgxpool-специфичных параметров

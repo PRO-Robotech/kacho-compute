@@ -85,3 +85,23 @@ opa:
     limits:
       cpu: 200m
       memory: 128Mi
+
+
+# KAC-198 follow-up: write-side FGA tuple for new compute resources
+# (`compute_<resource>:<id>#project@project:<project_id>`) so per-resource
+# Checks resolve via `viewer from project` cascade. Production: enabled=true
+# with the shared OpenFGA store id (umbrella values.dev.yaml injects
+# storeId/modelId from the OpenFGA bootstrap-job-populated Secrets).
+authz:
+  tupleWrite:
+    enabled: false           # Toggle write-side FGA (production: true)
+    openfgaEndpoint: ""      # OpenFGA HTTP API host:port (shared cluster store)
+    storeId: ""              # OpenFGA store id (shared with kacho-iam)
+    modelId: ""              # Pinned authorization_model_id (empty → store default)
+    timeoutMs: 2000          # Per-call write timeout
+    # Optional bootstrap-job-populated Secret refs (preferred over plain values
+    # so kacho-iam's openfga-bootstrap-job stays single source of truth).
+    storeIdSecretName: ""    # default: ""    e.g. kacho-iam-openfga-store
+    storeIdSecretKey: ""     # default: "store_id"
+    modelIdSecretName: ""    # default: ""    e.g. openfga-model-id-secret
+    modelIdSecretKey: ""     # default: "model_id"
