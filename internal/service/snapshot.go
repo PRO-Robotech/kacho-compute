@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -16,6 +17,7 @@ import (
 	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
 
 	"github.com/PRO-Robotech/kacho-compute/internal/domain"
+	"github.com/PRO-Robotech/kacho-compute/internal/fgawrite"
 	"github.com/PRO-Robotech/kacho-compute/internal/protoconv"
 )
 
@@ -44,11 +46,26 @@ type SnapshotService struct {
 	diskRepo      DiskRepo
 	projectClient ProjectClient
 	opsRepo       operations.Repo
+
+	// fgaWriter / logger — KAC-188 follow-up: after the Snapshot row is committed,
+	// publish `compute_snapshot:<id>#project@project:<project_id>` so a per-resource
+	// Check resolves. nil → no-op.
+	fgaWriter fgawrite.HierarchyTupleWriter
+	logger    *slog.Logger
 }
 
 // NewSnapshotService создаёт SnapshotService.
 func NewSnapshotService(repo SnapshotRepo, diskRepo DiskRepo, projectClient ProjectClient, opsRepo operations.Repo) *SnapshotService {
 	return &SnapshotService{repo: repo, diskRepo: diskRepo, projectClient: projectClient, opsRepo: opsRepo}
+}
+
+// WithFGAWriter wires the OpenFGA hierarchy-tuple writer (KAC-188 follow-up).
+// Without it a created Snapshot has no `compute_snapshot:<id>#project@project`
+// tuple and every per-resource Check is FGA `no path`.
+func (s *SnapshotService) WithFGAWriter(w fgawrite.HierarchyTupleWriter, logger *slog.Logger) *SnapshotService {
+	s.fgaWriter = w
+	s.logger = logger
+	return s
 }
 
 // Get возвращает Snapshot по ID.
@@ -132,6 +149,9 @@ func (s *SnapshotService) doCreate(ctx context.Context, snapID string, req Creat
 	if err != nil {
 		return nil, mapRepoErr(err)
 	}
+	// KAC-188 follow-up: publish the compute_snapshot→project hierarchy tuple so
+	// a per-resource Check resolves. Best-effort + non-fatal (row committed).
+	fgawrite.Emit(ctx, s.fgaWriter, s.logger, "compute_snapshot", created.ID, created.ProjectID)
 	return anypb.New(protoconv.Snapshot(created))
 }
 

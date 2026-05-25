@@ -22,6 +22,7 @@ import (
 	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
 
 	"github.com/PRO-Robotech/kacho-compute/internal/domain"
+	"github.com/PRO-Robotech/kacho-compute/internal/fgawrite"
 	"github.com/PRO-Robotech/kacho-compute/internal/protoconv"
 )
 
@@ -123,6 +124,15 @@ type InstanceService struct {
 	// skipIPAM — true при KACHO_COMPUTE_SKIP_PEER_VALIDATION: cross-service
 	// VPC IPAM-аллокация отключена, NIC-ам выдаются синтетические IP (synth*).
 	skipIPAM bool
+
+	// fgaWriter / logger — KAC-188 follow-up: after the Instance row is
+	// committed, publish `compute_instance:<id>#project@project:<project_id>`
+	// so a per-resource Get/Update/Delete Check resolves through the
+	// `<rel> from project` cascade. This is the direct fix for the live
+	// 403 AUTHZ_DENY "no path" on compute_instance:epd5hd7gadv28tny6246.
+	// nil → no-op.
+	fgaWriter fgawrite.HierarchyTupleWriter
+	logger    *slog.Logger
 }
 
 // NewInstanceService создаёт InstanceService. skipIPAM=true (зеркалит
@@ -134,6 +144,15 @@ func NewInstanceService(repo InstanceRepo, diskRepo DiskRepo, imageRepo ImageRep
 		zones: zones, projectClient: projectClient, vpcClient: vpcClient, opsRepo: opsRepo,
 		skipIPAM: skipIPAM,
 	}
+}
+
+// WithFGAWriter wires the OpenFGA hierarchy-tuple writer (KAC-188 follow-up).
+// Without it a created Instance has no `compute_instance:<id>#project@project`
+// tuple and every per-resource Check is FGA `no path` (403 AUTHZ_DENY).
+func (s *InstanceService) WithFGAWriter(w fgawrite.HierarchyTupleWriter, logger *slog.Logger) *InstanceService {
+	s.fgaWriter = w
+	s.logger = logger
+	return s
 }
 
 // Get возвращает Instance по ID.
@@ -285,6 +304,12 @@ func (s *InstanceService) doCreate(ctx context.Context, instanceID string, req C
 		s.releaseAddresses(ctx, createdAddrIDs)
 		return nil, mapRepoErr(err)
 	}
+	// KAC-188 follow-up: publish the compute_instance→project hierarchy tuple so
+	// a per-resource Get/Update/Delete Check resolves through the
+	// `<rel> from project` cascade. Without this tuple the FGA model returns
+	// fail-closed DENY with "no path" (the live 403 that motivated this fix).
+	// Best-effort + non-fatal (row committed).
+	fgawrite.Emit(ctx, s.fgaWriter, s.logger, "compute_instance", created.ID, created.ProjectID)
 	// Referrer-tracking (YC-like): mark every VPC Address this instance's NICs
 	// use with a compute_instance reference. Ephemeral addresses compute itself
 	// created (internal <vmid>-nicN + ephemeral external <vmid>-natN) get

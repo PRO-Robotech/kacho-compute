@@ -33,6 +33,7 @@ import (
 	"github.com/PRO-Robotech/kacho-compute/internal/check"
 	"github.com/PRO-Robotech/kacho-compute/internal/clients"
 	"github.com/PRO-Robotech/kacho-compute/internal/config"
+	"github.com/PRO-Robotech/kacho-compute/internal/fgawrite"
 	"github.com/PRO-Robotech/kacho-compute/internal/handler"
 	"github.com/PRO-Robotech/kacho-compute/internal/migrations"
 	"github.com/PRO-Robotech/kacho-compute/internal/repo"
@@ -106,7 +107,23 @@ func runServe(cfg config.Config) error {
 		}
 	}()
 
+	// KAC-188 follow-up: write-side FGA. fgaTupleWriter — nil unless
+	// authz.tuple-write is configured; nil makes fgawrite.Emit a no-op
+	// (dev / degraded). When wired, each compute resource Create publishes
+	// `compute_<resource>:<id>#project@project:<project_id>` so a per-resource
+	// FGA Check resolves through the `<rel> from project` cascade. Without this
+	// every Get/Update/Delete on a freshly created Instance/Disk/Image/Snapshot
+	// fails closed with `no path` (the live bug that motivated KAC-188 follow-up
+	// on compute_instance:epd5hd7gadv28tny6246).
+	fgaTupleWriter := buildFGATupleWriter(cfg, logger)
+
 	svcs := buildServices(pool, projectClient, vpcClient, opsRepo, cfg.SkipPeerValidation)
+	if fgaTupleWriter != nil {
+		svcs.instance.WithFGAWriter(fgaTupleWriter, logger)
+		svcs.disk.WithFGAWriter(fgaTupleWriter, logger)
+		svcs.image.WithFGAWriter(fgaTupleWriter, logger)
+		svcs.snapshot.WithFGAWriter(fgaTupleWriter, logger)
+	}
 
 	// KAC-178 §2 (W1.4 mirror of kacho-vpc): principal-extract ОБЯЗАН стоять
 	// ПЕРВЫМ в public-цепочке — без него operations.PrincipalFromContext(ctx)
@@ -368,6 +385,39 @@ func buildListFilter(cfg config.Config, authzConn *grpc.ClientConn, logger *slog
 		"fail_open", cfg.ListFilterFailOpen,
 	)
 	return authzfilter.NewFGAFilter(cli, fcfg)
+}
+
+// buildFGATupleWriter — KAC-188 follow-up. Возвращает fgawrite.HierarchyTupleWriter,
+// готовый к подвешиванию в Create use-cases (Instance/Disk/Image/Snapshot).
+// Если master-switch отключён (KACHO_COMPUTE_AUTHZ_TUPLE_WRITE_ENABLED=false)
+// либо endpoint/store-id пустые — возвращает nil, что делает fgawrite.Emit
+// no-op'ом (dev/degraded). В production-режиме без выписки tuple'ов каждый
+// per-resource Check валится с `no path` — это live bug, который мы чиним.
+func buildFGATupleWriter(cfg config.Config, logger *slog.Logger) fgawrite.HierarchyTupleWriter {
+	if !cfg.AuthZTupleWriteEnabled {
+		logger.Warn("compute write-side FGA NOT wired — KACHO_COMPUTE_AUTHZ_TUPLE_WRITE_ENABLED=false; " +
+			"created resources will have no per-resource FGA hierarchy tuple (KAC-188 follow-up)")
+		return nil
+	}
+	if cfg.AuthZTupleWriteOpenFGAEndpoint == "" || cfg.AuthZTupleWriteStoreID == "" {
+		logger.Warn("compute write-side FGA NOT wired — endpoint or store-id empty " +
+			"(KACHO_COMPUTE_AUTHZ_TUPLE_WRITE_OPENFGA_ENDPOINT / _STORE_ID); created resources " +
+			"will have no per-resource FGA hierarchy tuple (KAC-188 follow-up)")
+		return nil
+	}
+	timeout := time.Duration(cfg.AuthZTupleWriteTimeoutMs) * time.Millisecond
+	logger.Info("compute write-side FGA wired (KAC-188 follow-up)",
+		"openfga_endpoint", cfg.AuthZTupleWriteOpenFGAEndpoint,
+		"store_id", cfg.AuthZTupleWriteStoreID,
+		"model_id", cfg.AuthZTupleWriteModelID,
+		"timeout", timeout,
+	)
+	return &clients.OpenFGAWriteClient{
+		Endpoint: cfg.AuthZTupleWriteOpenFGAEndpoint,
+		StoreID:  cfg.AuthZTupleWriteStoreID,
+		ModelID:  cfg.AuthZTupleWriteModelID,
+		Timeout:  timeout,
+	}
 }
 
 // registerInternalServices — kacho-only/admin RPC на internal listener (:9091,
