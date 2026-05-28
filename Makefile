@@ -2,7 +2,7 @@ BINARY         := kacho-compute
 CMD            := ./cmd/compute
 IMAGE          := kacho-compute:dev
 
-.PHONY: build test test-short vet lint docker sync-migrations
+.PHONY: build test test-short vet lint docker sync-migrations audit-list-filter
 
 build:
 	CGO_ENABLED=0 go build -o bin/$(BINARY) $(CMD)
@@ -15,6 +15,12 @@ test-short:
 
 vet:
 	go vet ./...
+
+# audit-list-filter — RBAC v2 / KAC-219 / W6 CI gate.
+# Refuses to ship a public List<Resource> handler without authzfilter wiring.
+# Whitelist admin-only / catalog handlers via --allow=<HandlerName>.
+audit-list-filter:
+	@./tools/audit-list-filter.sh
 
 lint:
 	golangci-lint run ./...
