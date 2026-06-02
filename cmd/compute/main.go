@@ -20,8 +20,10 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 
 	coredb "github.com/PRO-Robotech/kacho-corelib/db"
+	"github.com/PRO-Robotech/kacho-corelib/grpcclient"
 	"github.com/PRO-Robotech/kacho-corelib/grpcsrv"
 	"github.com/PRO-Robotech/kacho-corelib/observability"
 	"github.com/PRO-Robotech/kacho-corelib/operations"
@@ -149,7 +151,9 @@ func runServe(cfg config.Config) error {
 
 	var authzConn *grpc.ClientConn
 	if cfg.AuthZIAMGRPCAddr != "" {
-		authzConn, err = dialPeer(cfg.AuthZIAMGRPCAddr, cfg.AuthZIAMTLS)
+		// authz-conn → iam-internal:9091 — idle-prone (между всплесками authz Check
+		// активных стримов нет) → idle=true: пинги держат conn тёплым (KAC-244).
+		authzConn, err = dialPeer(cfg.AuthZIAMGRPCAddr, cfg.AuthZIAMTLS, true)
 		if err != nil {
 			return fmt.Errorf("dial kacho-iam (authz): %w", err)
 		}
@@ -277,16 +281,19 @@ func dialPeers(cfg config.Config, logger *slog.Logger) (service.ProjectClient, s
 		logger.Warn("KACHO_COMPUTE_SKIP_PEER_VALIDATION=true — cross-service existence-check disabled (dev/test only)")
 		return clients.NoopProjectClient{}, clients.NoopVPCClient{}, nil, nil
 	}
-	iamConn, err := dialPeer(cfg.IAMGRPCAddr, cfg.IAMTLS)
+	// iam (public ProjectService.Get) + vpc conn'ы — активно используются на
+	// request-path каждой мутации → idle=false (трафик есть, idle-пинги не нужны;
+	// keepalive всё равно ставится для half-open-detection при паузах). KAC-244.
+	iamConn, err := dialPeer(cfg.IAMGRPCAddr, cfg.IAMTLS, false)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("dial iam: %w", err)
 	}
-	vpcConn, err := dialPeer(cfg.VPCGRPCAddr, cfg.VPCTLS)
+	vpcConn, err := dialPeer(cfg.VPCGRPCAddr, cfg.VPCTLS, false)
 	if err != nil {
 		_ = iamConn.Close()
 		return nil, nil, nil, fmt.Errorf("dial vpc: %w", err)
 	}
-	vpcInternalConn, err := dialPeer(cfg.VPCInternalGRPCAddr, cfg.VPCInternalTLS)
+	vpcInternalConn, err := dialPeer(cfg.VPCInternalGRPCAddr, cfg.VPCInternalTLS, false)
 	if err != nil {
 		_ = vpcConn.Close()
 		_ = iamConn.Close()
@@ -295,14 +302,33 @@ func dialPeers(cfg config.Config, logger *slog.Logger) (service.ProjectClient, s
 	return clients.NewProjectClient(iamConn), clients.NewVPCClient(vpcConn, vpcInternalConn), []*grpc.ClientConn{iamConn, vpcConn, vpcInternalConn}, nil
 }
 
-func dialPeer(addr string, useTLS bool) (*grpc.ClientConn, error) {
+// peerKeepalive — keepalive-параметры для peer-conn (KAC-244). idle=true для
+// преимущественно-idle conn'ов (authz → iam-internal): PermitWithoutStream держит
+// conn тёплым пингами без активных стримов, прямо лечит half-open-столл.
+func peerKeepalive(idle bool) keepalive.ClientParameters {
+	return grpcclient.KeepaliveParams(idle)
+}
+
+// peerDialOpts — seam-функция (тестируемая): собирает []grpc.DialOption для
+// dialPeer (creds по useTLS + keepalive по idle). Вынесена отдельно, т.к.
+// grpc.NewClient не отдаёт опции назад — тест инспектирует именно этот набор.
+func peerDialOpts(useTLS, idle bool) []grpc.DialOption {
 	var creds credentials.TransportCredentials
 	if useTLS {
 		creds = credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12})
 	} else {
 		creds = insecure.NewCredentials()
 	}
-	return grpc.NewClient(addr, grpc.WithTransportCredentials(creds))
+	return []grpc.DialOption{
+		grpc.WithTransportCredentials(creds),
+		grpcclient.KeepaliveDialOption(idle),
+	}
+}
+
+// dialPeer открывает gRPC-conn к peer-сервису с keepalive (KAC-244). idle=true →
+// idle-prone conn (authz/internal): пинги без стрима держат его тёплым.
+func dialPeer(addr string, useTLS, idle bool) (*grpc.ClientConn, error) {
+	return grpc.NewClient(addr, peerDialOpts(useTLS, idle)...)
 }
 
 // buildServices создаёт все repo'ы поверх pool и собирает из них бизнес-сервисы.
