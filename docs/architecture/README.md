@@ -17,7 +17,7 @@
 |---|---|---|
 | 00 | [Overview](00-overview.md) | Что делает kacho-compute, какие ресурсы owns, что вне скоупа, 6 принципов проекта, Clean Architecture, verbatim-YC parity goal |
 | 01 | [Resources](01-resources.md) | Детально по каждому ресурсу: Disk, Image, Snapshot, Instance (+`nic_id`→kacho-vpc NIC), DiskType, Region, Zone (Geography, owner kacho-compute) — proto-поля, ID-префиксы, status-enum'ы, полный список RPC с пометкой implemented/blocked/Unimplemented, инварианты, cross-resource links |
-| 02 | [Data Flows](02-data-flows.md) | Sequence-диаграммы compute-сценариев: Operations LRO worker, Disk.Create, Image.Create (source oneof), Snapshot.Create, Instance.Create (NIC/boot-disk validation), AttachDisk/DetachDisk, outbox + LISTEN/NOTIFY + InternalWatchService |
+| 02 | [Data Flows](02-data-flows.md) | Sequence-диаграммы compute-сценариев: Operations LRO worker, Disk.Create, Image.Create (source oneof), Snapshot.Create, Instance.Create (boot-disk validation, без авто-NIC — KAC-266), AttachDisk/DetachDisk, outbox + LISTEN/NOTIFY + InternalWatchService |
 | 03 | [Instance Lifecycle](03-instance-lifecycle.md) | State-машина `Instance.Status` (PROVISIONING/RUNNING/STOPPING/STOPPED/STARTING/RESTARTING/UPDATING/ERROR/CRASHED/DELETING), transition-таблица (RPC × precondition × end-status × Operation.response), control-plane имитация, AttachDisk/DetachDisk/NAT инварианты |
 | 04 | [API Surface](04-api-surface.md) | Таблица всех публичных RPC (REST path, method, request/response, Operation metadata/response, sync-vs-async, implemented/blocked) + internal RPC (InternalWatchService / InternalDiskTypeService / InternalRegionService / InternalZoneService на :9091) |
 | 05 | [Database](05-database.md) | Схема `kacho_compute`, миграции (`0003_geography_owner.sql` — regions+zones owned by compute; `0005_instance_nic_id.sql` — `instance_network_interfaces.nic_id`): все таблицы, колонки, индексы, FK, partial UNIQUE, outbox trigger, seed, flat-схема, xmin OCC |
@@ -71,9 +71,12 @@ disk data не существует; serial-port output синтетически
 
 Внешние зависимости:
 - `kacho-resource-manager.FolderService.Exists` — existence-check `folder_id`
-  в Create/Move (как в VPC).
-- `kacho-vpc.{SubnetService.Get, SecurityGroupService.Get, AddressService.Get}` —
-  валидация `network_interface_spec` Instance'а.
+  в Create (как в VPC).
+- `kacho-vpc.{SubnetService.Get, SecurityGroupService.Get, AddressService.Get,
+  NetworkInterfaceService.*}` — IPAM эфемерных Address + delete kacho-vpc
+  `NetworkInterface` при `Instance.Delete`. ⚠️ авто-создание/привязка NIC при
+  `Instance.Create` удалены в `KAC-266` (инстанс создаётся без сетевых
+  интерфейсов; правильная сетевая модель — будущая переделка).
 - `kacho-corelib` — `ids`, `operations`, `db`, `grpcsrv`, `grpcclient`, `outbox`,
   `validate`, `filter`, `retry`, `shutdown`, `observability`, `config`, `errors`.
 - `kacho-proto` — все `.proto`, generated stubs (`gen/go/kacho/cloud/compute/v1`).

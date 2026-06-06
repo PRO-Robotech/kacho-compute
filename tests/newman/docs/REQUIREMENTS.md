@@ -22,7 +22,7 @@ YC Compute API, чтобы заменить плейсхолдеры `# probe-ne
 | PROBE-09 | `FailedPrecondition` текст для DetachDisk boot disk | `INST-DD-NEG-BOOT` | code 9 | `"Cannot detach boot disk"` или verbatim |
 | PROBE-10 | `FailedPrecondition` текст для Disk.Delete-while-attached | `INST-DISK-DEL-WHILE-ATTACHED` | code 9 | `"The disk <id> is being used"` или verbatim |
 | PROBE-11 | AttachDisk wrong-zone / already-attached: `InvalidArgument` vs `FailedPrecondition`; тексты | `INST-AD-NEG-*` | allow code 3\|9 | зафиксировать |
-| PROBE-12 | AddOneToOneNat already-NAT: code + text | `INST-NAT-ADD-NEG-ALREADY` | code 9 | verbatim |
+| PROBE-12 | ~~AddOneToOneNat already-NAT: code + text~~ — obsolete (KAC-266: NIC binding removed from Instance lifecycle, no auto-NIC) | — | — | n/a |
 | PROBE-13 | SimulateMaintenanceEvent: возвращает Operation или RPC Unimplemented? | `INST-SME-CRUD-OK` | allow 200\|501 | зафиксировать поведение |
 | PROBE-14 | OperationService.Cancel на done-op: `FailedPrecondition` vs idempotent 200 (с уже-done op) | `OP-CANCEL-NEG-ALREADY-DONE` | allow 200\|400 | зафиксировать |
 | PROBE-15 | DiskType/Zone List игнорируют ли `page_token`? (справочники малы) | `DT-LST-PAGE-TOKEN-GARBAGE` | allow 200\|400 | зафиксировать |
@@ -47,11 +47,11 @@ YC Compute API, чтобы заменить плейсхолдеры `# probe-ne
 
 | # | Что | Почему отложено |
 |---|---|---|
-| COV-01 | Instance.AttachNetworkInterface / DetachNetworkInterface — happy path | нужен 2-й subnet из kacho-vpc в seed (есть только NEG sync-NF) |
+| COV-01 | ~~Instance.AttachNetworkInterface / DetachNetworkInterface — happy path~~ — obsolete (KAC-266: NIC binding removed from Instance lifecycle, no auto-NIC) | n/a |
 | COV-02 | Disk.Create from-snapshot — full happy path (создать snapshot → disk из него → assert source_snapshot_id) | покрыто частично (DISK-CR-NEG-SOURCE-SNAPSHOT-NOTFOUND); полный happy похож на DISK-CR-CRUD-FROM-IMAGE-OK |
 | COV-03 | Disk size ≥ image.min_disk_size validation (Create disk из image с size < min → InvalidArgument) | нужен image с известным min_disk_size; зависит от PROBE-18 |
 | COV-04 | block_size whitelist (Disk.Create с block_size не из {4096,8192,...} → InvalidArgument) | зависит от PROBE — точный set неизвестен |
-| COV-05 | Instance с 2 NIC / 2 secondary disks (multi-spec) | усложняет cleanup; базовый 1-NIC покрыт |
+| COV-05 | Instance с 2 secondary disks (multi-spec) | усложняет cleanup; базовый 1-disk покрыт (NIC multi-spec — obsolete после KAC-266) |
 | COV-06 | Pagination round-trip для Disk/Image/Snapshot/Instance (создать N+1 ресурс → page через token) | quota-heavy; ZONE-LST-PAGE-ROUNDTRIP покрывает паттерн на справочнике |
 | COV-07 | access-bindings RPC (no-op skeleton) — smoke-кейс | после реализации AAA |
 | COV-08 | `kms_key_id` / `os_product_ids` — `blocked:kacho-kms` / `blocked:kacho-marketplace` | нужны соответствующие сервисы |

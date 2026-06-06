@@ -42,7 +42,7 @@ texts, status codes, timestamp precision, regex'ы, behavioural semantics.
 
 ### В скоупе (public, verbatim-YC)
 
-**Disk** — Get / List / Create / Update / Delete / ListOperations / Move /
+**Disk** — Get / List / Create / Update / Delete / ListOperations /
 Relocate (частично — cross-zone disk move) / ListSnapshotSchedules
 (`blocked:kacho-snapshot-schedule`) + access-bindings RPC (no-op скелет под AAA).
 
@@ -55,15 +55,18 @@ ListOperations + access-bindings. Create-источники (`oneof source`): `i
 ListOperations + access-bindings.
 
 **Instance** — Get / List / Create / Update / Delete / Start / Stop / Restart /
-Move / ListOperations / AttachDisk / DetachDisk / AddOneToOneNat /
+ListOperations / AttachDisk / DetachDisk / AddOneToOneNat /
 RemoveOneToOneNat / UpdateNetworkInterface / AttachNetworkInterface /
 DetachNetworkInterface / UpdateMetadata / GetSerialPortOutput +
 access-bindings. **Cross-service refs** валидируются через peer-сервисы (VPC:
 `subnet_id` / `security_group_id` / NAT `address`; resource-manager:
-`folder_id`). `AttachFilesystem` / `DetachFilesystem` →
-`blocked:kacho-filesystem` (нет ресурса Filesystem). `Relocate` → blocked
-(нужен cross-zone disk move + restart-семантика). `SimulateMaintenanceEvent` →
-no-op (operation сразу done, response Empty).
+`folder_id`). ⚠️ **`Instance.Create` создаётся без авто-NIC** — auto-NIC
+материализация (`materializeNICs`) удалена в `KAC-266`: инстанс создаётся без
+сетевых интерфейсов, NIC больше не создаётся/привязывается на Create; правильная
+сетевая модель (явная привязка NIC) — будущая переделка. `AttachFilesystem` /
+`DetachFilesystem` → `blocked:kacho-filesystem` (нет ресурса Filesystem).
+`Relocate` → blocked (нужен cross-zone disk move + restart-семантика).
+`SimulateMaintenanceEvent` → no-op (operation сразу done, response Empty).
 
 **DiskType** — Get / List (read-only справочник; seed: `network-hdd`,
 `network-ssd`, `network-ssd-nonreplicated`, `network-ssd-io-m3`).

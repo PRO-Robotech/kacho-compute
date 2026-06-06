@@ -1,6 +1,6 @@
 """Case-set для DiskService (kacho-compute).
 
-Covered RPCs: Get, List, Create, Update, Delete, Move, Relocate, ListOperations.
+Covered RPCs: Get, List, Create, Update, Delete, Relocate, ListOperations.
 (ListSnapshotSchedules — blocked:kacho-snapshot-schedule; access-bindings — no-op skeleton, skip.)
 
 Контракт изоляции: каждый case в своём runId, работает внутри pre-allocated
@@ -524,68 +524,6 @@ CASES.append(Case(
     classes=["NEG"], priority="P0",
     steps=[Step(name="del-nx", method="DELETE", path=f"{DISKS}/{{{{garbageComputeId}}}}",
                 test_script=[*assert_status(404), *assert_grpc_code(5, "NOT_FOUND")])],
-))
-
-# ---------------------------------------------------------------------------
-# DISK-MV — Move
-# ---------------------------------------------------------------------------
-
-CASES.append(Case(
-    id="DISK-MV-CRUD-OK",
-    title="Move disk в другой folder → projectId в Get обновлён",
-    classes=["CRUD"], priority="P1",
-    steps=[
-        Step(name="cr", method="POST", path=DISKS, body=_disk_body("mv"),
-             test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
-                          *save_from_response("j.metadata && j.metadata.diskId", "diskId")]),
-        poll_operation_until_done(),
-        Step(name="move", method="POST", path=f"{DISKS}/{{{{diskId}}}}:move",
-             body={"destinationProjectId": "{{_suiteFolderCrossId}}"},
-             test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
-        poll_operation_until_done(), assert_op_success(),
-        Step(name="verify", method="GET", path=f"{DISKS}/{{{{diskId}}}}",
-             test_script=[*assert_status(200),
-                          "pm.test('projectId == cross', () => pm.expect(pm.response.json().projectId).to.eql(pm.environment.get('_suiteFolderCrossId')));"]),
-        Step(name="cleanup", method="DELETE", path=f"{DISKS}/{{{{diskId}}}}", test_script=[*save_from_response("j.id", "opId")]),
-        poll_operation_until_done(),
-    ],
-))
-
-CASES.append(Case(
-    id="DISK-MV-NEG-DEST-NOTFOUND",
-    title="Move disk в garbage destinationProjectId → async NOT_FOUND",
-    classes=["NEG"], priority="P1",
-    steps=[
-        # # requires peer-validation enabled
-        Step(name="cr", method="POST", path=DISKS, body=_disk_body("mvbad"),
-             test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
-                          *save_from_response("j.metadata && j.metadata.diskId", "diskId")]),
-        poll_operation_until_done(),
-        Step(name="move-bad", method="POST", path=f"{DISKS}/{{{{diskId}}}}:move",
-             body={"destinationProjectId": "{{garbageRmId}}"},
-             test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
-        poll_operation_until_done(),
-        assert_op_error(5, "NOT_FOUND"),
-        Step(name="cleanup", method="DELETE", path=f"{DISKS}/{{{{diskId}}}}", test_script=[*save_from_response("j.id", "opId")]),
-        poll_operation_until_done(),
-    ],
-))
-
-CASES.append(Case(
-    id="DISK-MV-AUTHZ-NF-SYNC",
-    title="Move несуществующего disk → sync 404 NOT_FOUND",
-    classes=["NEG", "AUTHZ"], priority="P1",
-    steps=[Step(name="mv-nx", method="POST", path=f"{DISKS}/{{{{garbageComputeId}}}}:move",
-                body={"destinationProjectId": "{{_suiteFolderId}}"},
-                test_script=[*assert_status(404), *assert_grpc_code(5, "NOT_FOUND")])],
-))
-
-CASES.append(Case(
-    id="DISK-MV-VAL-NO-DEST",
-    title="Move disk без destinationProjectId → 400 InvalidArgument (или 404 если Get раньше)",
-    classes=["VAL"], priority="P1",
-    steps=[Step(name="mv-no-dest", method="POST", path=f"{DISKS}/{{{{garbageComputeId}}}}:move", body={},
-                test_script=["pm.test('rejected (400 or 404)', () => pm.expect(pm.response.code).to.be.oneOf([400, 404]));"])],
 ))
 
 # ---------------------------------------------------------------------------

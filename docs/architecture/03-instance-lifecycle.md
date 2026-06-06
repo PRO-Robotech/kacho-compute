@@ -41,7 +41,7 @@ precondition по текущему status; нарушение → `FailedPrecond
 
 | RPC | preconditions (иначе `FailedPrecondition`) | промежуточный status (внутри TX) | end status | Operation.response |
 |---|---|---|---|---|
-| `Create` | — (NIC spec: exactly one of {`subnet_id`, `nic_id`} — см. ниже «materializeNICs») | `PROVISIONING` | `RUNNING` | `Instance` |
+| `Create` | — (создаётся **без авто-NIC** — см. ниже «Instance.Create без авто-NIC») | `PROVISIONING` | `RUNNING` | `Instance` |
 | `Start` | `status ∈ {STOPPED}` | `STARTING` | `RUNNING` | `Instance` |
 | `Stop` | `status ∈ {RUNNING}` | `STOPPING` | `STOPPED` | `google.protobuf.Empty` |
 | `Restart` | `status ∈ {RUNNING}` | `RESTARTING` | `RUNNING` | `google.protobuf.Empty` |
@@ -55,11 +55,10 @@ precondition по текущему status; нарушение → `FailedPrecond
 | `UpdateNetworkInterface` | NIC index valid; OCC через `xmin` (read-modify-write); precondition-семантика probe YC (вероятно `STOPPED` для смены subnet) | — | unchanged | `Instance` |
 | `AttachNetworkInterface` | `status ∈ {STOPPED}` (proto-комментарий verbatim YC); NIC index ещё не занят | — | unchanged | `Instance` |
 | `DetachNetworkInterface` | `status ∈ {STOPPED}` (proto-комментарий); NIC index valid; нельзя detach последний NIC | — | unchanged | `Instance` |
-| `Move` | `status ∈ {STOPPED}` (proto-комментарий: «instance must be stopped before moving») | — | unchanged | `Instance` |
 | `GetSerialPortOutput` | any (это **sync** read, не операция) | — | — | `GetInstanceSerialPortOutputResponse{contents}` (синтетический текст) |
 | `Relocate` | `status ∈ {STOPPED}` или RUNNING-с-restart (proto: «running instance will be restarted») — **blocked** (нужен cross-zone disk move) | — | (blocked) | `Instance` |
 | `SimulateMaintenanceEvent` | any — **no-op** | — | unchanged | `google.protobuf.Empty` |
-| `Delete` | any (Instance с дисками — отвязывает по `auto_delete`; для каждого NIC с непустым `nic_id` — detach + delete kacho-vpc `NetworkInterface`) | `DELETING` | (deleted) | `google.protobuf.Empty` |
+| `Delete` | any (Instance с дисками — отвязывает по `auto_delete`; для каждого NIC с непустым `nic_id` — delete kacho-vpc `NetworkInterface`) | `DELETING` | (deleted) | `google.protobuf.Empty` |
 
 ⚠️ verbatim YC-тексты precondition-ошибок — **probe реального YC** при написании
 acceptance/newman. До probe — placeholder-формулировки (зафиксированы в
@@ -96,7 +95,7 @@ stateDiagram-v2
   end note
   note right of STOPPED
     Stable. Допускают то же + Update resources_spec/platform_id,
-    AttachNetworkInterface/DetachNetworkInterface, Move, Relocate(blocked).
+    AttachNetworkInterface/DetachNetworkInterface, Relocate(blocked).
   end note
   note left of ERROR
     ERROR / CRASHED — зарезервированы; в control-plane
@@ -161,35 +160,31 @@ stateDiagram-v2
 - `AttachNetworkInterface` / `DetachNetworkInterface`: proto-комментарии явно
   требуют `status == STOPPED`; нельзя detach последний NIC (минимум 1 на Instance).
 
-## materializeNICs — Instance ↔ kacho-vpc NetworkInterface (эпик KAC-9)
+## Instance.Create без авто-NIC (`materializeNICs` удалён, KAC-266)
 
-Compute-NIC бэкуется ресурсом **kacho-vpc `NetworkInterface`** — он source of
-truth для интерфейса (адрес, SG, data-plane wiring); `subnet_id` /
-`primary_v4_address` / `security_group_ids` в `compute.v1.NetworkInterface` —
-read-only denorm-зеркало. id бэкующего NIC — `compute.v1.NetworkInterface.nic_id`
-(proto field 7), хранится в `instance_network_interfaces.nic_id` (миграция
-`0005_instance_nic_id.sql`). Device-index интерфейса — `compute.v1.NetworkInterface.index`
-(остаётся как было).
+⚠️ **`Instance.Create` больше не создаёт и не привязывает NIC автоматически.**
+Авто-материализация сетевых интерфейсов (`materializeNICs`) удалена в `KAC-266`:
+worker `Instance.Create` больше **не** создаёт kacho-vpc `Address` /
+`NetworkInterface` и не вызывает attach. Инстанс создаётся **без сетевых
+интерфейсов** (`instance_network_interfaces` остаётся пустой). Правильная сетевая
+модель (явная привязка NIC к инстансу) — **будущая переделка** (вне scope KAC-266;
+завести отдельный эпик при возврате к сетевой модели).
 
-`NetworkInterfaceSpec` принимает **exactly one of {`subnet_id`, `nic_id`}**
-(`subnet_id` больше не безусловно `(required)`):
+Контекст (эпик `KAC-9`, для истории): Compute-NIC задумывался как backed
+kacho-vpc-ресурсом `NetworkInterface` (source of truth для адреса/SG/data-plane);
+id бэкующего NIC — `compute.v1.NetworkInterface.nic_id` (proto field 7), колонка
+`instance_network_interfaces.nic_id` (миграция `0005_instance_nic_id.sql`)
+сохраняется в схеме, но при `Instance.Create` больше не заполняется. NIC-RPC
+`AttachToInstance` / `DetachFromInstance` на стороне kacho-vpc также сняты в `KAC-266`.
 
-- **`Instance.Create` (worker, materializeNICs):**
-  - spec задал `nic_id` → `vpcClient.AttachToInstance(nic_id, instance_id, device_index)`
-    на уже существующем kacho-vpc NIC; читает его атрибуты в denorm-зеркало.
-  - spec задал `subnet_id` → inline-создаёт kacho-vpc `Address` (эфемерный
-    internal IPAM) + `NetworkInterface` (+ attach к инстансу), сохраняет его id в
-    `nic_id`.
-  - `KACHO_COMPUTE_SKIP_PEER_VALIDATION=true` → синтетический NIC без
-    kacho-vpc-ресурса (`nic_id=''`) — для unit/newman без поднятого kacho-vpc.
-- **`Instance.Delete` (worker):** для каждого NIC с непустым `nic_id` —
-  `vpcClient.DetachFromInstance` + delete kacho-vpc `NetworkInterface` (что
-  освобождает его `Address`-ресурсы). Best-effort: VPC недоступен → log warning,
-  операцию не валим (как и с one_to_one_nat addresses).
+- **`Instance.Delete` (worker):** для каждого NIC с непустым `nic_id` (если такие
+  есть от прежних данных) — delete kacho-vpc `NetworkInterface` (что освобождает
+  его `Address`-ресурсы). Best-effort: VPC недоступен → log warning, операцию не
+  валим (как и с one_to_one_nat addresses).
 
-Новый runtime cross-domain edge (зафиксирован в workspace `CLAUDE.md`
-§«Кросс-репо зависимости»): `kacho-compute → kacho-vpc` (NIC create/attach/detach
-+ эфемерный Address IPAM).
+Runtime cross-domain edge `kacho-compute → kacho-vpc` сохраняется (валидация
+ссылок + delete NIC при Delete + эфемерный Address IPAM), но **без** create/attach
+NIC на пути `Instance.Create`.
 
 ## `Update` resources_spec / platform_id требует STOPPED
 

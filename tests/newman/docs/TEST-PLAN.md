@@ -16,12 +16,12 @@
 | Create | CRUD (empty, type-explicit, from-image), VAL (folder/zone/size req, name regex/len, labels, desc), NEG (folder-NF, zone-unknown, type-unknown, dup-name, source-NF), BVA (size min/below/max/above), CONF (id-prefix epd, created_at sec), SEC | DISK-CR-* (~35) | ▣ |
 | Update | CRUD (name/desc/labels, size-increase), STATE (immutable type/zone, full-PATCH silent ignore, size-decrease reject, unknown-mask), NEG (sync-NF) | DISK-UPD-* (8) | ▣ |
 | Delete | CRUD, NEG (sync-NF), CONF (response=Empty + metadata) | DISK-DEL-* (3) | ▣ |
-| Move | CRUD-OK, NEG (dest-NF, sync-NF), VAL (no-dest) | DISK-MV-* (4) | ▣ |
+| Move | — removed (KAC-266) | — | □ |
 | Relocate | CRUD-OK, NEG (dest-zone-unknown) | DISK-REL-* (2) | ■ |
 | ListOperations | CRUD-OK (≥1 op), NEG (parent-NF) | DISK-LOP-* (2) | ■ |
 | ListSnapshotSchedules | — | — `blocked:kacho-snapshot-schedule` | □ |
 
-**Coverage: 8/9 RPC (89%); ListSnapshotSchedules — blocked.**
+**Coverage: 7/8 RPC (88%); Move removed (KAC-266); ListSnapshotSchedules — blocked.**
 
 ## ImageService (7 публичных RPC — без access-bindings)
 
@@ -50,35 +50,32 @@
 
 **Coverage: 6/6 RPC (100%).**
 
-## InstanceService (18 публичных RPC — без access-bindings)
+## InstanceService (public RPC — без access-bindings)
 
 | RPC | Классы | Кейсы | Статус |
 |---|---|---|---|
 | Get | NEG, CONF (NF-text), BASIC-view metadata omission (через List) | INST-GET-* (2), INST-LST-VIEW-BASIC-NO-METADATA | ▣ |
 | List | CRUD, VAL (folder req), PAGE, FILTER, view=BASIC conformance | INST-LST-* + блоки | ▣ |
-| Create | CRUD (boot disk_spec / disk_id / from-image), VAL (missing zone/platform/resources/bootdisk/nic/folder, name regex, core_fraction, cores, bootdisk-exactly-one), NEG (folder-NF, subnet-NF, dup-name), CONF (id-prefix epd, created_at sec, fqdn, NIC), SEC, BVA | INST-CR-* (~25) | ▣ |
+| Create | CRUD (boot disk_spec / disk_id / from-image; no auto-NIC — KAC-266), VAL (missing zone/platform/resources/bootdisk/folder, name regex, core_fraction, cores, bootdisk-exactly-one), NEG (folder-NF, dup-name), CONF (id-prefix epd, created_at sec, fqdn, no NIC), SEC, BVA | INST-CR-* | ▣ |
 | Update | CRUD (name/desc/labels), STATE (resources_spec requires STOPPED, immutable zone, unknown-mask), NEG (sync-NF) | INST-UPD-* (5) | ▣ |
 | Start | STATE (←STOPPED only; from-RUNNING→FailedPrec, from-STOPPED→OK), NEG (sync-NF) | INST-STATE-START-* (2), INST-START-AUTHZ-NF-SYNC | ▣ |
 | Stop | STATE (←RUNNING only; OK, from-STOPPED→FailedPrec), NEG (sync-NF) | INST-STATE-STOP-* (2), INST-STOP-AUTHZ-NF-SYNC | ▣ |
 | Restart | STATE (←RUNNING only; OK, from-STOPPED→FailedPrec) | INST-STATE-RESTART-* (2) | ▣ |
 | Delete | CRUD, NEG (sync-NF), STATE (auto_delete boot gone / non-auto remains), CONF (response=Empty + metadata) | INST-DEL-* (5) | ▣ |
-| Move | CRUD-OK (status preserved), NEG (sync-NF) | INST-MV-* (2) | ■ |
+| Move | — removed (KAC-266) | — | □ |
 | ListOperations | CRUD-OK, NEG (parent-NF) | INST-LOP-* (2) | ■ |
 | AttachDisk | CRUD-OK (secondary_disks updated), NEG (wrong-zone, already-attached) | INST-AD-* (3) | ▣ |
 | DetachDisk | CRUD-OK, NEG (boot disk → FailedPrec, not-attached) | INST-DD-* (3) | ▣ |
-| AddOneToOneNat | CRUD-OK (NIC.one_to_one_nat present), NEG (already-NAT) | INST-NAT-ADD-* (2) | ▣ |
-| RemoveOneToOneNat | CRUD-OK (NIC.one_to_one_nat absent) | INST-NAT-REMOVE-CRUD-OK | ◐ |
-| UpdateNetworkInterface | CRUD-OK (mask=security_group_ids), NEG (bad index) | INST-UNI-* (2) | ■ |
 | UpdateMetadata | CRUD-OK (upsert/delete + FULL-view round-trip) | INST-UMETA-CRUD-OK | ◐ |
 | GetSerialPortOutput | CRUD-OK (contents string), NEG (NotFound) | INST-SPO-* (2) | ■ |
-| AttachNetworkInterface | NEG (sync-NF) | INST-ANI-AUTHZ-NF-SYNC | ◐ — happy path `enhancement` (нужен 2-й subnet) |
-| DetachNetworkInterface | — | — `enhancement` | □ |
+| AttachNetworkInterface / DetachNetworkInterface / UpdateNetworkInterface | — NIC binding removed from Instance lifecycle (KAC-266, no auto-NIC); proto-level RPC cleanup tracked separately | — | □ |
+| AddOneToOneNat / RemoveOneToOneNat | — NIC binding removed from Instance lifecycle (KAC-266); Instance has no NIC to NAT | — | □ |
 | AttachFilesystem / DetachFilesystem | — | — `blocked:kacho-filesystem` | □ |
 | Relocate | — | — `blocked` (cross-zone disk move) | □ |
 | SimulateMaintenanceEvent | CRUD-OK (no-op) | INST-SME-CRUD-OK | ◐ |
 
-**Coverage: 18/20 RPC (90%); DetachNetworkInterface — enhancement, Attach/DetachFilesystem & Relocate — blocked.**
-Кросс-сервис: INST-* CRUD требуют поднятого kacho-vpc + seeded subnet/SG; NEG-SUBNET-NOTFOUND / NEG-FOLDER-NOTFOUND требуют `KACHO_COMPUTE_SKIP_PEER_VALIDATION!=true`.
+**KAC-266: Move + all NIC-coupled RPCs (Attach/Detach/UpdateNetworkInterface, AddOneToOneNat/RemoveOneToOneNat) removed from the active test surface — NIC binding is no longer part of the Instance lifecycle (no auto-NIC).**
+Кросс-сервис: INST-* CRUD требуют поднятого kacho-iam (project existence); NEG-FOLDER-NOTFOUND требует `KACHO_COMPUTE_SKIP_PEER_VALIDATION!=true`.
 
 ## DiskTypeService (2 RPC — read-only)
 

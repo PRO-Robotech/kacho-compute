@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "2b864697-3cf8-45f9-89ba-27d949b2f4f6",
+    "_postman_id": "d3d77bb2-cb69-40c5-9940-746be2844db4",
     "name": "kacho-compute / newman / authz-deny",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -50,7 +50,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{projectA1Id}}\", \"name\": \"authz-instance-anon-own-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{seedNetworkA1Id}}\"}]}",
+              "raw": "{\"folderId\": \"{{projectA1Id}}\", \"name\": \"authz-instance-anon-own-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -112,7 +112,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{projectB1Id}}\", \"name\": \"authz-instance-anon-cross-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{seedNetworkA1Id}}\"}]}",
+              "raw": "{\"folderId\": \"{{projectB1Id}}\", \"name\": \"authz-instance-anon-cross-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -451,7 +451,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{projectA1Id}}\", \"name\": \"authz-instance-nob-own-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{seedNetworkA1Id}}\"}]}",
+              "raw": "{\"folderId\": \"{{projectA1Id}}\", \"name\": \"authz-instance-nob-own-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -518,7 +518,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{projectB1Id}}\", \"name\": \"authz-instance-nob-cross-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{seedNetworkA1Id}}\"}]}",
+              "raw": "{\"folderId\": \"{{projectB1Id}}\", \"name\": \"authz-instance-nob-cross-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -887,7 +887,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{projectA1Id}}\", \"name\": \"authz-instance-pa1-own-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{seedNetworkA1Id}}\"}]}",
+              "raw": "{\"folderId\": \"{{projectA1Id}}\", \"name\": \"authz-instance-pa1-own-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -953,7 +953,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{projectB1Id}}\", \"name\": \"authz-instance-pa1-cross-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{seedNetworkA1Id}}\"}]}",
+              "raw": "{\"folderId\": \"{{projectB1Id}}\", \"name\": \"authz-instance-pa1-cross-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1318,7 +1318,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{projectA1Id}}\", \"name\": \"authz-instance-aaa-own-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{seedNetworkA1Id}}\"}]}",
+              "raw": "{\"folderId\": \"{{projectA1Id}}\", \"name\": \"authz-instance-aaa-own-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1384,7 +1384,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{projectB1Id}}\", \"name\": \"authz-instance-aaa-cross-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{seedNetworkA1Id}}\"}]}",
+              "raw": "{\"folderId\": \"{{projectB1Id}}\", \"name\": \"authz-instance-aaa-cross-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1749,7 +1749,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{projectA1Id}}\", \"name\": \"authz-instance-aab-own-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{seedNetworkA1Id}}\"}]}",
+              "raw": "{\"folderId\": \"{{projectA1Id}}\", \"name\": \"authz-instance-aab-own-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1816,7 +1816,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{projectB1Id}}\", \"name\": \"authz-instance-aab-cross-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{seedNetworkA1Id}}\"}]}",
+              "raw": "{\"folderId\": \"{{projectB1Id}}\", \"name\": \"authz-instance-aab-cross-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2183,7 +2183,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{projectA1Id}}\", \"name\": \"authz-instance-inv-own-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{seedNetworkA1Id}}\"}]}",
+              "raw": "{\"folderId\": \"{{projectA1Id}}\", \"name\": \"authz-instance-inv-own-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2249,7 +2249,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"folderId\": \"{{projectB1Id}}\", \"name\": \"authz-instance-inv-cross-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{seedNetworkA1Id}}\"}]}",
+              "raw": "{\"folderId\": \"{{projectB1Id}}\", \"name\": \"authz-instance-inv-cross-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -13501,403 +13501,6 @@
                   "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
                   "pm.test('[AUTHZ-DISKTYPE-CR-INV] DENY: grpc code 7 (PERMISSION_DENIED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(7));",
                   "pm.test('[AUTHZ-DISKTYPE-CR-INV] DENY: message contains permission denied', () => pm.expect((j && j.message || '').toLowerCase()).to.contain('permission denied'));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "AUTHZ-CD-INST-XACCT-SUBNET-ANON — [DENY] Create Instance с subnet из cross-account project (peer-validation) as anon (cross-domain-subnet-from-victim)",
-      "description": "class:AUTHZ | class:NEG | priority:P1",
-      "item": [
-        {
-          "name": "post",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/compute/v1/instances",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "compute",
-                "v1",
-                "instances"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"folderId\": \"{{projectA1Id}}\", \"name\": \"cd-anon-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{seedNetworkB1Id}}\"}]}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// KAC-122 authz-deny: anonymous step",
-                  "pm.request.headers.remove('Authorization');"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('[AUTHZ-CD-INST-XACCT-SUBNET-ANON] DENY: status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(403));",
-                  "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('[AUTHZ-CD-INST-XACCT-SUBNET-ANON] DENY: grpc code 7 (PERMISSION_DENIED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(7));",
-                  "pm.test('[AUTHZ-CD-INST-XACCT-SUBNET-ANON] DENY: message contains permission denied', () => pm.expect((j && j.message || '').toLowerCase()).to.contain('permission denied'));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "AUTHZ-CD-INST-XACCT-SUBNET-NOB — [DENY] Create Instance с subnet из cross-account project (peer-validation) as no-bind (cross-domain-subnet-from-victim)",
-      "description": "class:AUTHZ | class:NEG | priority:P1",
-      "item": [
-        {
-          "name": "post",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/compute/v1/instances",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "compute",
-                "v1",
-                "instances"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"folderId\": \"{{projectA1Id}}\", \"name\": \"cd-nob-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{seedNetworkB1Id}}\"}]}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// KAC-122 authz-deny: bearer from env 'jwtNoBindings'",
-                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('[AUTHZ-CD-INST-XACCT-SUBNET-NOB] DENY: status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(403));",
-                  "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('[AUTHZ-CD-INST-XACCT-SUBNET-NOB] DENY: grpc code 7 (PERMISSION_DENIED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(7));",
-                  "pm.test('[AUTHZ-CD-INST-XACCT-SUBNET-NOB] DENY: message contains permission denied', () => pm.expect((j && j.message || '').toLowerCase()).to.contain('permission denied'));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "AUTHZ-CD-INST-XACCT-SUBNET-PA1 — [DENY] Create Instance с subnet из cross-account project (peer-validation) as proj-adm (cross-domain-subnet-from-victim)",
-      "description": "class:AUTHZ | class:NEG | priority:P1",
-      "item": [
-        {
-          "name": "post",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/compute/v1/instances",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "compute",
-                "v1",
-                "instances"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"folderId\": \"{{projectA1Id}}\", \"name\": \"cd-pa1-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{seedNetworkB1Id}}\"}]}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// KAC-122 authz-deny: bearer from env 'jwtProjectAdminA1'",
-                  "const __t = pm.environment.get('jwtProjectAdminA1') || pm.variables.get('jwtProjectAdminA1') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('[AUTHZ-CD-INST-XACCT-SUBNET-PA1] DENY: status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(403));",
-                  "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('[AUTHZ-CD-INST-XACCT-SUBNET-PA1] DENY: grpc code 7 (PERMISSION_DENIED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(7));",
-                  "pm.test('[AUTHZ-CD-INST-XACCT-SUBNET-PA1] DENY: message contains permission denied', () => pm.expect((j && j.message || '').toLowerCase()).to.contain('permission denied'));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "AUTHZ-CD-INST-XACCT-SUBNET-AAA — [DENY] Create Instance с subnet из cross-account project (peer-validation) as acct-adm-a (cross-domain-subnet-from-victim)",
-      "description": "class:AUTHZ | class:NEG | priority:P1",
-      "item": [
-        {
-          "name": "post",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/compute/v1/instances",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "compute",
-                "v1",
-                "instances"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"folderId\": \"{{projectA1Id}}\", \"name\": \"cd-aaa-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{seedNetworkB1Id}}\"}]}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// KAC-122 authz-deny: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('[AUTHZ-CD-INST-XACCT-SUBNET-AAA] DENY: status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(403));",
-                  "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('[AUTHZ-CD-INST-XACCT-SUBNET-AAA] DENY: grpc code 7 (PERMISSION_DENIED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(7));",
-                  "pm.test('[AUTHZ-CD-INST-XACCT-SUBNET-AAA] DENY: message contains permission denied', () => pm.expect((j && j.message || '').toLowerCase()).to.contain('permission denied'));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "AUTHZ-CD-INST-XACCT-SUBNET-AAB — [DENY] Create Instance с subnet из cross-account project (peer-validation) as acct-adm-b (cross-domain-subnet-from-victim)",
-      "description": "class:AUTHZ | class:NEG | priority:P1",
-      "item": [
-        {
-          "name": "post",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/compute/v1/instances",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "compute",
-                "v1",
-                "instances"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"folderId\": \"{{projectA1Id}}\", \"name\": \"cd-aab-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{seedNetworkB1Id}}\"}]}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// KAC-122 authz-deny: bearer from env 'jwtAccountAdminB'",
-                  "const __t = pm.environment.get('jwtAccountAdminB') || pm.variables.get('jwtAccountAdminB') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('[AUTHZ-CD-INST-XACCT-SUBNET-AAB] DENY: status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(403));",
-                  "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('[AUTHZ-CD-INST-XACCT-SUBNET-AAB] DENY: grpc code 7 (PERMISSION_DENIED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(7));",
-                  "pm.test('[AUTHZ-CD-INST-XACCT-SUBNET-AAB] DENY: message contains permission denied', () => pm.expect((j && j.message || '').toLowerCase()).to.contain('permission denied'));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "AUTHZ-CD-INST-XACCT-SUBNET-INV — [DENY] Create Instance с subnet из cross-account project (peer-validation) as invitee (cross-domain-subnet-from-victim)",
-      "description": "class:AUTHZ | class:NEG | priority:P1",
-      "item": [
-        {
-          "name": "post",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/compute/v1/instances",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "compute",
-                "v1",
-                "instances"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"folderId\": \"{{projectA1Id}}\", \"name\": \"cd-inv-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}, \"networkInterfaceSpecs\": [{\"subnetId\": \"{{seedNetworkB1Id}}\"}]}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// KAC-122 authz-deny: bearer from env 'jwtInvitee'",
-                  "const __t = pm.environment.get('jwtInvitee') || pm.variables.get('jwtInvitee') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.request.headers.remove('Authorization');",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('[AUTHZ-CD-INST-XACCT-SUBNET-INV] DENY: status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(403));",
-                  "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('[AUTHZ-CD-INST-XACCT-SUBNET-INV] DENY: grpc code 7 (PERMISSION_DENIED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(7));",
-                  "pm.test('[AUTHZ-CD-INST-XACCT-SUBNET-INV] DENY: message contains permission denied', () => pm.expect((j && j.message || '').toLowerCase()).to.contain('permission denied'));"
                 ]
               }
             }

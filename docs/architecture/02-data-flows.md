@@ -9,7 +9,7 @@ Sequence-диаграммы compute-сценариев (то, что в коде
 2. [Disk.Create](#2-diskcreate)
 3. [Image.Create (source oneof resolve)](#3-imagecreate-source-oneof-resolve)
 4. [Snapshot.Create (из Disk READY)](#4-snapshotcreate-из-disk-ready)
-5. [Instance.Create (NIC + boot-disk validation, single TX)](#5-instancecreate-nic--boot-disk-validation-single-tx)
+5. [Instance.Create (boot-disk validation, single TX, без авто-NIC)](#5-instancecreate-boot-disk-validation-single-tx-без-авто-nic)
 6. [Instance.AttachDisk / DetachDisk](#6-instanceattachdisk--detachdisk)
 7. [Instance.Delete (auto_delete + NAT release)](#7-instancedelete-auto_delete--nat-release)
 8. [Outbox + LISTEN/NOTIFY + InternalWatchService](#8-outbox--listennotify--internalwatchservice)
@@ -18,7 +18,7 @@ Sequence-диаграммы compute-сценариев (то, что в коде
 
 ## 1. Operations LRO worker (общий шаблон)
 
-Все мутации (`Create/Update/Delete/Start/Stop/Restart/Move/AttachDisk/...`)
+Все мутации (`Create/Update/Delete/Start/Stop/Restart/AttachDisk/...`)
 возвращают `*operation.Operation`; реальная работа — в worker-горутине через
 `operations.Run(ctx, opsRepo, opID, fn)`. Шаблон идентичен VPC
 (`../kacho-vpc/internal/service/route_table.go`).
@@ -66,7 +66,7 @@ sequenceDiagram
   worker возвращает `anypb.New(&emptypb.Empty{})`; metadata уже в
   `Operation.metadata`. То же для `Stop`/`Restart`/`SimulateMaintenanceEvent`
   (response `Empty`); `Start`/`AttachDisk`/`DetachDisk`/NAT/UpdateMetadata —
-  response `Instance`; Disk/Image/Snapshot Create/Update/Move/Relocate — response
+  response `Instance`; Disk/Image/Snapshot Create/Update + Disk.Relocate — response
   соответствующего ресурса.
 - Worker — на той же поде, что сервис. graceful shutdown ждёт активных
   worker'ов через `operations.Wait(30s)` в `cmd/compute/main.go` (как в VPC после
@@ -194,7 +194,14 @@ sequenceDiagram
 
 ---
 
-## 5. Instance.Create (NIC + boot-disk validation, single TX)
+## 5. Instance.Create (boot-disk validation, single TX, без авто-NIC)
+
+⚠️ **`Instance.Create` больше не создаёт и не привязывает NIC автоматически**
+(auto-NIC материализация `materializeNICs` удалена в `KAC-266`): worker больше
+**не** валидирует per-NIC ссылки, не создаёт kacho-vpc `Address` / `NetworkInterface`,
+не делает attach и не проставляет address-referrer. Инстанс создаётся **без
+сетевых интерфейсов** (`instance_network_interfaces` остаётся пустой). Правильная
+сетевая модель (явная привязка NIC) — будущая переделка.
 
 ```mermaid
 sequenceDiagram
@@ -203,27 +210,17 @@ sequenceDiagram
   participant S as InstanceService
   participant RM as folderClient
   participant ZR as ZoneRegistry
-  participant VPC as vpcClient (kacho-vpc :9090)
   participant DB as pg-compute
 
-  U->>S: Create(folder_id, zone_id, platform_id, resources_spec,<br/>boot_disk_spec{disk_id|disk_spec, auto_delete},<br/>secondary_disk_specs[≤3], network_interface_specs[≥1], metadata?, hostname?, ...)
-  S->>S: SYNC: folder_id/zone_id/platform_id/resources_spec/boot_disk_spec/≥1 NIC required;<br/>NameCompute(name); per-platform resources (platforms.go: cores set, memory range/multiple, core_fraction ∈ {0,5,20,50,100}, gpus per-platform);<br/>boot/secondary: exactly-one {disk_id, disk_spec}; metadata ≤256 KiB; filesystem_specs → blocked:kacho-filesystem
+  U->>S: Create(folder_id, zone_id, platform_id, resources_spec,<br/>boot_disk_spec{disk_id|disk_spec, auto_delete},<br/>secondary_disk_specs[≤3], metadata?, hostname?, ...)
+  S->>S: SYNC: folder_id/zone_id/platform_id/resources_spec/boot_disk_spec required;<br/>NameCompute(name); per-platform resources (platforms.go: cores set, memory range/multiple, core_fraction ∈ {0,5,20,50,100}, gpus per-platform);<br/>boot/secondary: exactly-one {disk_id, disk_spec}; metadata ≤256 KiB; filesystem_specs → blocked:kacho-filesystem
   S-->>U: Operation{id: epd..., metadata: CreateInstanceMetadata{instance_id: epd...}}
 
   rect rgb(255,247,230)
   Note over S: async worker
   S->>RM: folderClient.Exists(folder_id) → NotFound if absent
   S->>ZR: zone existence (zones table)
-  loop for each network_interface_spec
-    S->>VPC: SubnetService.Get(subnet_id) → NotFound "Subnet <X> not found"
-    S->>S: assert subnet.zone_id == instance.zone_id else InvalidArgument
-    loop for each security_group_id
-      S->>VPC: SecurityGroupService.Get(sg_id) → NotFound "Security group <X> not found"
-    end
-    opt one_to_one_nat.address set
-      S->>VPC: AddressService.Get(address) → NotFound "Address <X> not found"
-    end
-  end
+  Note over S: NIC не создаётся и не валидируется (auto-NIC удалён в KAC-266)
   alt boot_disk_spec.disk_id
     S->>DB: SELECT disks WHERE id=$disk_id → NotFound; disk READY & same zone & not attached
   else boot_disk_spec.disk_spec
@@ -232,7 +229,6 @@ sequenceDiagram
   S->>DB: BEGIN
   S->>DB: (если disk_spec) INSERT disks (boot, status='READY')
   S->>DB: INSERT instances (status='PROVISIONING' → конечный 'RUNNING' в той же TX; fqdn computed)
-  S->>DB: INSERT instance_network_interfaces (по одной строке на NIC, idx '0','1',...)
   S->>DB: INSERT attached_disks (boot: is_boot=true; secondary: is_boot=false)
   S->>DB: INSERT compute_outbox (Instance, CREATED)
   S->>DB: COMMIT
@@ -240,30 +236,15 @@ sequenceDiagram
     DB-->>S: 23505/23503 → mapRepoErr → ALREADY_EXISTS / FailedPrecondition
     S->>DB: UPDATE operation error
   else success
-    S->>DB: UPDATE operation done=true, response=protoconv.Instance(created)  # status RUNNING
-    loop for each NIC address
-      alt ephemeral (compute-created: internal <vmid>-nicN OR ephemeral external <vmid>-natN)
-        S->>VPC: InternalAddressService.MarkAddressEphemeralInUse(address_id, "compute_instance", instance_id, instance_name) — atomically sets reserved=false, used=true + upserts referrer
-      else reserved (user-provided one_to_one_nat.address_id)
-        S->>VPC: InternalAddressService.SetAddressReference(address_id, "compute_instance", instance_id, instance_name) — referrer only, reserved=true intact
-      end
-      Note over S,VPC: best-effort (ошибка → warning, не валит инстанс)
-    end
+    S->>DB: UPDATE operation done=true, response=protoconv.Instance(created)  # status RUNNING, network_interfaces[] пуст
   end
   end
 ```
 
 Control-plane имитация: статус переходит `PROVISIONING → RUNNING` синхронно в той
 же TX (без таймеров; см. [`03-instance-lifecycle.md`](03-instance-lifecycle.md)).
-После успешной вставки compute проставляет referrer (`type=compute_instance`,
-`id=instance_id`, `name=instance_name`) каждому VPC `Address`-ресурсу NIC-ей.
-Эфемерные адреса (которые compute создал сам через `AddressService.Create`) при
-этом флипаются `reserved=true → false` и помечаются `used=true` атомарно — через
-`MarkAddressEphemeralInUse`; у reserved пользовательских адресов
-(`one_to_one_nat.address_id`) `reserved` остаётся `true`, добавляется только
-`used_by[]`. Адреса видны в `AddressService.Get/List` с `used_by=[…]` и в
-`SubnetService.ListUsedAddresses` (YC-like; см.
-[`07-known-divergences.md`](07-known-divergences.md) §8).
+Инстанс создаётся без сетевых интерфейсов; address-referrer / эфемерный IPAM
+больше не задействуются на пути `Instance.Create`.
 
 ---
 
@@ -408,7 +389,7 @@ durable-consumer'ов (сейчас не обязательна — клиент
 | Disk create | `internal/service/disk.go::doCreate` |
 | Image create + source resolve | `internal/service/image.go::doCreate` |
 | Snapshot create | `internal/service/snapshot.go::doCreate` |
-| Instance create + NIC validation | `internal/service/instance.go::doCreate` |
+| Instance create (без авто-NIC, KAC-266) | `internal/service/instance.go::doCreate` |
 | Attach/Detach/NAT/UpdateNIC | `internal/service/instance.go` |
 | Instance delete + auto_delete | `internal/service/instance.go::doDelete` |
 | Cross-service clients | `internal/clients/resourcemanager_client.go`, `internal/clients/vpc_client.go` |

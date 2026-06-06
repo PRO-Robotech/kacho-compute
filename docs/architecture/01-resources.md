@@ -119,7 +119,6 @@ async `NotFound`, а malformed/wrong-prefix id → sync `InvalidArgument "invali
 | `Update` | async | ✅ | metadata `UpdateDiskMetadata`, response `Disk`. mutable: `name`/`description`/`labels`/`size` (только увеличение)/`disk_placement_policy`; immutable: `type_id`/`zone_id`/`block_size`/`source` |
 | `Delete` | async | ✅ | metadata `DeleteDiskMetadata`, response `google.protobuf.Empty`. Attached disk → `FailedPrecondition "The disk <id> is being used"` (FK `attached_disks.disk_id` RESTRICT) |
 | `ListOperations` | sync | ✅ | `GET /compute/v1/disks/{disk_id}/operations` |
-| `Move` | async | ✅ | metadata `MoveDiskMetadata`, response `Disk`. Меняет `folder_id`; existence-check destination folder |
 | `Relocate` | async | ⚠️ частично | metadata `RelocateDiskMetadata`, response `Disk`. Меняет `zone_id`; precondition: disk не attached (`FailedPrecondition "Disk is in use"`). Cross-zone semantics simplified — см. `07-known-divergences.md` §7 |
 | `ListSnapshotSchedules` | sync | 🚫 `blocked:kacho-snapshot-schedule` | возвращает пустой list / `Unimplemented` — нет ресурса SnapshotSchedule |
 | `ListAccessBindings` | sync | ⏭️ no-op скелет | пустой list (AAA не реализован) |
@@ -285,9 +284,9 @@ state-машину статуса. Таблица `instances` + дочерние
 |---|---|---|---|
 | `Get` | sync | ✅ | `GET /compute/v1/instances/{instance_id}?view=` (BASIC/FULL — FULL включает metadata) |
 | `List` | sync | ✅ | `GET /compute/v1/instances?folderId=`. metadata всегда омитится (verbatim YC). filter: `id/name/created_at/status/zone_id/platform_id/host_id` (whitelist; текущая фаза — `name=`) |
-| `Create` | async | ✅ | required `zone_id`/`platform_id`/`resources_spec`/`boot_disk_spec`/≥1 `network_interface_spec`. metadata `CreateInstanceMetadata{instance_id}`, response `Instance`. boot/secondary disk: `exactly_one` of {`disk_id`, `disk_spec`}. **NIC spec** (`NetworkInterfaceSpec`): либо `subnet_id` (inline-создать Address + kacho-vpc NetworkInterface + attach), либо `nic_id` (`(length)="<=50"`, attach уже существующий kacho-vpc NIC к этому инстансу) — exactly one of {`subnet_id`, `nic_id`}; `subnet_id` больше не безусловно `(required)`. `SKIP_PEER_VALIDATION` → синтетический NIC без kacho-vpc-ресурса (`nic_id=''`). end status `RUNNING`. `filesystem_specs[]` → `blocked:kacho-filesystem`; `local_disk_specs[]` — отложено |
+| `Create` | async | ✅ | required `zone_id`/`platform_id`/`resources_spec`/`boot_disk_spec`. metadata `CreateInstanceMetadata{instance_id}`, response `Instance`. boot/secondary disk: `exactly_one` of {`disk_id`, `disk_spec`}. ⚠️ **без авто-NIC** — auto-NIC материализация `materializeNICs` удалена в `KAC-266`: инстанс создаётся **без сетевых интерфейсов** (`instance_network_interfaces` пуст), NIC не создаётся/привязывается на Create; правильная сетевая модель (явная привязка NIC) — будущая переделка. end status `RUNNING`. `filesystem_specs[]` → `blocked:kacho-filesystem`; `local_disk_specs[]` — отложено |
 | `Update` | async | ✅ | metadata `UpdateInstanceMetadata`, response `Instance`. mutable: `name`/`description`/`labels`/`service_account_id`/`network_settings`/`placement_policy`/`scheduling_policy`/`maintenance_policy`/`maintenance_grace_period`/`serial_port_settings`. `resources_spec`/`platform_id` — только при `STOPPED` (`FailedPrecondition "Instance must be stopped"`). `metadata` — через `UpdateMetadata`. immutable: `zone_id`/`boot_disk` |
-| `Delete` | async | ✅ | metadata `DeleteInstanceMetadata`, response `Empty`. worker: обрабатывает attached disks по `auto_delete` (true → DELETE disk; false → строка `attached_disks` чистится CASCADE при DELETE instance), для каждого NIC с непустым `nic_id` — detach + delete kacho-vpc `NetworkInterface` (release его Address-ресурсов; best-effort vpcClient), DELETE instance (CASCADE чистит NIC-строки + attached_disks), освобождает one_to_one_nat addresses (best-effort vpcClient) |
+| `Delete` | async | ✅ | metadata `DeleteInstanceMetadata`, response `Empty`. worker: обрабатывает attached disks по `auto_delete` (true → DELETE disk; false → строка `attached_disks` чистится CASCADE при DELETE instance), для каждого NIC с непустым `nic_id` — delete kacho-vpc `NetworkInterface` (release его Address-ресурсов; best-effort vpcClient), DELETE instance (CASCADE чистит NIC-строки + attached_disks), освобождает one_to_one_nat addresses (best-effort vpcClient) |
 | `UpdateMetadata` | async | ✅ | `POST /compute/v1/instances/{instance_id}/updateMetadata` body `{delete:[], upsert:{}}`. metadata `UpdateInstanceMetadataMetadata`, response `Instance`. status unchanged |
 | `GetSerialPortOutput` | **sync** | ✅ (синтетика) | `GET /compute/v1/instances/{instance_id}:serialPortOutput?port=1..4`. response `GetInstanceSerialPortOutputResponse{contents}` — синтетический текст (НЕ операция) |
 | `Stop` | async | ✅ | `POST /compute/v1/instances/{instance_id}:stop`. precondition `status ∈ {RUNNING}` → end `STOPPED`. metadata `StopInstanceMetadata`, response `Empty` |
@@ -301,20 +300,19 @@ state-машину статуса. Таблица `instances` + дочерние
 | `AttachNetworkInterface` | async | ✅ | `POST :attachNetworkInterface` body `{network_interface_index, subnet_id, primary_v4_address_spec?, security_group_ids[]}`. proto: instance должен быть `STOPPED`. metadata `AttachInstanceNetworkInterfaceMetadata`, response `Instance` |
 | `DetachNetworkInterface` | async | ✅ | `POST :detachNetworkInterface` body `{network_interface_index}`. proto: instance `STOPPED`. metadata `DetachInstanceNetworkInterfaceMetadata`, response `Instance` |
 | `ListOperations` | sync | ✅ | `GET /compute/v1/instances/{instance_id}/operations` |
-| `Move` | async | ✅ | `POST :move` body `{destination_folder_id}`. metadata `MoveInstanceMetadata`, response `Instance`. proto: instance должен быть `STOPPED` перед move. status сохраняется |
 | `Relocate` | async | 🚫 blocked | `POST :relocate` body `{destination_zone_id, network_interface_specs[1], boot_disk_placement?, secondary_disk_placements[]}`. metadata `RelocateInstanceMetadata`, response `Instance`. Нужен cross-zone disk move + restart-семантика → `Unimplemented` / частично |
 | `SimulateMaintenanceEvent` | async | ⏭️ no-op | `POST :simulateMaintenanceEvent`. metadata `SimulateInstanceMaintenanceEventMetadata`, response `Empty`. operation сразу done |
 | `ListAccessBindings` / `SetAccessBindings` / `UpdateAccessBindings` | — | ⏭️ no-op скелет | как у Disk |
 
 ### Инварианты
 
-- `Create`: для каждого `network_interface_spec` — subnet existence
-  (`vpcClient.GetSubnet` → `NotFound "Subnet <X> not found"`), `subnet.zone_id ==
-  instance.zone_id` (иначе `InvalidArgument`), `security_group_ids[]`
-  (`vpcClient.GetSecurityGroup`), `one_to_one_nat.address` (если задан —
-  `vpcClient.GetAddress`). boot disk: `disk_id` → existence-check; `disk_spec` →
-  inline-создание Disk в той же TX. Insert instance + NICs + attached_disks в
-  **одной транзакции** worker'а, затем outbox `Instance CREATED`.
+- `Create`: ⚠️ **без авто-NIC** — auto-NIC материализация (`materializeNICs`)
+  удалена в `KAC-266`: per-NIC валидация (subnet/SG/NAT-address) и создание
+  kacho-vpc `NetworkInterface` больше не выполняются, инстанс создаётся без
+  сетевых интерфейсов; правильная сетевая модель — будущая переделка. boot disk:
+  `disk_id` → existence-check; `disk_spec` → inline-создание Disk в той же TX.
+  Insert instance + attached_disks в **одной транзакции** worker'а, затем outbox
+  `Instance CREATED`.
 - Ровно один boot-disk (`attached_disks_boot_uniq` partial UNIQUE на
   `instance_id WHERE is_boot`). `device_name` уникален в пределах instance
   (`attached_disks_device_uniq` partial UNIQUE на `(instance_id, device_name)
@@ -332,9 +330,10 @@ state-машину статуса. Таблица `instances` + дочерние
 - `instances.boot_disk_id` — не отдельный FK, а строка `attached_disks` с
   `is_boot=true`.
 - `network_interfaces[].nic_id` → VPC `NetworkInterface` (НЕ FK; source of truth
-  для интерфейса). На `Instance.Create`: если NIC spec задал `nic_id` —
-  `AttachToInstance` на существующем kacho-vpc NIC; если задал `subnet_id` — inline-создание
-  Address + NetworkInterface + attach. На `Instance.Delete` — detach + delete NIC.
+  для интерфейса). ⚠️ `Instance.Create` **больше не создаёт и не привязывает NIC**
+  (auto-NIC материализация `materializeNICs` удалена в `KAC-266`; инстанс
+  создаётся без сетевых интерфейсов, правильная сетевая модель — будущая
+  переделка). На `Instance.Delete` — delete NIC (если `nic_id` непустой).
 - `network_interfaces[].subnet_id` → VPC `Subnet` (НЕ FK; в proto-ответе — denorm-зеркало
   kacho-vpc NIC).
 - `network_interfaces[].security_group_ids[]` → VPC `SecurityGroup` (НЕ FK; denorm-зеркало).

@@ -179,11 +179,6 @@ func (r *DiskRepo) Update(ctx context.Context, d *domain.Disk) (*domain.Disk, er
 	return result, nil
 }
 
-// SetProjectID меняет project_id (для Move).
-func (r *DiskRepo) SetProjectID(ctx context.Context, id, folderID string) (*domain.Disk, error) {
-	return r.simpleSet(ctx, id, "project_id", folderID)
-}
-
 // SetZoneID меняет zone_id (для Relocate).
 func (r *DiskRepo) SetZoneID(ctx context.Context, id, zoneID string) (*domain.Disk, error) {
 	return r.simpleSet(ctx, id, "zone_id", zoneID)

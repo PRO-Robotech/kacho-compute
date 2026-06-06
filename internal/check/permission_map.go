@@ -89,12 +89,6 @@ func PermissionMap() authz.RPCMap {
 				return req.(*computev1.DeleteDiskRequest).GetDiskId(), nil
 			}),
 		},
-		"/kacho.cloud.compute.v1.DiskService/Move": {
-			Relation: relationEditor,
-			Extract: authz.StaticExtractor(objectTypeDisk, func(req any) (string, error) {
-				return req.(*computev1.MoveDiskRequest).GetDiskId(), nil
-			}),
-		},
 		"/kacho.cloud.compute.v1.DiskService/Relocate": {
 			Relation: relationEditor,
 			Extract: authz.StaticExtractor(objectTypeDisk, func(req any) (string, error) {
@@ -287,18 +281,6 @@ func PermissionMap() authz.RPCMap {
 				return req.(*computev1.DetachInstanceFilesystemRequest).GetInstanceId(), nil
 			}),
 		},
-		"/kacho.cloud.compute.v1.InstanceService/AttachNetworkInterface": {
-			Relation: relationEditor,
-			Extract: authz.StaticExtractor(objectTypeInstance, func(req any) (string, error) {
-				return req.(*computev1.AttachInstanceNetworkInterfaceRequest).GetInstanceId(), nil
-			}),
-		},
-		"/kacho.cloud.compute.v1.InstanceService/DetachNetworkInterface": {
-			Relation: relationEditor,
-			Extract: authz.StaticExtractor(objectTypeInstance, func(req any) (string, error) {
-				return req.(*computev1.DetachInstanceNetworkInterfaceRequest).GetInstanceId(), nil
-			}),
-		},
 		"/kacho.cloud.compute.v1.InstanceService/AddOneToOneNat": {
 			Relation: relationEditor,
 			Extract: authz.StaticExtractor(objectTypeInstance, func(req any) (string, error) {
@@ -321,12 +303,6 @@ func PermissionMap() authz.RPCMap {
 			Relation: relationViewer,
 			Extract: authz.StaticExtractor(objectTypeInstance, func(req any) (string, error) {
 				return req.(*computev1.ListInstanceOperationsRequest).GetInstanceId(), nil
-			}),
-		},
-		"/kacho.cloud.compute.v1.InstanceService/Move": {
-			Relation: relationEditor,
-			Extract: authz.StaticExtractor(objectTypeInstance, func(req any) (string, error) {
-				return req.(*computev1.MoveInstanceRequest).GetInstanceId(), nil
 			}),
 		},
 		"/kacho.cloud.compute.v1.InstanceService/Relocate": {

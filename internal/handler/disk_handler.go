@@ -155,28 +155,6 @@ func (h *DiskHandler) Delete(ctx context.Context, req *computev1.DeleteDiskReque
 	return operationToProto(op), nil
 }
 
-// Move инициирует перенос Disk в другой folder.
-func (h *DiskHandler) Move(ctx context.Context, req *computev1.MoveDiskRequest) (*operationpb.Operation, error) {
-	if req.DiskId == "" {
-		return nil, status.Error(codes.InvalidArgument, "disk_id required")
-	}
-	d, err := h.svc.Get(ctx, req.DiskId)
-	if err != nil {
-		return nil, err
-	}
-	if err := AssertFolderOwnership(ctx, d.ProjectID); err != nil {
-		return nil, err
-	}
-	if err := AssertFolderOwnership(ctx, req.DestinationProjectId); err != nil {
-		return nil, err
-	}
-	op, err := h.svc.Move(ctx, req.DiskId, req.DestinationProjectId)
-	if err != nil {
-		return nil, err
-	}
-	return operationToProto(op), nil
-}
-
 // Relocate инициирует перенос Disk в другую зону.
 func (h *DiskHandler) Relocate(ctx context.Context, req *computev1.RelocateDiskRequest) (*operationpb.Operation, error) {
 	if req.DiskId == "" {
