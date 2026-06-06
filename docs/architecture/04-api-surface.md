@@ -16,7 +16,7 @@ Operation metadata/response (из `(kacho.cloud.api.operation)` options).
 
 > ⚠️ REST-пути неоднородны (кальки YC API surface, proto-decided): top-level
 > camelCase (`/compute/v1/diskTypes`, `/compute/v1/instances`), custom-методы
-> с двоеточием (`:move`, `:relocate`, `:serialPortOutput`, `:latestByFamily`,
+> с двоеточием (`:relocate`, `:serialPortOutput`, `:latestByFamily`,
 > `:listAccessBindings`), child-list `.../operations`, action-методы через
 > сегмент пути (`/updateMetadata`, `/addOneToOneNat`, `:attachDisk`),
 > `OperationService.Get` — `/operations/{id}` (БЕЗ `/compute/v1/`-префикса).
@@ -32,7 +32,6 @@ Operation metadata/response (из `(kacho.cloud.api.operation)` options).
 | `Update` | `PATCH /compute/v1/disks/{disk_id}` body `*` | async | `UpdateDiskMetadata` / `Disk` | ✅ |
 | `Delete` | `DELETE /compute/v1/disks/{disk_id}` | async | `DeleteDiskMetadata` / `google.protobuf.Empty` | ✅ |
 | `ListOperations` | `GET /compute/v1/disks/{disk_id}/operations` | sync | → `ListDiskOperationsResponse` | ✅ |
-| `Move` | `POST /compute/v1/disks/{disk_id}:move` body `*` | async | `MoveDiskMetadata` / `Disk` | ✅ |
 | `Relocate` | `POST /compute/v1/disks/{disk_id}:relocate` body `*` | async | `RelocateDiskMetadata` / `Disk` | ⚠️ частично (cross-zone simplified) |
 | `ListSnapshotSchedules` | (нет `google.api.http`) | sync | → `ListDiskSnapshotSchedulesResponse` | 🚫 `blocked:kacho-snapshot-schedule` |
 | `ListAccessBindings` | `GET /compute/v1/disks/{resource_id}:listAccessBindings` | sync | → `access.ListAccessBindingsResponse` | ⏭️ no-op скелет |
@@ -70,9 +69,9 @@ Operation metadata/response (из `(kacho.cloud.api.operation)` options).
 |---|---|---|---|---|
 | `Get` | `GET /compute/v1/instances/{instance_id}?view=` | sync | → `Instance` (FULL включает metadata) | ✅ |
 | `List` | `GET /compute/v1/instances?folderId=&...` | sync | → `ListInstancesResponse` (metadata всегда омитится) | ✅ |
-| `Create` | `POST /compute/v1/instances` body `*` | async | `CreateInstanceMetadata{instance_id}` / `Instance` | ✅ (`filesystem_specs[]`→`blocked:kacho-filesystem`. NIC spec: exactly one of {`subnet_id` → inline-create Address+kacho-vpc NIC+attach; `nic_id` → attach existing kacho-vpc NIC}; `subnet_id` no longer unconditionally `(required)`) |
+| `Create` | `POST /compute/v1/instances` body `*` | async | `CreateInstanceMetadata{instance_id}` / `Instance` | ✅ (`filesystem_specs[]`→`blocked:kacho-filesystem`. ⚠️ **без авто-NIC** — auto-NIC материализация `materializeNICs` удалена в `KAC-266`; инстанс создаётся без сетевых интерфейсов, NIC не создаётся/привязывается на Create; правильная сетевая модель — будущая переделка) |
 | `Update` | `PATCH /compute/v1/instances/{instance_id}` body `*` | async | `UpdateInstanceMetadata` / `Instance` | ✅ (`resources_spec`/`platform_id` требуют STOPPED) |
-| `Delete` | `DELETE /compute/v1/instances/{instance_id}` | async | `DeleteInstanceMetadata` / `google.protobuf.Empty` | ✅ (для каждого NIC с непустым `nic_id` — detach + delete kacho-vpc `NetworkInterface`) |
+| `Delete` | `DELETE /compute/v1/instances/{instance_id}` | async | `DeleteInstanceMetadata` / `google.protobuf.Empty` | ✅ (для каждого NIC с непустым `nic_id` — delete kacho-vpc `NetworkInterface`) |
 | `UpdateMetadata` | `POST /compute/v1/instances/{instance_id}/updateMetadata` body `*` | async | `UpdateInstanceMetadataMetadata` / `Instance` | ✅ |
 | `GetSerialPortOutput` | `GET /compute/v1/instances/{instance_id}:serialPortOutput?port=` | **sync** | → `GetInstanceSerialPortOutputResponse{contents}` | ✅ (синтетика, не операция) |
 | `Stop` | `POST /compute/v1/instances/{instance_id}:stop` | async | `StopInstanceMetadata` / `google.protobuf.Empty` | ✅ |
@@ -88,7 +87,6 @@ Operation metadata/response (из `(kacho.cloud.api.operation)` options).
 | `RemoveOneToOneNat` | `POST /compute/v1/instances/{instance_id}/removeOneToOneNat` body `*` | async | `RemoveInstanceOneToOneNatMetadata` / `Instance` | ✅ |
 | `UpdateNetworkInterface` | `PATCH /compute/v1/instances/{instance_id}/updateNetworkInterface` body `*` | async | `UpdateInstanceNetworkInterfaceMetadata` / `Instance` | ✅ (OCC через xmin) |
 | `ListOperations` | `GET /compute/v1/instances/{instance_id}/operations` | sync | → `ListInstanceOperationsResponse` | ✅ |
-| `Move` | `POST /compute/v1/instances/{instance_id}:move` body `*` | async | `MoveInstanceMetadata` / `Instance` | ✅ (требует STOPPED) |
 | `Relocate` | `POST /compute/v1/instances/{instance_id}:relocate` body `*` | async | `RelocateInstanceMetadata` / `Instance` | 🚫 blocked (cross-zone disk move) |
 | `SimulateMaintenanceEvent` | `POST /compute/v1/instances/{instance_id}:simulateMaintenanceEvent` body `*` | async | `SimulateInstanceMaintenanceEventMetadata` / `google.protobuf.Empty` | ⏭️ no-op |
 | `ListAccessBindings` / `SetAccessBindings` / `UpdateAccessBindings` | `.../instances/{resource_id}:listAccessBindings` / `:setAccessBindings` / `:updateAccessBindings` | sync / async / async | как у Disk | ⏭️ no-op скелет |
@@ -173,7 +171,7 @@ Operation metadata/response (из `(kacho.cloud.api.operation)` options).
 
 ## Operations (LRO) — общая модель
 
-Все мутации (`Create/Update/Delete/Start/Stop/Restart/Move/Relocate/AttachDisk/
+Все мутации (`Create/Update/Delete/Start/Stop/Restart/Relocate/AttachDisk/
 DetachDisk/AddOneToOneNat/RemoveOneToOneNat/UpdateNetworkInterface/UpdateMetadata/
 SimulateMaintenanceEvent/Set|UpdateAccessBindings`) возвращают
 `operation.Operation`. Клиент полит `OperationService.Get(operation_id)` до

@@ -65,7 +65,7 @@ placeholder'ы до probe реального YC. Текущие формулир
   stopped"`;
 - `AttachDisk`/`DetachDisk`/`AddNat`/`RemoveNat` при не-`{RUNNING,STOPPED}` →
   precondition-текст probe;
-- `AttachNetworkInterface`/`DetachNetworkInterface`/`Move` при не-`STOPPED` →
+- `AttachNetworkInterface`/`DetachNetworkInterface` при не-`STOPPED` →
   proto-комментарий говорит «must have STOPPED status» — текст ошибки probe;
 - `DetachDisk` boot disk → `"Boot disk cannot be detached"` / similar;
 - `AttachDisk` disk не READY / wrong zone / уже attached → `"The disk is being

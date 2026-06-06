@@ -19,7 +19,10 @@ API → операционные аспекты → тестирование →
 (образы), **Snapshot** (снимки дисков) — и read-only справочников **DiskType**,
 **Region**, **Zone** (Geography — owner kacho-compute с эпика `KAC-15`).
 Compute-NIC бэкуется ресурсом kacho-vpc `NetworkInterface` (`nic_id`, эпик
-`KAC-9`). Сервис **не** управляет реальным data plane: он только хранит
+`KAC-9`). ⚠️ `Instance.Create` **не** создаёт и не привязывает NIC автоматически
+(auto-NIC материализация удалена в `KAC-266`; инстанс создаётся без сетевых
+интерфейсов, правильная сетевая модель — будущая переделка). Сервис **не**
+управляет реальным data plane: он только хранит
 конфигурацию, валидирует её, имитирует жизненный цикл (детерминированная
 state-машина Instance), эмитит события об изменениях.
 Внешний контракт повторяет Yandex Cloud Compute API (`kacho.cloud.compute.v1`
@@ -51,14 +54,14 @@ Postgres-БД, шаринг через прямой SQL запрещён.
 | Сосед | Канал | Что делает |
 |---|---|---|
 | `kacho-api-gateway` | gRPC `:9090` → REST `/compute/v1/...` + opsproxy `/operations/{id}` | Маршрутизирует публичные RPC, преобразует ошибки в HTTP; internal mux на cluster-internal listener для `/compute/v1/diskTypes`,`/compute/v1/regions`,`/compute/v1/zones` (`Internal*` admin) — НЕ на external TLS endpoint |
-| `kacho-resource-manager` | gRPC client | `folderClient.Exists(folderID)` — existence-check в Create/Move |
-| `kacho-vpc` | gRPC client | `vpcClient.{GetSubnet, GetSecurityGroup, GetAddress, NetworkInterfaceService.*, InternalAddressService}` — валидация Instance `network_interface_spec` + создание/attach/detach/delete kacho-vpc `NetworkInterface` для Instance-NIC'ов + IPAM эфемерных Address (эпик `KAC-9`) |
+| `kacho-resource-manager` | gRPC client | `folderClient.Exists(folderID)` — existence-check в Create |
+| `kacho-vpc` | gRPC client | `vpcClient.{GetSubnet, GetSecurityGroup, GetAddress, NetworkInterfaceService.*, InternalAddressService}` — валидация ссылок Instance + delete kacho-vpc `NetworkInterface` при `Instance.Delete` (если у NIC есть `nic_id`) + IPAM эфемерных Address. ⚠️ авто-создание/привязка NIC при `Instance.Create` удалены в `KAC-266` (инстанс создаётся без сетевых интерфейсов; правильная сетевая модель — будущая переделка) |
 | Postgres (`kacho_compute`) | pgx + LISTEN/NOTIFY | Источник истины |
 | Внутренние подписчики на изменения | gRPC server-stream `:9091` | `InternalWatchService.Watch` — events из `compute_outbox` |
 | Admin-инструменты (UI / curl на api-gateway internal mux) | gRPC `:9091` через internal listener | `InternalDiskTypeService` / `InternalRegionService` / `InternalZoneService` — seed справочников |
 
 **Внешний контракт.** Все мутации (`Create/Update/Delete/Start/Stop/Restart/
-Move/Relocate/AttachDisk/DetachDisk/AddOneToOneNat/RemoveOneToOneNat/
+Relocate/AttachDisk/DetachDisk/AddOneToOneNat/RemoveOneToOneNat/
 UpdateNetworkInterface/UpdateMetadata/SimulateMaintenanceEvent`) возвращают
 `Operation` (long-running async); клиент полит `OperationService.Get(id)` до
 `done=true`. Все чтения (`Get/List/GetLatestByFamily/GetSerialPortOutput`) —
@@ -130,9 +133,10 @@ Database-per-service. Подробно — [05-database.md](architecture/05-data
   (в той же TX, что domain-write). По файлу на ресурс.
 - **`clients/`** — gRPC-adapter: `folderClient` (resource-manager.FolderService),
   `vpcClient` (vpc.{Subnet,SecurityGroup,Address}Service.Get + `NetworkInterfaceService`
-  create/attach/detach/delete + `InternalAddressService` IPAM — эпик `KAC-9`). Retry
-  on `Unavailable` через `kacho-corelib/retry`; `SkipPeerValidation` → no-op /
-  синтетический NIC (`nic_id=''`).
+  delete + `InternalAddressService` IPAM). Авто-создание/привязка NIC при
+  `Instance.Create` удалены в `KAC-266` (инстанс создаётся без сетевых
+  интерфейсов; правильная сетевая модель — будущая переделка). Retry
+  on `Unavailable` через `kacho-corelib/retry`; `SkipPeerValidation` → no-op.
 - **`handler/`** — тонкий transport: parse-request → service.Foo() →
   format-response. Public-handlers (`:9090`) и Internal-handlers (`:9091`) —
   отдельные файлы. `internal_watch_handler.go` — структурно копия kacho-vpc.
@@ -182,7 +186,7 @@ RUNNING/STOPPING/STOPPED/STARTING/RESTARTING/UPDATING/ERROR/CRASHED/DELETING`.
 таймеров). Стабильные состояния — `RUNNING`/`STOPPED`. Transition table: Create→
 RUNNING; Start (STOPPED→)RUNNING; Stop (RUNNING→)STOPPED; Restart (RUNNING→)
 RUNNING; Update resources/platform (STOPPED→)STOPPED; AttachDisk/DetachDisk/
-AddNat/RemoveNat (RUNNING|STOPPED, status unchanged); AttachNIC/DetachNIC/Move
+AddNat/RemoveNat (RUNNING|STOPPED, status unchanged); AttachNIC/DetachNIC
 (STOPPED, status unchanged); Delete (any→deleted). Precondition-нарушение →
 `FailedPrecondition` (verbatim текст — probe). Подробно —
 [03-instance-lifecycle.md](architecture/03-instance-lifecycle.md).
@@ -232,8 +236,10 @@ Region / Zone — публичный read-only справочник Geography (o
 по `folder_id`. Cross-resource links: boot/secondary disk → `attached_disks` →
 `disks` (FK `disk_id` RESTRICT, `instance_id` CASCADE); `boot_disk` = строка
 `attached_disks` с `is_boot=true`; NIC `nic_id` → kacho-vpc `NetworkInterface`
-(НЕ FK; на `Instance.Create` — attach/inline-create, на `Instance.Delete` —
-detach+delete; эпик `KAC-9`), NIC subnet/SG/NAT-address → VPC (НЕ FK, denorm);
+(НЕ FK; denorm subnet/SG/NAT-address). ⚠️ **`Instance.Create` больше не создаёт и
+не привязывает NIC автоматически** (auto-NIC материализация `materializeNICs`
+удалена в `KAC-266`): инстанс создаётся без сетевых интерфейсов, правильная
+сетевая модель (явная привязка NIC) — будущая переделка. NIC subnet/SG/NAT-address → VPC (НЕ FK, denorm);
 disk source / snapshot source / image source → локальные ресурсы (НЕ FK,
 existence-check на Create); `zones.region_id` → `regions.id` (FK RESTRICT, same-DB).
 Подробно — [01-resources.md](architecture/01-resources.md).
@@ -267,9 +273,9 @@ disks RESTRICT, `.instance_id` → instances CASCADE; FK
 ~60 публичных RPC в 7 публичных сервисах (`InstanceService` — крупнейший:
 Get/List/Create/Update/Delete/UpdateMetadata/GetSerialPortOutput/Stop/Start/
 Restart/AttachDisk/DetachDisk/AttachNetworkInterface/DetachNetworkInterface/
-AddOneToOneNat/RemoveOneToOneNat/UpdateNetworkInterface/ListOperations/Move/
+AddOneToOneNat/RemoveOneToOneNat/UpdateNetworkInterface/ListOperations/
 Relocate(blocked)/SimulateMaintenanceEvent(no-op)/access-bindings(no-op);
-`DiskService` — CRUD/ListOperations/Move/Relocate(частично)/ListSnapshotSchedules
+`DiskService` — CRUD/ListOperations/Relocate(частично)/ListSnapshotSchedules
 (blocked)/access-bindings; `ImageService` — CRUD/GetLatestByFamily/ListOperations/
 access-bindings; `SnapshotService` — CRUD/ListOperations/access-bindings;
 `DiskTypeService`/`RegionService`/`ZoneService` — Get/List) + `OperationService`
@@ -292,9 +298,10 @@ CRUD справочников) → `/compute/v1/diskTypes`,`/compute/v1/regions`
 (общий шаблон); Disk.Create (folder/zone/type/source checks → INSERT READY →
 outbox); Image.Create (source oneof resolve: image|snapshot|disk|uri, uri —
 мгновенный download-заглушка); Snapshot.Create (из Disk READY); Instance.Create
-(per-NIC subnet/SG/address validation через vpcClient + boot-disk resolve/inline-
-create → INSERT instance+NICs+attached_disks в одной TX → outbox; status
-PROVISIONING→RUNNING внутри TX); Instance.AttachDisk/DetachDisk (precondition
+(boot-disk resolve/inline-create → INSERT instance+attached_disks в одной TX →
+outbox; status PROVISIONING→RUNNING внутри TX; **без авто-NIC** — auto-NIC
+материализация удалена в `KAC-266`, инстанс создаётся без сетевых интерфейсов,
+правильная сетевая модель — будущая переделка); Instance.AttachDisk/DetachDisk (precondition
 status ∈ {RUNNING,STOPPED}; disk READY & same zone & not attached / not boot);
 Instance.Delete (auto_delete: true→DELETE disk, false→строка attached_disks
 CASCADE; DELETE instance → CASCADE NIC+attached_disks; best-effort NAT-address

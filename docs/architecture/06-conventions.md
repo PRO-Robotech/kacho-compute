@@ -49,7 +49,9 @@ Compute-specific правила, error mapping, top-10 gotchas. Workspace-уро
   `name` где proto помечает; `Snapshot.Create` требует `disk_id`; `Image.Create`
   — ровно один из `source` (`image_id`/`snapshot_id`/`disk_id`/`uri`,
   `(exactly_one)`); `Instance.Create` требует `zone_id`, `platform_id`,
-  `resources_spec`, `boot_disk_spec`, ≥1 `network_interface_spec`.
+  `resources_spec`, `boot_disk_spec` (⚠️ NIC-spec больше не требуется — авто-NIC
+  материализация удалена в `KAC-266`; инстанс создаётся без сетевых интерфейсов,
+  правильная сетевая модель — будущая переделка).
 - Format: `corevalidate.NameCompute` для Disk/Image/Snapshot/Instance — proto
   `(pattern) = "|[a-z]([-_a-z0-9]{0,61}[a-z0-9])?"` (**lowercase**-only + digits
   + hyphens + underscore, empty allowed, start с буквы; regex
@@ -89,15 +91,14 @@ Compute-specific правила, error mapping, top-10 gotchas. Workspace-уро
   через `kacho-corelib/retry`).
 - zone / type_id / source image|snapshot|disk existence → `NotFound` /
   `InvalidArgument`.
-- Instance.Create (materializeNICs, эпик `KAC-9`): NIC spec — exactly one of
-  {`subnet_id`, `nic_id`}. `subnet_id` → subnet existence (`vpcClient.GetSubnet`
-  → `NotFound "Subnet <X> not found"`), `subnet.zone_id == instance.zone_id`
-  (иначе `InvalidArgument`), inline-создание Address + kacho-vpc `NetworkInterface`
-  + attach. `nic_id` → `AttachToInstance` на существующем kacho-vpc NIC. Затем
-  `security_group_ids[]` (`vpcClient.GetSecurityGroup`), `one_to_one_nat.address`
-  (`vpcClient.GetAddress`). `SKIP_PEER_VALIDATION` → синтетический NIC, `nic_id=''`.
-  `Instance.Delete` → для каждого NIC с непустым `nic_id` detach + delete kacho-vpc
-  NIC (best-effort).
+- Instance.Create: ⚠️ **без авто-NIC** — auto-NIC материализация `materializeNICs`
+  удалена в `KAC-266`. Worker больше **не** валидирует per-NIC ссылки, не создаёт
+  kacho-vpc `Address` / `NetworkInterface` и не делает attach; инстанс создаётся
+  без сетевых интерфейсов. NIC-RPC `AttachToInstance` / `DetachFromInstance` на
+  стороне kacho-vpc также сняты в `KAC-266`. Правильная сетевая модель (явная
+  привязка NIC) — будущая переделка.
+  `Instance.Delete` → для каждого NIC с непустым `nic_id` (если есть от прежних
+  данных) delete kacho-vpc NIC (best-effort).
 - Repo Insert/Update — UNIQUE violation `(folder_id, name)` partial
   `WHERE name <> ''` для всех 4 ресурсов → `ALREADY_EXISTS`; FK violation
   (`attached_disks.disk_id` RESTRICT) → `FailedPrecondition`; boot/device UNIQUE
@@ -190,12 +191,13 @@ disk <id> is being used"` (FK RESTRICT); иначе DELETE.
 Все межсервисные ссылки — **НЕ FK** (database-per-service; workspace `CLAUDE.md`
 §запрет 4). Валидируются gRPC-вызовом к peer-сервису в worker'е Create/Update:
 - `folderClient` → `kacho-resource-manager.FolderService.Exists` (worker каждого
-  Create/Move).
+  Create).
 - `vpcClient` → `kacho.cloud.vpc.v1.{SubnetService.Get, SecurityGroupService.Get,
   AddressService.Get, NetworkInterfaceService.*}` + `InternalAddressService` на
-  kacho-vpc — Instance NIC validation, IPAM-аллокация эфемерных Address, создание/
-  attach/detach/delete kacho-vpc `NetworkInterface` для Instance-NIC'ов (эпик
-  `KAC-9`; `kacho-compute → kacho-vpc` runtime-edge).
+  kacho-vpc — IPAM-аллокация эфемерных Address + delete kacho-vpc `NetworkInterface`
+  при `Instance.Delete` (`kacho-compute → kacho-vpc` runtime-edge). ⚠️ авто-создание/
+  привязка NIC при `Instance.Create` удалены в `KAC-266` (инстанс создаётся без
+  сетевых интерфейсов; правильная сетевая модель — будущая переделка).
 - `imageRepo` / `snapshotRepo` / `diskTypeRepo` / `zoneRepo` / `regionRepo` —
   **НЕ clients**, а локальные repo (та же БД): existence-check source-ресурсов;
   Geography (`zones`/`regions`) — kacho-compute owns (эпик `KAC-15`, нет proxy в
@@ -287,13 +289,14 @@ Zero-overhead, миграция не нужна. Используется в `Up
 16. **`SimulateMaintenanceEvent` — no-op** (operation сразу `done`, status не
     меняется).
 17. **boot disk нельзя `DetachDisk`** (`is_boot=true`) — только удалив Instance.
-18. **Compute-NIC бэкуется kacho-vpc `NetworkInterface`** (эпик `KAC-9`):
-    `compute.v1.NetworkInterface.nic_id` — source of truth; `subnet_id`/
-    `primary_v4_address`/`security_group_ids` — denorm-зеркало. `NetworkInterfaceSpec`
-    принимает exactly one of {`subnet_id` → inline-create, `nic_id` → attach existing};
-    `subnet_id` больше не безусловно `(required)`. `Instance.Delete` чистит NIC'и в
-    kacho-vpc. Device-index — `compute.v1.NetworkInterface.index`. Миграция
-    `0005_instance_nic_id.sql`.
+18. **`Instance.Create` создаётся без авто-NIC** (`materializeNICs` удалён,
+    `KAC-266`): инстанс создаётся **без сетевых интерфейсов**, NIC больше не
+    создаётся/привязывается на Create; NIC-RPC `AttachToInstance`/`DetachFromInstance`
+    на стороне kacho-vpc также сняты. Правильная сетевая модель (явная привязка NIC)
+    — будущая переделка. Колонка `instance_network_interfaces.nic_id` (миграция
+    `0005_instance_nic_id.sql`) сохраняется в схеме, но при Create не заполняется;
+    `Instance.Delete` чистит NIC'и в kacho-vpc, если `nic_id` непустой (от прежних
+    данных). Для истории: backed-NIC модель — эпик `KAC-9`.
 19. **Geography (Region/Zone) — owner kacho-compute** (эпик `KAC-15`): читается из
     локальных таблиц `regions`/`zones`; нет proxy в kacho-vpc и `skipPeer`-fallback;
     другие сервисы валидируют `zone_id` вызовом `ZoneService.Get`. Миграция
