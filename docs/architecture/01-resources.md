@@ -42,7 +42,6 @@ Image      — folder-level, family (GetLatestByFamily), source = image|snapshot
 Snapshot   — folder-level, source_disk_id (обязателен в Create)
 DiskType   — глобальный read-only справочник (id = "network-ssd" и т.п.)
 Region/Zone — публичный read-only справочник Geography (owner = kacho-compute, эпик KAC-15)
-Hypervisor  — INTERNAL-ONLY: физ. хост (placement/инвентарь железа); node_index → SRv6-локатор
 ```
 
 Все мутируемые ресурсы (Instance/Disk/Image/Snapshot) — **folder-level**
@@ -436,49 +435,6 @@ Create Disk/Instance / Relocate Disk и `disk_types.zone_ids`. Другие се
 `zone_id` вызовом нашего `ZoneService.Get` (`kacho-vpc → kacho-compute` runtime-edge).
 Seed (`0003_geography_owner.sql`): `ru-central1-{a,b,d}`, `region_id = ru-central1`,
 `status = UP`.
-
-## Hypervisor (internal-only)
-
-**INTERNAL-ONLY ресурс kacho-compute** — физический хост, на котором compute
-размещает инстансы. На публичной поверхности **не появляется** (placement /
-инвентарь железа = инфра-чувствительное, см. workspace `CLAUDE.md`
-§«Инфра-чувствительные данные»; `GET /compute/v1/hypervisors` на external TLS
-endpoint → 404). Таблица `hypervisors` + sequence/free-list для `node_index`
-(миграция `0004_hypervisors.sql`).
-
-### proto-поля (`hypervisor.proto`, message `Hypervisor`)
-
-| Поле | Тип | Замечания |
-|---|---|---|
-| `id` | string | генерируется при регистрации (или задаётся явно) |
-| `zone_id` | string | зона, где стоит хост; индекс `hypervisors_zone_idx` |
-| `node_index` | uint32 | последовательный стабильный индекс узла (0-based, 0,1,2,…), уникален в installation; переиспользуется free-list'ом после дерегистрации. **Основа `/48`-SRv6-локатора хоста** в kacho-vpc-implement |
-| `fqdn` | string | best-effort, опционально |
-| `state` | Hypervisor.State enum | `STATE_UNSPECIFIED=0, READY=1, CORDONED=2, DRAINING=3, DOWN=4` |
-| `capacity` | Capacity{vcpus int64, memory_bytes int64, instances int64} | для placement-решений |
-| `created_at` / `updated_at` | Timestamp | регистрация / последний heartbeat/смена state |
-
-### RPC (`internal_hypervisor_service.proto`, service `InternalHypervisorService`)
-
-**Синхронные RPC (не Operation)** — это инфра-реестр, не tenant-facing ресурс.
-
-| RPC | REST (api-gateway internal mux) | статус | примечание |
-|---|---|---|---|
-| `RegisterHypervisor` | `POST /compute/v1/hypervisors` body `{id?, zone_id, fqdn?, capacity?}` | ✅ kacho-only | присваивает `node_index` next-free из `hypervisor_node_index_seq` (MINVALUE 0) + `hypervisor_node_index_free`; идемпотентно по `id`; пустой `zone_id` → `InvalidArgument`; исчерпан диапазон → `ResourceExhausted` |
-| `GetHypervisor` | `GET /compute/v1/hypervisors/{hypervisor_id}` | ✅ kacho-only | не зарегистрирован → `NotFound` |
-| `ListHypervisors` | `GET /compute/v1/hypervisors?zoneId=&state=&pageSize=&pageToken=` | ✅ kacho-only | опц. фильтр по зоне/состоянию |
-| `UpdateHypervisorState` | `POST /compute/v1/hypervisors/{hypervisor_id}:updateState` body `{state, capacity?, heartbeat?}` | ✅ kacho-only | меняет state/ёмкость/heartbeat; не зарегистрирован → `NotFound` |
-| `DeregisterHypervisor` | `DELETE /compute/v1/hypervisors/{hypervisor_id}` → `DeregisterHypervisorResponse{}` | ✅ kacho-only | возвращает `node_index` во free-list; `NotFound` если нет; `FailedPrecondition` если на хосте есть размещённые инстансы |
-
-**Где экспонируется:** `:9091` internal gRPC + проброс через api-gateway REST mux
-**только на cluster-internal listener** (`/compute/v1/hypervisors...`,
-`:updateState`) — НЕ на external TLS endpoint. Любой новый admin-RPC, которого
-нет в verbatim-YC — добавлять только в `Internal*` сервис (workspace `CLAUDE.md`
-§запрет 6).
-
-**Потребители:** kacho-compute reconciler (placement инстансов), kacho-vpc-implement
-(читает `Hypervisor.node_index` → выводит SRv6 `/48`-локатор хоста — `kacho-vpc-implement
-→ kacho-compute` runtime-edge), admin-UI / admin-tooling.
 
 ---
 

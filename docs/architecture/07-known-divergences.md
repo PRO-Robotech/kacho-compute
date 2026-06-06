@@ -154,26 +154,7 @@ RESTRICT (same-DB), если есть зоны; `Zone.Delete` проверяет
 workspace `CLAUDE.md` §«Кросс-доменные ссылки на ресурсы»). Старый
 `KACHO_COMPUTE_VPC_INTERNAL_GRPC_ADDR` и зеркало-таблица `zones` упразднены.
 
-### 6.2. `Hypervisor` — internal-only ресурс kacho-compute (placement / HW инвентарь)
-
-**Намеренное решение** (verbatim-parity отложена; YC-аналога нет): kacho-compute
-владеет ресурсом `Hypervisor` — физический хост, на котором размещаются инстансы.
-Доступен **только** через `InternalHypervisorService` (`:9091`, **синхронные RPC,
-не Operation** — инфра-реестр) и проброшен через api-gateway REST mux **только на
-cluster-internal listener** (`/compute/v1/hypervisors...`, `:updateState`). На
-external TLS endpoint **нет tenant-facing пути** — `GET /compute/v1/hypervisors`
-→ 404. Обоснование — placement / HW инвентарь = инфра-чувствительное (workspace
-`CLAUDE.md` §«Инфра-чувствительные данные»; defense-in-depth: tenant не должен
-выводить «мой инстанс и инстанс другого tenant'а на одном железе»). `node_index`
-(0-based) аллоцируется next-free из `hypervisor_node_index_seq` (MINVALUE 0) +
-free-list `hypervisor_node_index_free` (миграция `0004_hypervisors.sql`), стабилен,
-переиспользуется после дерегистрации — основа SRv6 `/48`-локатора хоста в
-kacho-vpc-implement (который **читает** `node_index` через
-`InternalHypervisorService.GetHypervisor` — `kacho-vpc-implement → kacho-compute`
-runtime-edge, эпик `KAC-2`). `DeregisterHypervisor` fails (`FailedPrecondition`),
-если на хосте есть размещённые инстансы.
-
-### 6.3. `Instance` NIC бэкуется ресурсом kacho-vpc `NetworkInterface` (эпик KAC-9)
+### 6.2. `Instance` NIC бэкуется ресурсом kacho-vpc `NetworkInterface` (эпик KAC-9)
 
 **Намеренное решение** (clean-API дизайн; verbatim-parity отложена): compute-NIC
 бэкуется first-class ресурсом kacho-vpc `NetworkInterface` (вариант А, эпик
@@ -188,10 +169,9 @@ read-only denorm-зеркало. `NetworkInterfaceSpec` принимает **exa
 detach + delete kacho-vpc NIC (release его Address-ресурсов; best-effort). Device-index
 интерфейса — `compute.v1.NetworkInterface.index` (как было). Миграция
 `0005_instance_nic_id.sql` (`instance_network_interfaces.nic_id TEXT NOT NULL
-DEFAULT ''`; `''` = legacy / synthetic NIC). Новые runtime cross-domain edges
-(зафиксированы в workspace `CLAUDE.md`): `kacho-compute → kacho-vpc` (NIC
-create/attach/detach + эфемерный Address IPAM) и `kacho-vpc-implement → kacho-compute`
-(`Hypervisor.node_index`).
+DEFAULT ''`; `''` = legacy / synthetic NIC). Новый runtime cross-domain edge
+(зафиксирован в workspace `CLAUDE.md`): `kacho-compute → kacho-vpc` (NIC
+create/attach/detach + эфемерный Address IPAM).
 
 ## 7. Blocked-on-missing-service — отложено до появления зависимого сервиса
 

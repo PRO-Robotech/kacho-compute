@@ -42,8 +42,9 @@ VPC FINDING-007); pgxpool — `cfg.DSN()` (с `pool_max_conns` если
 | 0001 | `0001_initial.sql` | **squashed baseline** — `operations` (схема как у corelib `0001_operations.sql`), `zones`, `disk_types`, `disks`, `images`, `snapshots`, `instances`, `instance_network_interfaces`, `attached_disks`, `compute_outbox`, `compute_watch_cursors`; индексы; partial UNIQUE `(folder_id, name) WHERE name <> ''`; FK `attached_disks.disk_id` → disks RESTRICT, `.instance_id` → instances CASCADE; FK `instance_network_interfaces.instance_id` → instances CASCADE; outbox trigger `compute_outbox_notify_trg`; seed `disk_types` + `zones`. Id-колонки — `TEXT` |
 | 0002 | `0002_nic_ephemeral_address.sql` | поддержка эфемерных Address-аллокаций для NIC |
 | 0003 | `0003_geography_owner.sql` | **kacho-compute становится owner Geography** (эпик `KAC-15`): таблица `regions`(`id,name,created_at`), колонка `zones.name`, FK `zones.region_id → regions.id` RESTRICT, seed `ru-central1` + `ru-central1-{a,b,d}` здесь (больше не зеркалится из kacho-vpc) |
-| 0004 | `0004_hypervisors.sql` | таблица `hypervisors` (internal-only ресурс — placement/HW инвентарь) + `hypervisor_node_index_seq` (`MINVALUE 0`, 0-based) + `hypervisor_node_index_free` (free-list возвращённых `node_index`) |
+| 0004 | `0004_hypervisors.sql` | (исторический footprint kube-ovn-эпохи; таблицы и связанный слой удалены миграцией 0006, KAC-36/79/80) |
 | 0005 | `0005_instance_nic_id.sql` | `ALTER TABLE instance_network_interfaces ADD COLUMN nic_id TEXT NOT NULL DEFAULT ''` — id бэкующего kacho-vpc `NetworkInterface` (эпик `KAC-9`); `''` = legacy NIC / `SKIP_PEER_VALIDATION` синтетика |
+| 0006 | `0006_drop_hypervisors.sql` | удаление таблиц kube-ovn-эпохи (`hypervisors`, `hypervisor_node_index_seq`, `hypervisor_node_index_free`); inventory нод перешёл на k8s Node objects (KAC-36/79/80) |
 
 `migrations/` (корень репо) — staging для `make sync-migrations` (только
 `0001_operations.sql` от corelib; в `0001_initial.sql` схема `operations` уже
@@ -52,7 +53,7 @@ VPC FINDING-007); pgxpool — `cfg.DSN()` (с `pool_max_conns` если
 ⚠️ Запреты (workspace `CLAUDE.md` §5):
 - НЕ редактировать применённую миграцию. Только новая.
 - НЕ модифицировать `0001_operations.sql` (staging-копия corelib).
-- Новая миграция = новый файл с инкрементным номером (следующий — `0006_*`).
+- Новая миграция = новый файл с инкрементным номером.
 
 ## Таблицы
 
@@ -306,36 +307,6 @@ UNIQUE INDEX attached_disks_device_uniq (instance_id, device_name) WHERE device_
 
 `instances.boot_disk_id` — НЕ отдельный FK; boot disk = строка `attached_disks`
 с `is_boot=true`. `Disk.instance_ids` — derived из `attached_disks` (output-only).
-
-### `hypervisors` (internal-only)
-
-Реестр физических хостов (placement / HW инвентарь — **internal-only ресурс**;
-не появляется на публичной поверхности, см. workspace `CLAUDE.md`
-§«Инфра-чувствительные данные»). Миграция `0004_hypervisors.sql`.
-
-```
-id                    TEXT        PRIMARY KEY                 -- "hyp..." (или явный id от admin)
-zone_id               TEXT        NOT NULL                    -- зона, где стоит хост
-node_index            INTEGER     NOT NULL UNIQUE             -- 0-based стабильный индекс узла; основа /48-SRv6-локатора в kacho-vpc-implement
-fqdn                  TEXT        NOT NULL DEFAULT ''
-state                 TEXT        NOT NULL DEFAULT 'READY'    -- READY | CORDONED | DRAINING | DOWN (имя Hypervisor.State)
-capacity_vcpus        BIGINT      NOT NULL DEFAULT 0
-capacity_memory_bytes BIGINT      NOT NULL DEFAULT 0
-capacity_instances    BIGINT      NOT NULL DEFAULT 0
-created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
-updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
-
-INDEX hypervisors_zone_idx (zone_id)
-```
-
-Аллокация `node_index`: `SEQUENCE hypervisor_node_index_seq` (`MINVALUE 0 START
-WITH 0 MAXVALUE 65535`) + `TABLE hypervisor_node_index_free (id INTEGER PRIMARY
-KEY)` — при `RegisterHypervisor` берётся минимальный из free-list (если есть),
-иначе `nextval`; при `DeregisterHypervisor` `node_index` возвращается во
-free-list. `DeregisterHypervisor` fails (`FailedPrecondition`), если на хосте ещё
-размещены инстансы. Управляется только через `InternalHypervisorService`
-(синхронные RPC, не Operation). Потребители — kacho-compute reconciler (placement),
-kacho-vpc-implement (читает `node_index`), admin-UI/tooling.
 
 ### `compute_outbox`
 

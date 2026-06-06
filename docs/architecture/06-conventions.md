@@ -33,7 +33,6 @@ Compute-specific правила, error mapping, top-10 gotchas. Workspace-уро
 | Image | `ids.PrefixImage` | `fd8` |
 | Snapshot | `ids.PrefixSnapshot` | `fd8` |
 | Operation (Compute) | `ids.PrefixOperationCompute` (== `ids.PrefixInstance`) | `epd` |
-| Hypervisor | литерал-префикс `"hyp"` + 17-char base32 (либо явный id от admin) | `hyp` |
 | DiskType / Region / Zone | литерал-строка (`network-ssd`, `ru-central1`, `ru-central1-a`) | — (не prefix-id) |
 
 ⚠️ **Operation prefix всегда `epd`** независимо от ресурса (`PrefixOperationCompute
@@ -197,10 +196,10 @@ disk <id> is being used"` (FK RESTRICT); иначе DELETE.
   kacho-vpc — Instance NIC validation, IPAM-аллокация эфемерных Address, создание/
   attach/detach/delete kacho-vpc `NetworkInterface` для Instance-NIC'ов (эпик
   `KAC-9`; `kacho-compute → kacho-vpc` runtime-edge).
-- `imageRepo` / `snapshotRepo` / `diskTypeRepo` / `zoneRepo` / `regionRepo` /
-  `hypervisorRepo` — **НЕ clients**, а локальные repo (та же БД): existence-check
-  source-ресурсов; Geography (`zones`/`regions`) — kacho-compute owns (эпик
-  `KAC-15`, нет proxy в kacho-vpc); `hypervisors` — infra-registry.
+- `imageRepo` / `snapshotRepo` / `diskTypeRepo` / `zoneRepo` / `regionRepo` —
+  **НЕ clients**, а локальные repo (та же БД): existence-check source-ресурсов;
+  Geography (`zones`/`regions`) — kacho-compute owns (эпик `KAC-15`, нет proxy в
+  kacho-vpc).
 
 Конфиг адресов: `KACHO_COMPUTE_RESOURCE_MANAGER_GRPC_ADDR`,
 `KACHO_COMPUTE_VPC_GRPC_ADDR` + `*_TLS` флаги. `KACHO_COMPUTE_SKIP_PEER_VALIDATION=true`
@@ -213,20 +212,16 @@ NIC, `nic_id=''`) — для unit/newman/load-тестов без подняты
 ⚠️ **Внутренние служебные сущности не публиковать наружу** (workspace `CLAUDE.md`
 §запрет 6; CLAUDE.md compute §16):
 - `InternalWatchService` / `InternalDiskTypeService` / `InternalRegionService` /
-  `InternalZoneService` / `InternalHypervisorService` — на cluster-internal порту
-  `:9091`; `InternalDiskType/Region/Zone/HypervisorService` проброшены через
+  `InternalZoneService` — на cluster-internal порту
+  `:9091`; `InternalDiskType/Region/ZoneService` проброшены через
   api-gateway internal mux на `/compute/v1/diskTypes`, `/compute/v1/regions`,
-  `/compute/v1/zones`, `/compute/v1/hypervisors` — только cluster-internal listener.
+  `/compute/v1/zones` — только cluster-internal listener.
 - На external TLS endpoint (`api.kacho.local:443`, advertised для внешних клиентов)
-  эти paths **не должны** быть доступны. Список admin/infra paths (для будущего
+  эти paths **не должны** быть доступны. Список admin paths (для будущего
   TLS-middleware фильтра):
   - `/compute/v1/diskTypes` (POST/PATCH/DELETE — kacho-only; GET публичный через `DiskTypeService`)
   - `/compute/v1/regions` (POST/PATCH/DELETE — kacho-only; GET публичный через `RegionService`)
   - `/compute/v1/zones` (POST/PATCH/DELETE — kacho-only; GET публичный через `ZoneService`)
-  - `/compute/v1/hypervisors` (GET/POST + `/{id}` GET/DELETE + `:updateState` —
-    **полностью** kacho-only; placement/HW инвентарь — инфра-чувствительное, см.
-    workspace `CLAUDE.md` §«Инфра-чувствительные данные»; на external endpoint
-    `GET /compute/v1/hypervisors` → 404, нет tenant-facing пути)
 - **Правило для новых admin-RPC**: добавлять **только** в `Internal*` сервис на
   `:9091`, регистрировать через `computeInternalAddr` блок в
   `kacho-api-gateway/internal/restmux/mux.go`. **НЕ** расширять публичные
@@ -299,13 +294,7 @@ Zero-overhead, миграция не нужна. Используется в `Up
     `subnet_id` больше не безусловно `(required)`. `Instance.Delete` чистит NIC'и в
     kacho-vpc. Device-index — `compute.v1.NetworkInterface.index`. Миграция
     `0005_instance_nic_id.sql`.
-19. **`Hypervisor` — internal-only ресурс** (`InternalHypervisorService`,
-    синхронные RPC, не Operation): placement / HW инвентарь — на публичной
-    поверхности не появляется; `GET /compute/v1/hypervisors` на external TLS
-    endpoint → 404. `node_index` (0-based) — next-free из `hypervisor_node_index_seq`
-    (MINVALUE 0) + `hypervisor_node_index_free`; основа SRv6 `/48`-локатора в
-    kacho-vpc-implement. Миграция `0004_hypervisors.sql`.
-20. **Geography (Region/Zone) — owner kacho-compute** (эпик `KAC-15`): читается из
+19. **Geography (Region/Zone) — owner kacho-compute** (эпик `KAC-15`): читается из
     локальных таблиц `regions`/`zones`; нет proxy в kacho-vpc и `skipPeer`-fallback;
     другие сервисы валидируют `zone_id` вызовом `ZoneService.Get`. Миграция
     `0003_geography_owner.sql`.

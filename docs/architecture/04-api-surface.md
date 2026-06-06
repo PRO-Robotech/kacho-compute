@@ -12,7 +12,6 @@ Operation metadata/response (из `(kacho.cloud.api.operation)` options).
 | Public read-only справочники | 3 (`DiskTypeService`, `RegionService`, `ZoneService`) | 6 | `:9090` public gRPC | ✅ через api-gateway. Geography (Region/Zone) — owner kacho-compute (эпик `KAC-15`) |
 | Operations | 1 (`OperationService`) | 2 (`Get`, `Cancel`) | `:9090` public gRPC | ✅ `/operations/{id}` (через api-gateway opsproxy) |
 | Internal admin (kacho-only) | 3 (`InternalDiskTypeService`, `InternalRegionService`, `InternalZoneService`) | 9 | `:9091` internal gRPC | ✅ выборочно (`/compute/v1/diskTypes`, `/compute/v1/regions`, `/compute/v1/zones`) — только cluster-internal listener |
-| Internal infra-registry (kacho-only) | 1 (`InternalHypervisorService`) | 5 (синхронные, не Operation) | `:9091` internal gRPC | ✅ `/compute/v1/hypervisors...`, `:updateState` — **только cluster-internal listener**; на external TLS endpoint `GET /compute/v1/hypervisors` → 404 (placement/инвентарь железа — инфра-чувствительное) |
 | Outbox stream | 1 (`InternalWatchService`) | 1 (`Watch`) | `:9091` internal gRPC | ❌ только server-to-server |
 
 > ⚠️ REST-пути неоднородны (кальки YC API surface, proto-decided): top-level
@@ -156,26 +155,6 @@ Operation metadata/response (из `(kacho.cloud.api.operation)` options).
 | `Update` | `PATCH /compute/v1/zones/{zone_id}` body `{region_id, name, status}` | → `Zone` | |
 | `Delete` | `DELETE /compute/v1/zones/{zone_id}` | → `DeleteZoneResponse{}` | проверяет своих dependents (instances/disks/disk_types); кросс-сервисных (vpc-подсети) НЕ проверяет — admin-ответственность |
 
-### InternalHypervisorService (`internal_hypervisor_service.proto`) — kacho-only, infra-registry
-
-**Синхронные RPC (не Operation)** — инфра-реестр гипервизоров (placement / HW
-инвентарь — internal-only ресурс; см. workspace `CLAUDE.md` §«Инфра-чувствительные
-данные»). Проброшено через api-gateway internal mux **только на cluster-internal
-listener** — на external TLS endpoint `GET /compute/v1/hypervisors` → 404 (нет
-tenant-facing пути).
-
-| RPC | REST (api-gateway internal mux) | response | примечание |
-|---|---|---|---|
-| `RegisterHypervisor` | `POST /compute/v1/hypervisors` body `{id?, zone_id, fqdn?, capacity?}` | → `Hypervisor` | присваивает `node_index` next-free (`hypervisor_node_index_seq` MINVALUE 0 + `hypervisor_node_index_free`); идемпотентно по `id`; пустой `zone_id` → `InvalidArgument`; диапазон исчерпан → `ResourceExhausted` |
-| `GetHypervisor` | `GET /compute/v1/hypervisors/{hypervisor_id}` | → `Hypervisor` | не зарегистрирован → `NotFound` |
-| `ListHypervisors` | `GET /compute/v1/hypervisors?zoneId=&state=&pageSize=&pageToken=` | → `ListHypervisorsResponse` | опц. фильтр по зоне/состоянию |
-| `UpdateHypervisorState` | `POST /compute/v1/hypervisors/{hypervisor_id}:updateState` body `{state, capacity?, heartbeat?}` | → `Hypervisor` | `NotFound` если нет |
-| `DeregisterHypervisor` | `DELETE /compute/v1/hypervisors/{hypervisor_id}` | → `DeregisterHypervisorResponse{}` | возвращает `node_index` во free-list; `FailedPrecondition` если на хосте есть инстансы |
-
-Потребители: kacho-compute reconciler (placement), kacho-vpc-implement (читает
-`node_index` → SRv6 `/48`-локатор), admin-UI/tooling. id-формат — `hyp` + 17-char
-base32 (либо явный id от admin).
-
 > ⚠️ `InternalDiskTypeService` / `InternalZoneService` — kacho-only расширение;
 > в verbatim YC Compute API есть только `DiskTypeService.{Get,List}` /
 > `ZoneService.{Get,List}` (статический discovery, без CRUD). Эти admin-RPC
@@ -219,12 +198,10 @@ kacho-proto/proto/kacho/cloud/compute/v1/
 ├── disk_type.proto / disk_type_service.proto
 ├── region.proto / region_service.proto  Geography (owner kacho-compute, эпик KAC-15)
 ├── zone.proto / zone_service.proto       Geography (owner kacho-compute, эпик KAC-15)
-├── hypervisor.proto                      Hypervisor — internal-only ресурс (placement/HW)
 ├── hardware_generation.proto / kek.proto / maintenance.proto / application.proto / package_options.proto
 │
 ├── internal_watch_service.proto         InternalWatchService.Watch (outbox stream)
 ├── internal_catalog_service.proto       InternalDiskTypeService / InternalRegionService / InternalZoneService (admin CRUD)
-├── internal_hypervisor_service.proto    InternalHypervisorService (sync RPC, infra-registry)
 │
 └── (vendored, реализация отложена) disk_placement_group*.proto, placement_group*.proto,
     host_group*.proto, host_type*.proto, gpu_cluster*.proto, filesystem*.proto,
