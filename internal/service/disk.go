@@ -340,35 +340,6 @@ func (s *DiskService) Delete(ctx context.Context, id string) (*operations.Operat
 	return &op, nil
 }
 
-// Move инициирует перенос Disk в другой folder.
-func (s *DiskService) Move(ctx context.Context, id, destProjectID string) (*operations.Operation, error) {
-	if id == "" {
-		return nil, status.Error(codes.InvalidArgument, "disk_id required")
-	}
-	if destProjectID == "" {
-		return nil, invalidArg("destination_project_id", "destination_project_id is required")
-	}
-	op, err := operations.New(ids.PrefixOperationCompute, fmt.Sprintf("Move disk %s", id),
-		&computev1.MoveDiskMetadata{DiskId: id, DestinationProjectId: destProjectID})
-	if err != nil {
-		return nil, err
-	}
-	if err := s.opsRepo.Create(ctx, op); err != nil {
-		return nil, err
-	}
-	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		if err := s.checkFolder(ctx, destProjectID); err != nil {
-			return nil, err
-		}
-		updated, err := s.repo.SetProjectID(ctx, id, destProjectID)
-		if err != nil {
-			return nil, mapRepoErr(err)
-		}
-		return anypb.New(protoconv.Disk(updated))
-	})
-	return &op, nil
-}
-
 // Relocate инициирует перенос Disk в другую зону (precondition: disk не attached).
 func (s *DiskService) Relocate(ctx context.Context, id, destZoneID string) (*operations.Operation, error) {
 	if id == "" {

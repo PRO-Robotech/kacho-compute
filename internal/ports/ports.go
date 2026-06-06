@@ -59,7 +59,6 @@ type DiskRepo interface {
 	Insert(ctx context.Context, d *domain.Disk) (*domain.Disk, error)
 	Update(ctx context.Context, d *domain.Disk) (*domain.Disk, error)
 	Delete(ctx context.Context, id string) error
-	SetProjectID(ctx context.Context, id, folderID string) (*domain.Disk, error)
 	// SetZoneID меняет zone_id (для Relocate).
 	SetZoneID(ctx context.Context, id, zoneID string) (*domain.Disk, error)
 	// IsAttached — true если есть строка attached_disks для disk_id.
@@ -103,8 +102,6 @@ type InstanceRepo interface {
 	// §«Within-service refs — DB-уровень обязателен» (KAC-91/KAC-87 G2,
 	// parity c kacho-vpc KAC-52 NIC-attach race).
 	SetStatusCAS(ctx context.Context, id string, expected, next domain.InstanceStatus) (*domain.Instance, error)
-	// SetProjectID меняет project_id (для Move).
-	SetProjectID(ctx context.Context, id, folderID string) (*domain.Instance, error)
 	// AttachDisk добавляет строку attached_disks. Возвращает обновлённую ВМ.
 	AttachDisk(ctx context.Context, id string, ad domain.AttachedDisk) (*domain.Instance, error)
 	// DetachDisk удаляет строку attached_disks по disk_id. Возвращает обновлённую ВМ.
@@ -174,61 +171,18 @@ type ZoneSource interface {
 	ListZones(ctx context.Context, pageSize int64, pageToken string) (zones []ZoneInfo, nextPageToken string, err error)
 }
 
-// SubnetInfo — минимальные данные о subnet, нужные compute'у при материализации
-// Instance NIC-spec: zone (для cross-zone-проверки) и v4-CIDR-блоки (для
-// валидации manual primary_v4_address и как контекст в ошибках).
-type SubnetInfo struct {
-	ZoneID       string
-	V4CidrBlocks []string
-}
-
-// VPCAddress — выделенный IP-адрес VPC (результат CreateInternal/ExternalAddress
-// или GetExternalAddress): сам IP + id Address-ресурса в kacho-vpc.
+// VPCAddress — выделенный IP-адрес VPC (результат CreateExternalAddress или
+// GetExternalAddress): сам IP + id Address-ресурса в kacho-vpc.
 type VPCAddress struct {
 	IP        string
 	AddressID string
 }
 
-// CreateNICReq — параметры создания kacho-vpc NetworkInterface-ресурса
-// (vpc/v1.NetworkInterfaceService.Create) при Instance.Create. Адреса
-// передаются ссылками на уже созданные Address-ресурсы (V4AddressIDs).
-type CreateNICReq struct {
-	ProjectID        string
-	Name             string
-	SubnetID         string
-	SecurityGroupIDs []string
-	V4AddressIDs     []string
-	InstanceID       string
-	Index            string
-}
-
-// NICInfo — denormalised mirror NIC-ресурса kacho-vpc (source of truth =
-// vpc.NetworkInterface): то, что compute показывает рядом с embedded NIC.
-// InstanceID резолвится из vpc.NetworkInterface.used_by (referrer.id) — этот
-// денорм kacho-vpc выставляет сам на AttachToInstance.
-type NICInfo struct {
-	ID               string
-	SubnetID         string
-	V4AddressIDs     []string
-	SecurityGroupIDs []string
-	InstanceID       string
-	Status           string
-}
-
-// VPCClient — port для cross-service взаимодействия с kacho-vpc: валидация
-// NIC-spec (subnet / security group), IPAM-аллокация реальных IPv4 (создание
-// эфемерных Address-ресурсов через AddressService.Create, который inline
-// выделяет IP из CIDR подсети / из AddressPool), и teardown этих ресурсов.
+// VPCClient — port для cross-service взаимодействия с kacho-vpc: IPAM-аллокация
+// эфемерных external Address-ресурсов под one-to-one NAT (AddOneToOneNat),
+// teardown этих ресурсов и referrer-tracking адресов. NIC-привязка убрана из
+// lifecycle Instance (KAC-266, no auto-NIC) — методов управления NIC здесь нет.
 type VPCClient interface {
-	// GetSubnet возвращает (info, found, error). found=false если subnet
-	// не существует на стороне VPC.
-	GetSubnet(ctx context.Context, subnetID string) (info SubnetInfo, found bool, err error)
-	// SecurityGroupExists — true если SG существует.
-	SecurityGroupExists(ctx context.Context, sgID string) (bool, error)
-	// CreateInternalAddress создаёт эфемерный internal Address в указанном
-	// folder с привязкой к subnetID; kacho-vpc inline выделяет IPv4 из CIDR
-	// подсети. Поллит Operation до завершения и возвращает выделенный IP + id.
-	CreateInternalAddress(ctx context.Context, folderID, name, subnetID string) (VPCAddress, error)
 	// CreateExternalAddress создаёт эфемерный external Address в указанном
 	// folder/zone; kacho-vpc inline выделяет публичный IPv4 из AddressPool
 	// (cascade resolve). Поллит Operation до завершения и возвращает IP + id.
@@ -243,33 +197,17 @@ type VPCClient interface {
 	// использует — type=compute_instance, id=instance id, name=instance name).
 	// Идемпотентно. НЕ меняет reserved-флаг адреса — используется для reserved
 	// пользовательских адресов (one-to-one NAT по address_id). Вызывается
-	// best-effort из instance.go (ошибка не валит Instance.Create — IP уже выделен).
+	// best-effort из instance.go (ошибка не валит операцию — IP уже выделен).
 	SetAddressReference(ctx context.Context, addressID, referrerType, referrerID, referrerName string) error
 	// MarkAddressEphemeralInUse атомарно помечает Address как «эфемерный, в
 	// работе»: reserved=false, used=true + upsert referrer (type=compute_instance,
-	// id/name инстанса). Используется для эфемерных NIC/NAT-адресов, которые
-	// compute создаёт сам через CreateInternal/ExternalAddress (а не для reserved
-	// пользовательских — у тех reserved не трогаем). Best-effort, как и
-	// SetAddressReference.
+	// id/name инстанса). Используется для эфемерных NAT-адресов, которые compute
+	// создаёт сам через CreateExternalAddress (а не для reserved пользовательских
+	// — у тех reserved не трогаем). Best-effort, как и SetAddressReference.
 	MarkAddressEphemeralInUse(ctx context.Context, addressID, referrerType, referrerID, referrerName string) error
 	// ClearAddressReference снимает referrer с Address-ресурса (best-effort;
 	// NotFound = адрес уже удалён → успех). Вызывается при отвязке
 	// reserved-адреса от ВМ (для эфемерных адресов referrer уходит через FK
 	// CASCADE при DeleteAddress).
 	ClearAddressReference(ctx context.Context, addressID string) error
-
-	// CreateNetworkInterface создаёт kacho-vpc NetworkInterface-ресурс
-	// (vpc/v1.NetworkInterfaceService.Create), поллит Operation и возвращает
-	// id созданного NIC (из Operation metadata `network_interface_id`).
-	CreateNetworkInterface(ctx context.Context, req CreateNICReq) (nicID string, err error)
-	// GetNetworkInterface возвращает (info, found, error) для существующего NIC.
-	GetNetworkInterface(ctx context.Context, nicID string) (info NICInfo, found bool, err error)
-	// AttachNetworkInterface привязывает существующий NIC к инстансу
-	// (vpc/v1.NetworkInterfaceService.AttachToInstance), поллит Operation.
-	AttachNetworkInterface(ctx context.Context, nicID, instanceID, index string) error
-	// DetachNetworkInterface отвязывает NIC от инстанса (best-effort, поллит Operation).
-	DetachNetworkInterface(ctx context.Context, nicID string) error
-	// DeleteNetworkInterface удаляет NIC-ресурс (best-effort: поллит Operation;
-	// NotFound = успех). При удалении NIC kacho-vpc освобождает его Address-ресурсы.
-	DeleteNetworkInterface(ctx context.Context, nicID string) error
 }

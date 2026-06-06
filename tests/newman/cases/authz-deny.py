@@ -88,7 +88,6 @@ define_resource_cases("instance", "instances", create_body_extra={
     "zoneId": "ru-central1-a", "platformId": "standard-v3",
     "resourcesSpec": {"memory": "1073741824", "cores": 2},
     "bootDiskSpec": {"diskSpec": {"size": "8589934592", "typeId": "network-ssd"}},
-    "networkInterfaceSpecs": [{"subnetId": "{{seedNetworkA1Id}}"}],
 })
 define_resource_cases("disk", "disks", create_body_extra={
     "zoneId": "ru-central1-a", "typeId": "network-ssd", "size": "8589934592"
@@ -124,17 +123,10 @@ for name, list_path, _ in CATALOG_READ_RESOURCES:
 
 # ---------------------------------------------------------------------------
 # Cross-domain validation (KAC-122 §5.4 CD-*)
+#
+# KAC-266: the former CD-INST-XACCT-SUBNET case (cross-account subnet via an
+# instance NIC spec) was removed — NIC binding is no longer part of the Instance
+# lifecycle (no auto-NIC), so Instance.Create performs no cross-account subnet
+# peer-validation. Generic instance create-deny (above) already covers the authz
+# gate denial for the same subjects.
 # ---------------------------------------------------------------------------
-
-EXPECT["cross-domain-subnet-from-victim"] = {"ANON":"DENY","NOB":"DENY","PA1":"DENY","AAA":"DENY","AAB":"DENY","INV":"DENY"}
-
-# CD-1: AAA пытается создать Instance в project-A1 со ссылкой на subnet из network-B1 (cross-account)
-# Должно DENY — peer-validation должна обнаружить что subnet принадлежит другому account.
-for subj in SUBJECTS:
-    emit("CD-INST-XACCT-SUBNET", "Create Instance с subnet из cross-account project (peer-validation)",
-         "cross-domain-subnet-from-victim", "POST", "/compute/v1/instances",
-         {"folderId":"{{projectA1Id}}","name": f"cd-{subj[0].lower()}-{{{{runId}}}}",
-          "zoneId":"ru-central1-a","platformId":"standard-v3",
-          "resourcesSpec":{"memory":"1073741824","cores":2},
-          "bootDiskSpec":{"diskSpec":{"size":"8589934592","typeId":"network-ssd"}},
-          "networkInterfaceSpecs":[{"subnetId":"{{seedNetworkB1Id}}"}]}, subj)

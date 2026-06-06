@@ -19,7 +19,8 @@ import (
 //
 // Unimplemented RPC (наследуются из UnimplementedInstanceServiceServer →
 // codes.Unimplemented): AttachFilesystem/DetachFilesystem (blocked:kacho-filesystem),
-// AttachNetworkInterface/DetachNetworkInterface, UpdateNetworkInterface, Relocate
+// AttachNetworkInterface/DetachNetworkInterface/UpdateNetworkInterface (NIC binding
+// removed from the Instance lifecycle — KAC-266, no auto-NIC), Relocate
 // (blocked: cross-zone disk move), ListAccessBindings/SetAccessBindings/UpdateAccessBindings
 // (AAA-скелет). См. docs/architecture/07-known-divergences.md.
 type InstanceHandler struct {
@@ -122,9 +123,8 @@ func (h *InstanceHandler) Create(ctx context.Context, req *computev1.CreateInsta
 	for _, sd := range req.SecondaryDiskSpecs {
 		cr.SecondaryDisks = append(cr.SecondaryDisks, diskSourceFromSpec(sd))
 	}
-	for _, nic := range req.NetworkInterfaceSpecs {
-		cr.NICs = append(cr.NICs, nicSpecFromProto(nic))
-	}
+	// KAC-266: network_interface_specs are ignored — the Instance is created
+	// without any auto-NIC (NIC binding removed from the Instance lifecycle).
 	op, err := h.svc.Create(ctx, cr)
 	if err != nil {
 		return nil, err
@@ -303,28 +303,6 @@ func (h *InstanceHandler) RemoveOneToOneNat(ctx context.Context, req *computev1.
 	return operationToProto(op), nil
 }
 
-// Move инициирует перенос ВМ в другой folder.
-func (h *InstanceHandler) Move(ctx context.Context, req *computev1.MoveInstanceRequest) (*operationpb.Operation, error) {
-	if req.InstanceId == "" {
-		return nil, status.Error(codes.InvalidArgument, "instance_id required")
-	}
-	in, err := h.svc.Get(ctx, req.InstanceId)
-	if err != nil {
-		return nil, err
-	}
-	if err := AssertFolderOwnership(ctx, in.ProjectID); err != nil {
-		return nil, err
-	}
-	if err := AssertFolderOwnership(ctx, req.DestinationProjectId); err != nil {
-		return nil, err
-	}
-	op, err := h.svc.Move(ctx, req.InstanceId, req.DestinationProjectId)
-	if err != nil {
-		return nil, err
-	}
-	return operationToProto(op), nil
-}
-
 // SimulateMaintenanceEvent — no-op (control-plane).
 func (h *InstanceHandler) SimulateMaintenanceEvent(ctx context.Context, req *computev1.SimulateInstanceMaintenanceEventRequest) (*operationpb.Operation, error) {
 	if req.InstanceId == "" {
@@ -425,22 +403,6 @@ func diskSourceFromSpec(s *computev1.AttachedDiskSpec) svc.DiskSourceSpec {
 		out.NewDiskTypeID = ds.GetTypeId()
 		out.NewSourceImage = ds.GetImageId()
 		out.NewSourceSnap = ds.GetSnapshotId()
-	}
-	return out
-}
-
-func nicSpecFromProto(n *computev1.NetworkInterfaceSpec) svc.NICSpec {
-	out := svc.NICSpec{
-		SubnetID:         n.GetSubnetId(),
-		NicID:            n.GetNicId(),
-		Index:            n.GetIndex(),
-		SecurityGroupIDs: n.GetSecurityGroupIds(),
-	}
-	if v4 := n.GetPrimaryV4AddressSpec(); v4 != nil {
-		out.PrimaryV4Address = v4.GetAddress()
-		if nat := v4.GetOneToOneNatSpec(); nat != nil {
-			out.OneToOneNat = &svc.NatSpec{Address: nat.GetAddress(), IPVersion: int32(nat.GetIpVersion())}
-		}
 	}
 	return out
 }

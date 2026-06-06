@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/netip"
-	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -30,20 +28,6 @@ import (
 // Полная per-platform валидация (cores/memory/gpus per standard-v1/v2/v3, gpu-*)
 // — TODO platforms.go; пока — basic sanity check (см. CLAUDE.md §5).
 var validCoreFractions = map[int64]struct{}{0: {}, 5: {}, 20: {}, 50: {}, 100: {}}
-
-// NICSpec — спека сетевого интерфейса для Create / AttachNetworkInterface.
-//
-// NicID — опционально: id существующего kacho-vpc NetworkInterface-ресурса,
-// который нужно приаттачить к создаваемой ВМ вместо создания нового NIC. Ровно
-// одно из {SubnetID, NicID} должно быть задано (как в proto).
-type NICSpec struct {
-	SubnetID         string
-	NicID            string
-	Index            string
-	PrimaryV4Address string   // manual internal IP ("" = auto)
-	OneToOneNat      *NatSpec // nil = без NAT
-	SecurityGroupIDs []string
-}
 
 // NatSpec — спека one-to-one NAT.
 type NatSpec struct {
@@ -81,7 +65,6 @@ type CreateInstanceReq struct {
 	MetadataOptions     *computev1.MetadataOptions
 	BootDisk            DiskSourceSpec
 	SecondaryDisks      []DiskSourceSpec
-	NICs                []NICSpec
 	Hostname            string
 	Preemptible         bool
 	ServiceAccountID    string
@@ -203,14 +186,6 @@ func (s *InstanceService) Create(ctx context.Context, req CreateInstanceReq) (*o
 			return nil, err
 		}
 	}
-	if len(req.NICs) == 0 {
-		return nil, invalidArg("network_interface_specs", "at least one network_interface_spec is required")
-	}
-	for i, nic := range req.NICs {
-		if (nic.SubnetID == "") == (nic.NicID == "") {
-			return nil, invalidArg(fmt.Sprintf("network_interface_specs[%d]", i), "exactly one of subnet_id or nic_id is required")
-		}
-	}
 
 	instanceID := ids.NewID(ids.PrefixInstance)
 	op, err := operations.New(ids.PrefixOperationCompute, fmt.Sprintf("Create instance %s", req.Name),
@@ -235,23 +210,15 @@ func (s *InstanceService) doCreate(ctx context.Context, instanceID string, req C
 		return nil, mapZoneRefErr(err, req.ZoneID)
 	}
 
-	// NIC cross-service validation + materialization: real IPv4 allocation via
-	// kacho-vpc IPAM (ephemeral Address) + creation of (or attach to) the backing
-	// kacho-vpc NetworkInterface resource (epic KAC-2). On failure after creating
-	// ephemeral Address / NIC resources — release them best-effort.
-	nics, createdAddrIDs, createdNICIDs, err := s.materializeNICs(ctx, instanceID, req)
-	if err != nil {
-		s.releaseNICs(ctx, createdNICIDs)
-		s.releaseAddresses(ctx, createdAddrIDs)
-		return nil, err
-	}
+	// KAC-266: Instance is created WITHOUT any network interface. NIC binding has
+	// been removed from the Instance lifecycle entirely (no auto-NIC) — no
+	// kacho-vpc Address/NetworkInterface resources are created or attached at
+	// Create time. NICs can be managed independently through kacho-vpc.
 
 	// Boot disk + secondary disks: resolve existing OR materialize inline.
 	var inlineDisks []*domain.Disk
 	bootAD, bootInline, err := s.resolveDiskSource(ctx, req.ProjectID, req.ZoneID, req.BootDisk, true)
 	if err != nil {
-		s.releaseNICs(ctx, createdNICIDs)
-		s.releaseAddresses(ctx, createdAddrIDs)
 		return nil, err
 	}
 	if bootInline != nil {
@@ -261,8 +228,6 @@ func (s *InstanceService) doCreate(ctx context.Context, instanceID string, req C
 	for _, sd := range req.SecondaryDisks {
 		ad, inline, err := s.resolveDiskSource(ctx, req.ProjectID, req.ZoneID, sd, false)
 		if err != nil {
-			s.releaseNICs(ctx, createdNICIDs)
-			s.releaseAddresses(ctx, createdAddrIDs)
 			return nil, err
 		}
 		if inline != nil {
@@ -295,13 +260,10 @@ func (s *InstanceService) doCreate(ctx context.Context, instanceID string, req C
 		PlacementPolicy:       req.PlacementPolicy,
 		HardwareGeneration:    req.HardwareGeneration,
 		Application:           req.Application,
-		NetworkInterfaces:     nics,
 		AttachedDisks:         attached,
 	}
 	created, err := s.repo.Insert(ctx, in, inlineDisks)
 	if err != nil {
-		s.releaseNICs(ctx, createdNICIDs)
-		s.releaseAddresses(ctx, createdAddrIDs)
 		return nil, mapRepoErr(err)
 	}
 	// KAC-188 follow-up: publish the compute_instance→project hierarchy tuple so
@@ -310,38 +272,7 @@ func (s *InstanceService) doCreate(ctx context.Context, instanceID string, req C
 	// fail-closed DENY with "no path" (the live 403 that motivated this fix).
 	// Best-effort + non-fatal (row committed).
 	fgawrite.Emit(ctx, s.fgaWriter, s.logger, "compute_instance", created.ID, created.ProjectID)
-	// Referrer-tracking (YC-like): mark every VPC Address this instance's NICs
-	// use with a compute_instance reference. Ephemeral addresses compute itself
-	// created (internal <vmid>-nicN + ephemeral external <vmid>-natN) get
-	// MarkAddressEphemeralInUse → reserved=false, used=true + referrer atomically;
-	// reserved user addresses (one-to-one NAT by address_id) keep their reserved
-	// flag and just get a referrer via SetAddressReference. Best-effort — the IPs
-	// are already allocated; a missing reference must not fail the instance create.
-	s.setNICAddressReferences(ctx, created)
 	return anypb.New(protoconv.Instance(created))
-}
-
-// setNICAddressReferences best-effort помечает каждый VPC Address-ресурс, который
-// используют NIC-и инстанса:
-//   - эфемерный internal (PrimaryV4AddressID — compute создал его сам) и
-//     эфемерный external NAT (PrimaryV4Nat/PrimaryV6Nat.AddressID при Ephemeral=true)
-//     → MarkAddressEphemeralInUse (reserved=false, used=true + referrer);
-//   - reserved external NAT (Ephemeral=false, передан клиентом по address_id)
-//     → SetAddressReference (referrer, reserved не трогаем).
-//
-// Ошибка → warning в лог, не валит вызывающую операцию.
-func (s *InstanceService) setNICAddressReferences(ctx context.Context, in *domain.Instance) {
-	for i := range in.NetworkInterfaces {
-		nic := &in.NetworkInterfaces[i]
-		// PrimaryV4AddressID is always an ephemeral internal Address compute created.
-		s.markEphemeralAddressInUse(ctx, nic.PrimaryV4AddressID, in.ID, in.Name)
-		if nat := nic.PrimaryV4Nat; nat != nil {
-			s.markNatAddress(ctx, nat, in.ID, in.Name)
-		}
-		if nat := nic.PrimaryV6Nat; nat != nil {
-			s.markNatAddress(ctx, nat, in.ID, in.Name)
-		}
-	}
 }
 
 // markNatAddress помечает one-to-one-NAT Address: эфемерный (compute создал) →
@@ -409,191 +340,6 @@ func reservedNatAddressIDs(in *domain.Instance) []string {
 		}
 	}
 	return out
-}
-
-// materializeNICs валидирует cross-service refs каждого NIC-spec'а и
-// материализует domain.NetworkInterface:
-//   - spec.NicID задан → аттач существующего kacho-vpc NetworkInterface-ресурса
-//     (проверяем существование + что он не приаттачен к другому инстансу),
-//     denorm-поля (subnet_id, sg ids) копируются из NIC-ресурса;
-//   - иначе (spec.SubnetID задан) → создаём эфемерный internal Address из CIDR
-//     подсети и kacho-vpc NetworkInterface-ресурс, ссылающийся на него; внешний
-//     (one-to-one NAT) IP — эфемерный external Address либо reserved Address.
-//
-// В режиме skipIPAM (SKIP_PEER_VALIDATION) — синтетические IP, без обращения к
-// kacho-vpc и без создания NIC-ресурса (NICID берётся как есть из spec, если задан).
-//
-// Возвращает (nics, createdAddrIDs, createdNICIDs, error): два последних — id
-// эфемерных Address- и NIC-ресурсов, созданных compute'ом (для best-effort
-// rollback выше по стеку).
-func (s *InstanceService) materializeNICs(ctx context.Context, instanceID string, req CreateInstanceReq) ([]domain.NetworkInterface, []string, []string, error) {
-	nics := make([]domain.NetworkInterface, 0, len(req.NICs))
-	var createdAddrIDs, createdNICIDs []string
-	for i, spec := range req.NICs {
-		idx := spec.Index
-		if idx == "" {
-			idx = fmt.Sprintf("%d", i)
-		}
-
-		// --- attach an existing kacho-vpc NIC by id ---
-		if spec.NicID != "" {
-			nic, err := s.attachExistingNIC(ctx, instanceID, idx, spec.NicID)
-			if err != nil {
-				return nil, createdAddrIDs, createdNICIDs, err
-			}
-			nics = append(nics, nic)
-			continue
-		}
-
-		// --- create a fresh NIC (with an internal Address) in the given subnet ---
-		subnet, found, err := s.vpcClient.GetSubnet(ctx, spec.SubnetID)
-		if err != nil {
-			return nil, createdAddrIDs, createdNICIDs, status.Errorf(codes.Unavailable, "subnet check: %v", err)
-		}
-		if !found {
-			return nil, createdAddrIDs, createdNICIDs, status.Errorf(codes.NotFound, "Subnet %s not found", spec.SubnetID)
-		}
-		if subnet.ZoneID != "" && subnet.ZoneID != req.ZoneID {
-			return nil, createdAddrIDs, createdNICIDs, status.Errorf(codes.InvalidArgument, "Subnet %s is in zone %s, instance zone is %s", spec.SubnetID, subnet.ZoneID, req.ZoneID)
-		}
-		for _, sg := range spec.SecurityGroupIDs {
-			ok, err := s.vpcClient.SecurityGroupExists(ctx, sg)
-			if err != nil {
-				return nil, createdAddrIDs, createdNICIDs, status.Errorf(codes.Unavailable, "security group check: %v", err)
-			}
-			if !ok {
-				return nil, createdAddrIDs, createdNICIDs, status.Errorf(codes.NotFound, "Security group %s not found", sg)
-			}
-		}
-
-		nic := domain.NetworkInterface{
-			Index:            idx,
-			SubnetID:         spec.SubnetID,
-			SecurityGroupIDs: spec.SecurityGroupIDs,
-		}
-
-		// Internal IPv4.
-		switch {
-		case spec.PrimaryV4Address != "":
-			// Manual address — validate it's within the subnet CIDR (a manual
-			// primary v4 address inside the subnet is used as-is). No ephemeral
-			// Address resource is created for it (so the kacho-vpc NIC below gets
-			// no v4_address_ids ref — MVP).
-			if err := validateIPInSubnet("primary_v4_address_spec.address", spec.PrimaryV4Address, subnet.V4CidrBlocks); err != nil {
-				return nil, createdAddrIDs, createdNICIDs, err
-			}
-			nic.PrimaryV4Address = spec.PrimaryV4Address
-		case s.skipIPAM:
-			nic.PrimaryV4Address = synthInternalIP(i)
-		default:
-			addr, err := s.vpcClient.CreateInternalAddress(ctx, req.ProjectID, nicAddressName(instanceID, idx), spec.SubnetID)
-			if err != nil {
-				return nil, createdAddrIDs, createdNICIDs, status.Errorf(codes.Internal, "allocate internal ip for nic %s: %v", idx, err)
-			}
-			createdAddrIDs = append(createdAddrIDs, addr.AddressID)
-			nic.PrimaryV4Address = addr.IP
-			nic.PrimaryV4AddressID = addr.AddressID
-		}
-
-		// Create the backing kacho-vpc NetworkInterface resource (skipped in
-		// skipIPAM mode — synthetic NIC, no vpc resource).
-		if !s.skipIPAM {
-			var v4Addrs []string
-			if nic.PrimaryV4AddressID != "" {
-				v4Addrs = []string{nic.PrimaryV4AddressID}
-			}
-			nicID, err := s.vpcClient.CreateNetworkInterface(ctx, CreateNICReq{
-				ProjectID:        req.ProjectID,
-				Name:             nicResourceName(instanceID, idx),
-				SubnetID:         spec.SubnetID,
-				SecurityGroupIDs: spec.SecurityGroupIDs,
-				V4AddressIDs:     v4Addrs,
-				InstanceID:       instanceID,
-				Index:            idx,
-			})
-			if err != nil {
-				return nil, createdAddrIDs, createdNICIDs, status.Errorf(codes.Internal, "create network interface for nic %s: %v", idx, err)
-			}
-			createdNICIDs = append(createdNICIDs, nicID)
-			nic.NICID = nicID
-		}
-
-		// External (one-to-one NAT) IPv4.
-		if spec.OneToOneNat != nil {
-			nat, addrID, err := s.resolveNatAddress(ctx, req.ProjectID, req.ZoneID, nicNatAddressName(instanceID, idx), spec.OneToOneNat, i)
-			if err != nil {
-				return nil, createdAddrIDs, createdNICIDs, err
-			}
-			if addrID != "" && nat.Ephemeral {
-				createdAddrIDs = append(createdAddrIDs, addrID)
-			}
-			nic.PrimaryV4Nat = nat
-		}
-		nics = append(nics, nic)
-	}
-	return nics, createdAddrIDs, createdNICIDs, nil
-}
-
-// attachExistingNIC проверяет существование kacho-vpc NIC по id, что он не
-// приаттачен к другому инстансу, аттачит его к instanceID@idx и собирает
-// domain.NetworkInterface с denorm-полями из NIC-ресурса. В skipIPAM-режиме —
-// без обращения к VPC (NICID берётся как есть).
-//
-// Software fast-path-check (info.InstanceID != "" && != instanceID) — для
-// human-friendly error до похода в Attach RPC. Финальная race-safe защита —
-// на vpc-стороне (миграция 0016 partial UNIQUE + conditional UPDATE CAS,
-// KAC-52). Если concurrent Attach к одному и тому же existing NIC прошёл
-// software-guard, vpc вернёт FailedPrecondition — здесь мы её **пробрасываем
-// как есть** (не оборачиваем в codes.Internal), чтобы клиент получил
-// нормальный 412 с осмысленным сообщением, а не "internal error".
-func (s *InstanceService) attachExistingNIC(ctx context.Context, instanceID, idx, nicID string) (domain.NetworkInterface, error) {
-	if s.skipIPAM {
-		return domain.NetworkInterface{Index: idx, NICID: nicID, PrimaryV4Address: synthInternalIP(0)}, nil
-	}
-	info, found, err := s.vpcClient.GetNetworkInterface(ctx, nicID)
-	if err != nil {
-		return domain.NetworkInterface{}, status.Errorf(codes.Unavailable, "network interface check: %v", err)
-	}
-	if !found {
-		return domain.NetworkInterface{}, status.Errorf(codes.NotFound, "Network interface %s not found", nicID)
-	}
-	if info.InstanceID != "" && info.InstanceID != instanceID {
-		return domain.NetworkInterface{}, status.Errorf(codes.FailedPrecondition, "Network interface %s is already attached to instance %s", nicID, info.InstanceID)
-	}
-	if err := s.vpcClient.AttachNetworkInterface(ctx, nicID, instanceID, idx); err != nil {
-		// Map gRPC code from kacho-vpc:
-		//   FailedPrecondition — NIC race / уже attached (DB-side CAS отбил);
-		//   NotFound — NIC исчез между Get и Attach;
-		//   InvalidArgument — bad request (нереально с проверенным id, но прокидываем);
-		//   Unavailable — vpc недоступен, retryable;
-		//   остальное — Internal.
-		switch status.Code(err) {
-		case codes.FailedPrecondition, codes.NotFound, codes.InvalidArgument, codes.Unavailable:
-			return domain.NetworkInterface{}, err
-		default:
-			return domain.NetworkInterface{}, status.Errorf(codes.Internal, "attach network interface %s: %v", nicID, err)
-		}
-	}
-	return domain.NetworkInterface{
-		Index:            idx,
-		NICID:            nicID,
-		SubnetID:         info.SubnetID,
-		SecurityGroupIDs: info.SecurityGroupIDs,
-	}, nil
-}
-
-// releaseNICs best-effort удаляет kacho-vpc NetworkInterface-ресурсы, созданные
-// compute'ом для этого инстанса (на rollback Create или при teardown Delete).
-// VPC недоступен / NIC уже удалён — лишь предупреждение в лог.
-func (s *InstanceService) releaseNICs(ctx context.Context, nicIDs []string) {
-	for _, id := range nicIDs {
-		if id == "" {
-			continue
-		}
-		if err := s.vpcClient.DeleteNetworkInterface(ctx, id); err != nil {
-			slog.WarnContext(ctx, "failed to release kacho-vpc network interface (best-effort)", "nic_id", id, "err", err)
-		}
-	}
 }
 
 // resolveNatAddress материализует one-to-one NAT-конфигурацию NIC'а:
@@ -1148,35 +894,6 @@ func (s *InstanceService) RemoveOneToOneNat(ctx context.Context, id, nicIndex st
 	return &op, nil
 }
 
-// Move инициирует перенос ВМ в другой folder.
-func (s *InstanceService) Move(ctx context.Context, id, destProjectID string) (*operations.Operation, error) {
-	if id == "" {
-		return nil, status.Error(codes.InvalidArgument, "instance_id required")
-	}
-	if destProjectID == "" {
-		return nil, invalidArg("destination_project_id", "destination_project_id is required")
-	}
-	op, err := operations.New(ids.PrefixOperationCompute, fmt.Sprintf("Move instance %s", id),
-		&computev1.MoveInstanceMetadata{InstanceId: id, DestinationProjectId: destProjectID})
-	if err != nil {
-		return nil, err
-	}
-	if err := s.opsRepo.Create(ctx, op); err != nil {
-		return nil, err
-	}
-	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		if err := s.checkFolder(ctx, destProjectID); err != nil {
-			return nil, err
-		}
-		updated, err := s.repo.SetProjectID(ctx, id, destProjectID)
-		if err != nil {
-			return nil, mapRepoErr(err)
-		}
-		return anypb.New(protoconv.Instance(updated))
-	})
-	return &op, nil
-}
-
 // SimulateMaintenanceEvent — no-op (control-plane: возвращает done-операцию с самой ВМ).
 func (s *InstanceService) SimulateMaintenanceEvent(ctx context.Context, id string) (*operations.Operation, error) {
 	if id == "" {
@@ -1227,19 +944,12 @@ func (s *InstanceService) Delete(ctx context.Context, id string) (*operations.Op
 		if err := s.repo.Delete(ctx, id, autoDelete); err != nil {
 			return nil, mapRepoErr(err)
 		}
-		// Detach + delete the backing kacho-vpc NetworkInterface resources owned
-		// by this instance's NICs (epic KAC-2), then release any ephemeral VPC
-		// Address resources. All best-effort: VPC unavailable / already-gone → log
-		// warning, don't fail the delete — mirrors the legacy NAT-release path.
-		// The referrer rows of ephemeral addresses go away via FK CASCADE on
-		// delete; for any reserved one-to-one-NAT address we explicitly clear the
-		// referrer so it shows used=false again.
-		for _, nicID := range nicResourceIDs(in) {
-			if err := s.vpcClient.DetachNetworkInterface(ctx, nicID); err != nil {
-				slog.WarnContext(ctx, "failed to detach kacho-vpc network interface (best-effort)", "nic_id", nicID, "err", err)
-			}
-		}
-		s.releaseNICs(ctx, nicResourceIDs(in))
+		// Release any ephemeral VPC Address resources still referenced by the
+		// instance's NICs (one-to-one NAT addresses created via AddOneToOneNat).
+		// All best-effort: VPC unavailable / already-gone → log warning, don't
+		// fail the delete. The referrer rows of ephemeral addresses go away via
+		// FK CASCADE on delete; for any reserved one-to-one-NAT address we
+		// explicitly clear the referrer so it shows used=false again.
 		s.releaseAddresses(ctx, ephemeralAddressIDs(in))
 		for _, addrID := range reservedNatAddressIDs(in) {
 			s.clearAddressReference(ctx, addrID)
@@ -1247,18 +957,6 @@ func (s *InstanceService) Delete(ctx context.Context, id string) (*operations.Op
 		return anypb.New(&emptypb.Empty{})
 	})
 	return &op, nil
-}
-
-// nicResourceIDs возвращает id kacho-vpc NetworkInterface-ресурсов, на которые
-// ссылаются NIC-и инстанса (пусто для legacy / skip-peer NIC-ей).
-func nicResourceIDs(in *domain.Instance) []string {
-	var out []string
-	for i := range in.NetworkInterfaces {
-		if in.NetworkInterfaces[i].NICID != "" {
-			out = append(out, in.NetworkInterfaces[i].NICID)
-		}
-	}
-	return out
 }
 
 // ephemeralAddressIDs возвращает id всех Address-ресурсов, которые compute
@@ -1362,42 +1060,15 @@ func fqdn(id, hostname string) string {
 	return id + ".auto.internal"
 }
 
-func synthInternalIP(i int) string { return fmt.Sprintf("10.0.0.%d", 10+i) }
 func synthExternalIP(i int) string { return fmt.Sprintf("203.0.113.%d", 10+i) }
 
-// nicAddressName / nicNatAddressName — имена эфемерных VPC Address-ресурсов,
-// создаваемых для NIC'а. Уникальны в пределах folder (instanceID уникален) и
-// соответствуют regex имени Address (`|[a-zA-Z]([-_a-zA-Z0-9]{0,61}[a-zA-Z0-9])?`,
-// ≤63 символов): instanceID начинается с буквы `e` (prefix `epd`), длина 20.
-func nicAddressName(instanceID, idx string) string    { return instanceID + "-nic" + idx }
+// nicNatAddressName — имя эфемерного VPC Address-ресурса, создаваемого для
+// one-to-one NAT NIC'а (AddOneToOneNat). Уникально в пределах folder
+// (instanceID уникален) и соответствует regex имени Address
+// (`|[a-zA-Z]([-_a-zA-Z0-9]{0,61}[a-zA-Z0-9])?`, ≤63 символов): instanceID
+// начинается с буквы `e` (prefix `epd`), длина 20.
 func nicNatAddressName(instanceID, idx string) string { return instanceID + "-nat" + idx }
 
-// nicResourceName — имя kacho-vpc NetworkInterface-ресурса, создаваемого для
-// NIC'а инстанса (уникально в пределах folder; ≤63 символов, начинается с буквы).
-func nicResourceName(instanceID, idx string) string { return instanceID + "-ni" + idx }
-
-// validateIPInSubnet проверяет, что manual IPv4 (`primary_v4_address_spec.address`)
-// принадлежит одному из v4-CIDR-блоков подсети. Если CIDR-блоки неизвестны (напр.
-// NoopVPCClient в SKIP_PEER_VALIDATION) — проверка пропускается.
-func validateIPInSubnet(field, ip string, v4CidrBlocks []string) error {
-	if len(v4CidrBlocks) == 0 {
-		return nil
-	}
-	addr, err := netip.ParseAddr(ip)
-	if err != nil {
-		return invalidArg(field, "address is not a valid IP")
-	}
-	for _, raw := range v4CidrBlocks {
-		cidr, perr := netip.ParsePrefix(strings.TrimSpace(raw))
-		if perr != nil {
-			continue
-		}
-		if cidr.Contains(addr) {
-			return nil
-		}
-	}
-	return invalidArg(field, fmt.Sprintf("address %s is not within subnet cidr %s", ip, v4CidrBlocks[0]))
-}
 func orDefault(v, def string) string {
 	if v == "" {
 		return def

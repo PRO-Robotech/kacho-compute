@@ -139,18 +139,6 @@ func (r *DiskRepo) Delete(_ context.Context, id string) error {
 	return nil
 }
 
-// SetProjectID меняет project_id.
-func (r *DiskRepo) SetProjectID(_ context.Context, id, folderID string) (*domain.Disk, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	d, ok := r.data[id]
-	if !ok {
-		return nil, ports.ErrNotFound
-	}
-	d.ProjectID = folderID
-	return d, nil
-}
-
 // SetZoneID меняет zone_id.
 func (r *DiskRepo) SetZoneID(_ context.Context, id, zoneID string) (*domain.Disk, error) {
 	r.mu.Lock()
@@ -475,18 +463,6 @@ func (r *InstanceRepo) SetStatusCAS(_ context.Context, id string, expected, next
 		return nil, fmt.Errorf("%w: state transition not allowed from current status", ports.ErrFailedPrecondition)
 	}
 	in.Status = next
-	return in, nil
-}
-
-// SetProjectID меняет project_id.
-func (r *InstanceRepo) SetProjectID(_ context.Context, id, folderID string) (*domain.Instance, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	in, ok := r.data[id]
-	if !ok {
-		return nil, ports.ErrNotFound
-	}
-	in.ProjectID = folderID
 	return in, nil
 }
 
@@ -853,44 +829,24 @@ type ProjectClient struct{ OK bool }
 // Exists возвращает ProjectClient.OK.
 func (c *ProjectClient) Exists(_ context.Context, _ string) (bool, error) { return c.OK, nil }
 
-// VPCClient — fake VPCClient. SubnetFound/SubnetZone/SubnetCidrBlocks задают
-// ответ GetSubnet; SGFound — SecurityGroupExists; AddrFound — GetExternalAddress.
-// CreateInternalAddress / CreateExternalAddress возвращают детерминированные
-// «выделенные» IP (InternalIP/ExternalIP) + последовательные id; CreatedAddrIDs
-// и DeletedAddrIDs протоколируют вызовы для проверки teardown-логики в тестах.
+// VPCClient — fake VPCClient. AddrFound — ответ GetExternalAddress;
+// CreateExternalAddress возвращает детерминированный «выделенный» external IP
+// (ExternalIP) + последовательные id; CreatedAddrIDs и DeletedAddrIDs
+// протоколируют вызовы для проверки teardown-логики one-to-one NAT в тестах.
 type VPCClient struct {
-	SubnetFound      bool
-	SubnetZone       string
-	SubnetCidrBlocks []string
-	SGFound          bool
-	AddrFound        bool
-	// InternalIP/ExternalIP — IP, который вернёт CreateInternalAddress/
-	// CreateExternalAddress (если "" — используются дефолты ниже).
-	InternalIP string
+	AddrFound bool
+	// ExternalIP — IP, который вернёт CreateExternalAddress/GetExternalAddress
+	// (если "" — используются дефолты ниже).
 	ExternalIP string
 	// Zones — справочник зон, проксируемый GetZone/ListZones (имитация
-	// kacho-vpc InternalZoneService). Если nil — используется стандартный
+	// owner-таблицы зон compute). Если nil — используется стандартный
 	// набор ru-central1-{a,b,d}. Ключ — zone id, значение — region id.
 	Zones map[string]string
 
-	// NICInstanceID — InstanceId, который вернёт GetNetworkInterface (имитация
-	// «NIC уже приаттачен к этому инстансу»); "" = detached. NICFound — found
-	// для GetNetworkInterface (по умолчанию false; задаётся явно в тестах).
-	NICFound      bool
-	NICInstanceID string
-	NICSubnetID   string
-
 	mu             sync.Mutex
 	addrSeq        int
-	nicSeq         int
 	CreatedAddrIDs []string
 	DeletedAddrIDs []string
-	// CreatedNICIDs / AttachedNICIDs / DetachedNICIDs / DeletedNICIDs —
-	// протоколируют вызовы NIC-management методов для проверки в тестах.
-	CreatedNICIDs  []string
-	AttachedNICIDs []string
-	DetachedNICIDs []string
-	DeletedNICIDs  []string
 	// SetRefs — addressID → referrerID, протоколирует SetAddressReference.
 	// MarkedEphemeral — addressID → referrerID, протоколирует
 	// MarkAddressEphemeralInUse (reserved=false, used=true + referrer).
@@ -930,30 +886,6 @@ func (c *VPCClient) ListZones(_ context.Context, _ int64, _ string) ([]ports.Zon
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, "", nil
-}
-
-// GetSubnet возвращает ({SubnetZone, SubnetCidrBlocks}, SubnetFound, nil).
-func (c *VPCClient) GetSubnet(_ context.Context, _ string) (ports.SubnetInfo, bool, error) {
-	return ports.SubnetInfo{ZoneID: c.SubnetZone, V4CidrBlocks: c.SubnetCidrBlocks}, c.SubnetFound, nil
-}
-
-// SecurityGroupExists возвращает SGFound.
-func (c *VPCClient) SecurityGroupExists(_ context.Context, _ string) (bool, error) {
-	return c.SGFound, nil
-}
-
-// CreateInternalAddress возвращает «выделенный» internal IP + новый id.
-func (c *VPCClient) CreateInternalAddress(_ context.Context, _, _, _ string) (ports.VPCAddress, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.addrSeq++
-	id := fmt.Sprintf("e9bfakeaddr%08d", c.addrSeq)
-	c.CreatedAddrIDs = append(c.CreatedAddrIDs, id)
-	ip := c.InternalIP
-	if ip == "" {
-		ip = fmt.Sprintf("10.0.0.%d", 100+c.addrSeq)
-	}
-	return ports.VPCAddress{IP: ip, AddressID: id}, nil
 }
 
 // CreateExternalAddress возвращает «выделенный» external IP + новый id.
@@ -1015,45 +947,6 @@ func (c *VPCClient) ClearAddressReference(_ context.Context, addressID string) e
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.ClearedRefs = append(c.ClearedRefs, addressID)
-	return nil
-}
-
-// CreateNetworkInterface возвращает синтетический NIC id и протоколирует его.
-func (c *VPCClient) CreateNetworkInterface(_ context.Context, _ ports.CreateNICReq) (string, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.nicSeq++
-	id := fmt.Sprintf("enpfakenic%08d", c.nicSeq)
-	c.CreatedNICIDs = append(c.CreatedNICIDs, id)
-	return id, nil
-}
-
-// GetNetworkInterface возвращает ({nicID, NICSubnetID, NICInstanceID}, NICFound, nil).
-func (c *VPCClient) GetNetworkInterface(_ context.Context, nicID string) (ports.NICInfo, bool, error) {
-	return ports.NICInfo{ID: nicID, SubnetID: c.NICSubnetID, InstanceID: c.NICInstanceID}, c.NICFound, nil
-}
-
-// AttachNetworkInterface протоколирует nicID и возвращает nil.
-func (c *VPCClient) AttachNetworkInterface(_ context.Context, nicID, _, _ string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.AttachedNICIDs = append(c.AttachedNICIDs, nicID)
-	return nil
-}
-
-// DetachNetworkInterface протоколирует nicID и возвращает nil.
-func (c *VPCClient) DetachNetworkInterface(_ context.Context, nicID string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.DetachedNICIDs = append(c.DetachedNICIDs, nicID)
-	return nil
-}
-
-// DeleteNetworkInterface протоколирует nicID и возвращает nil.
-func (c *VPCClient) DeleteNetworkInterface(_ context.Context, nicID string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.DeletedNICIDs = append(c.DeletedNICIDs, nicID)
 	return nil
 }
 

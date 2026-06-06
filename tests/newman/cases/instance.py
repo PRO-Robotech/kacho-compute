@@ -1,15 +1,16 @@
 """Case-set для InstanceService (kacho-compute) — самый большой ресурс.
 
-Covered RPCs: Get, List, Create, Update, Delete, Start, Stop, Restart, Move, ListOperations,
-AttachDisk, DetachDisk, AddOneToOneNat, RemoveOneToOneNat, UpdateNetworkInterface, UpdateMetadata,
-GetSerialPortOutput, SimulateMaintenanceEvent.
-(AttachFilesystem/DetachFilesystem — blocked:kacho-filesystem; Relocate — blocked; access-bindings — no-op skip.)
+Covered RPCs: Get, List, Create, Update, Delete, Start, Stop, Restart, ListOperations,
+AttachDisk, DetachDisk, UpdateMetadata, GetSerialPortOutput, SimulateMaintenanceEvent.
+(AttachFilesystem/DetachFilesystem — blocked:kacho-filesystem; Relocate — blocked;
+Move — removed KAC-266; AttachNetworkInterface/DetachNetworkInterface/UpdateNetworkInterface /
+AddOneToOneNat/RemoveOneToOneNat — NIC binding removed from the Instance lifecycle (KAC-266,
+no auto-NIC): Instance.Create no longer creates or attaches any network interface;
+access-bindings — no-op skip.)
 
-Cross-service: NIC.subnet_id / security_group_ids → kacho-vpc (нужен поднятый kacho-vpc;
-кейсы с реальным subnet помечены '# requires kacho-vpc subnet {{existingSubnetId}}').
-project_id → kacho-resource-manager. При KACHO_COMPUTE_SKIP_PEER_VALIDATION=true cross-service
-existence-checks становятся no-op → NEG-SUBNET-NOTFOUND / NEG-FOLDER-NOTFOUND не сработают
-(помечены '# requires peer-validation enabled').
+Cross-service: project_id → kacho-iam. При KACHO_COMPUTE_SKIP_PEER_VALIDATION=true cross-service
+existence-checks становятся no-op → NEG-FOLDER-NOTFOUND не сработает
+(помечен '# requires peer-validation enabled').
 
 id-prefix Instance = `epd`, operation prefix `epd`. State-машина: см. kacho-compute/CLAUDE.md §8.
 Текст precondition-ошибок — probe-needed (предполагаем "Instance is not running" / "... not stopped" и т.п.);
@@ -32,15 +33,6 @@ def _resources_spec(cores=2, memory=2147483648, core_fraction=100):
     return {"cores": cores, "memory": memory, "coreFraction": core_fraction}
 
 
-def _nic_spec(subnet="{{existingSubnetId}}", sg="{{existingSgId}}", nat=False):
-    n = {"subnetId": subnet, "primaryV4AddressSpec": {}}
-    if sg:
-        n["securityGroupIds"] = [sg]
-    if nat:
-        n["primaryV4AddressSpec"]["oneToOneNatSpec"] = {"ipVersion": "IPV4"}
-    return n
-
-
 def _boot_disk_spec_inline(name_suffix="boot", size=_BOOT_SIZE, image=None):
     spec = {"autoDelete": True, "diskSpec": {"name": f"bd-{name_suffix}-{{{{runId}}}}",
                                              "size": size, "typeId": "{{existingDiskTypeId}}"}}
@@ -49,12 +41,13 @@ def _boot_disk_spec_inline(name_suffix="boot", size=_BOOT_SIZE, image=None):
     return spec
 
 
-def _instance_body(name_suffix, boot_disk_spec=None, secondary=None, nics=None, **over):
+def _instance_body(name_suffix, boot_disk_spec=None, secondary=None, **over):
+    # KAC-266: Instance is created without any network interface (no auto-NIC).
+    # network_interface_specs is no longer sent/required.
     b = {"projectId": "{{_suiteFolderId}}", "name": f"inst-{name_suffix}-{{{{runId}}}}",
          "zoneId": "{{existingZoneId}}", "platformId": "{{existingPlatformId}}",
          "resourcesSpec": _resources_spec(),
-         "bootDiskSpec": boot_disk_spec or _boot_disk_spec_inline(name_suffix),
-         "networkInterfaceSpecs": nics or [_nic_spec()]}
+         "bootDiskSpec": boot_disk_spec or _boot_disk_spec_inline(name_suffix)}
     if secondary is not None:
         b["secondaryDiskSpecs"] = secondary
     b.update(over)
@@ -113,10 +106,9 @@ def _stop_instance_steps():
 
 CASES.append(Case(
     id="INST-CR-CRUD-OK",
-    title="Create instance (zone, platform standard-v3, 2c/2GB, boot_disk_spec, 1 NIC subnet) → poll → Get → status RUNNING, fqdn, boot_disk, NIC, id-prefix epd, created_at секунды",
+    title="Create instance (zone, platform standard-v3, 2c/2GB, boot_disk_spec, no NIC) → poll → Get → status RUNNING, fqdn, boot_disk, no NIC, id-prefix epd, created_at секунды",
     classes=["CRUD", "CONF", "STATE"], priority="P0",
     steps=[
-        # # requires kacho-vpc subnet {{existingSubnetId}} + sg {{existingSgId}}
         Step(name="create", method="POST", path=INSTANCES,
              body=_instance_body("cr", description="newman CRUD-OK", labels={"suite": "newman"}),
              test_script=[*assert_status(200), *assert_operation_envelope(),
@@ -134,7 +126,7 @@ CASES.append(Case(
                           "pm.test('fqdn set', () => pm.expect(j.fqdn).to.be.a('string').and.length.greaterThan(0));",
                           "pm.test('bootDisk present with diskId', () => pm.expect(j.bootDisk && j.bootDisk.diskId).to.be.a('string').and.match(/^epd/));",
                           "pm.test('resources cores=2', () => pm.expect(String(j.resources && j.resources.cores)).to.eql('2'));",
-                          "pm.test('at least 1 NIC with subnetId', () => { pm.expect((j.networkInterfaces || []).length).to.be.at.least(1); pm.expect(j.networkInterfaces[0].subnetId).to.eql(pm.environment.get('existingSubnetId')); });",
+                          "pm.test('no NIC (auto-NIC removed KAC-266)', () => pm.expect((j.networkInterfaces || []).length).to.eql(0));",
                           *assert_created_at_seconds()]),
         *_delete_instance_steps(),
     ],
@@ -191,7 +183,6 @@ for fld, var, label in [
     ("platformId", "p", "platform_id"),
     ("resourcesSpec", "r", "resources_spec"),
     ("bootDiskSpec", "b", "boot_disk_spec"),
-    ("networkInterfaceSpecs", "n", "network_interface_specs"),
 ]:
     body = _instance_body(f"req{var}")
     body.pop(fld, None)
@@ -222,20 +213,6 @@ CASES.append(Case(
              test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
         poll_operation_until_done(),
         assert_op_error(5, "NOT_FOUND", msg_substr="folder"),
-    ],
-))
-
-CASES.append(Case(
-    id="INST-CR-NEG-SUBNET-NOTFOUND",
-    title="Create instance: NIC subnet_id=garbage → async NOT_FOUND 'Subnet ... not found'",
-    classes=["NEG"], priority="P1",
-    steps=[
-        # # requires peer-validation enabled (KACHO_COMPUTE_SKIP_PEER_VALIDATION!=true) + поднятый kacho-vpc
-        Step(name="cr-bad-subnet", method="POST", path=INSTANCES,
-             body=_instance_body("bs", nics=[_nic_spec(subnet="e9bnonexistent999999", sg=None)]),
-             test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
-        poll_operation_until_done(),
-        assert_op_error(5, "NOT_FOUND", msg_substr="subnet"),
     ],
 ))
 
@@ -300,113 +277,6 @@ CASES.append(Case(
                 body=_instance_body("bd2", boot_disk_spec={"autoDelete": True, "diskId": "{{garbageComputeId}}",
                                                            "diskSpec": {"name": "bd-x-{{runId}}", "size": _BOOT_SIZE}}),
                 test_script=[*assert_status(400), *assert_grpc_code(3, "INVALID_ARGUMENT")])],
-))
-
-# ===========================================================================
-# INST-CR — NIC modes: inline-create vs reference an existing kacho-vpc NIC
-# ===========================================================================
-# Epic KAC-2: Instance.NetworkInterfaceSpec gained `nic_id` — a NIC spec can
-# either reference an existing kacho-vpc NetworkInterface by id (then subnet_id /
-# primary_v4_address_spec must NOT be set — the NIC already carries them), or
-# (the default) inline-create one with subnet_id [+ primary_v4_address_spec].
-# These cases require kacho-vpc up (newman docker-compose has it).
-
-VPC_NETWORKS = "/vpc/v1/networks"
-VPC_SUBNETS = "/vpc/v1/subnets"
-VPC_NICS = "/vpc/v1/networkInterfaces"
-
-
-def _vpc_make_nic_steps():
-    """Create a fresh kacho-vpc Network → Subnet (in {{existingZoneId}}) → NetworkInterface;
-    saves vpcNetId / vpcSubnetId / vpcNicId. Returns step list (poll vpc ops)."""
-    return [
-        Step(name="vpc-cr-net", method="POST", path=VPC_NETWORKS,
-             body={"projectId": "{{_suiteFolderId}}", "name": "nm-nicnet-{{runId}}"},
-             test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
-                          *save_from_response("j.metadata && j.metadata.networkId", "vpcNetId")]),
-        poll_operation_until_done(),
-        Step(name="vpc-cr-subnet", method="POST", path=VPC_SUBNETS,
-             body={"projectId": "{{_suiteFolderId}}", "name": "nm-nicsub-{{runId}}",
-                   "networkId": "{{vpcNetId}}", "zoneId": "{{existingZoneId}}",
-                   "v4CidrBlocks": ["192.168.222.0/24"]},
-             test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
-                          *save_from_response("j.metadata && j.metadata.subnetId", "vpcSubnetId")]),
-        poll_operation_until_done(),
-        Step(name="vpc-cr-nic", method="POST", path=VPC_NICS,
-             body={"projectId": "{{_suiteFolderId}}", "name": "nm-nic-{{runId}}",
-                   "subnetId": "{{vpcSubnetId}}"},
-             test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
-                          *save_from_response("j.metadata && j.metadata.networkInterfaceId", "vpcNicId")]),
-        poll_operation_until_done(),
-    ]
-
-
-def _vpc_cleanup_nic_steps():
-    return [
-        Step(name="vpc-del-nic", method="DELETE", path=f"{VPC_NICS}/{{{{vpcNicId}}}}", test_script=[*save_from_response("j.id", "opId")]),
-        poll_operation_until_done(),
-        Step(name="vpc-del-subnet", method="DELETE", path=f"{VPC_SUBNETS}/{{{{vpcSubnetId}}}}", test_script=[*save_from_response("j.id", "opId")]),
-        poll_operation_until_done(),
-        Step(name="vpc-del-net", method="DELETE", path=f"{VPC_NETWORKS}/{{{{vpcNetId}}}}", test_script=[*save_from_response("j.id", "opId")]),
-        poll_operation_until_done(),
-    ]
-
-
-CASES.append(Case(
-    id="INST-CR-WITH-NICID-OK",
-    title="Create instance: NIC spec = {nicId: <existing kacho-vpc NIC>} (no subnetId) → poll → Get → instance NIC carries that nicId; Delete → NIC usedBy cleared",
-    classes=["CRUD", "CONF"], priority="P0",
-    steps=[
-        # # requires kacho-vpc up (newman docker-compose includes it)
-        *_vpc_make_nic_steps(),
-        Step(name="create", method="POST", path=INSTANCES,
-             body=_instance_body("nicid", nics=[{"nicId": "{{vpcNicId}}"}]),
-             test_script=[*assert_status(200), *assert_operation_envelope(),
-                          *save_from_response("j.id", "opId"),
-                          *save_from_response("j.metadata && j.metadata.instanceId", "instanceId")]),
-        poll_operation_until_done(), assert_op_success(),
-        Step(name="get", method="GET", path=f"{INSTANCES}/{{{{instanceId}}}}",
-             test_script=[*assert_status(200),
-                          "const j = pm.response.json();",
-                          "pm.test('status RUNNING', () => pm.expect(j.status).to.eql('RUNNING'));",
-                          "pm.test('at least 1 NIC', () => pm.expect((j.networkInterfaces || []).length).to.be.at.least(1));",
-                          "pm.test('NIC carries the referenced nicId', () => { const ids = (j.networkInterfaces || []).map(n => n.nicId); pm.expect(ids).to.include(pm.environment.get('vpcNicId')); });"]),
-        # check the vpc NIC now reports usedBy → the instance
-        Step(name="vpc-get-nic-attached", method="GET", path=f"{VPC_NICS}/{{{{vpcNicId}}}}",
-             test_script=[*assert_status(200),
-                          "const j = pm.response.json();",
-                          "pm.test('usedBy points at instance (if reported)', () => { if (j.usedBy) pm.expect(JSON.stringify(j.usedBy)).to.include(pm.environment.get('instanceId')); });"]),
-        *_delete_instance_steps(),
-        # after instance delete the NIC should be free again
-        Step(name="vpc-get-nic-freed", method="GET", path=f"{VPC_NICS}/{{{{vpcNicId}}}}",
-             test_script=[*assert_status(200),
-                          "const j = pm.response.json();",
-                          "pm.test('usedBy cleared after instance delete (if observable)', () => { if (j.usedBy && Object.keys(j.usedBy).length) pm.expect(JSON.stringify(j.usedBy)).to.not.include(pm.environment.get('instanceId')); });"]),
-        *_vpc_cleanup_nic_steps(),
-    ],
-))
-
-CASES.append(Case(
-    id="INST-CR-INLINE-NIC-OK",
-    title="Create instance: inline NIC = {subnetId, primaryV4AddressSpec:{}} (default mode) → poll → Get → NIC has subnetId, no nicId reference; minimal boot disk (size only, no image_id)",
-    classes=["CRUD", "CONF"], priority="P0",
-    steps=[
-        # # requires kacho-vpc subnet {{existingSubnetId}} + sg {{existingSgId}}
-        Step(name="create", method="POST", path=INSTANCES,
-             body=_instance_body("inlnic", nics=[_nic_spec()]),
-             test_script=[*assert_status(200), *assert_operation_envelope(),
-                          *save_from_response("j.id", "opId"),
-                          *save_from_response("j.metadata && j.metadata.instanceId", "instanceId")]),
-        poll_operation_until_done(), assert_op_success(),
-        Step(name="get", method="GET", path=f"{INSTANCES}/{{{{instanceId}}}}",
-             test_script=[*assert_status(200),
-                          "const j = pm.response.json();",
-                          "pm.test('status RUNNING', () => pm.expect(j.status).to.eql('RUNNING'));",
-                          "pm.test('boot disk present (size-only spec, no image)', () => pm.expect(j.bootDisk && j.bootDisk.diskId).to.be.a('string').and.length.greaterThan(0));",
-                          "pm.test('NIC has subnetId == existingSubnetId', () => { pm.expect((j.networkInterfaces || []).length).to.be.at.least(1); pm.expect(j.networkInterfaces[0].subnetId).to.eql(pm.environment.get('existingSubnetId')); });",
-                          "pm.test('inline NIC also exposes a nicId (kacho-vpc NetworkInterface backing it)', () => pm.expect(j.networkInterfaces[0].nicId === undefined || typeof j.networkInterfaces[0].nicId === 'string').to.be.true);"]),
-        *_delete_instance_steps(),
-    ],
 ))
 
 # ===========================================================================
@@ -879,123 +749,6 @@ CASES.append(Case(
 ))
 
 # ===========================================================================
-# INST-NAT — AddOneToOneNat / RemoveOneToOneNat
-# ===========================================================================
-
-CASES.append(Case(
-    id="INST-NAT-ADD-CRUD-OK",
-    title="AddOneToOneNat на NIC index=0 → Get → NIC.primary_v4_address.one_to_one_nat присутствует",
-    classes=["CRUD", "STATE"], priority="P1",
-    steps=[
-        # # requires kacho-vpc subnet {{existingSubnetId}}
-        *_create_instance_steps("natadd"),
-        Step(name="add-nat", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}/addOneToOneNat",
-             body={"networkInterfaceIndex": "0", "oneToOneNatSpec": {"ipVersion": "IPV4"}},
-             test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
-        poll_operation_until_done(), assert_op_success(),
-        Step(name="verify", method="GET", path=f"{INSTANCES}/{{{{instanceId}}}}",
-             test_script=[*assert_status(200),
-                          "const nic = (pm.response.json().networkInterfaces || [])[0];",
-                          "pm.test('NIC 0 has oneToOneNat', () => pm.expect(nic && nic.primaryV4Address && nic.primaryV4Address.oneToOneNat).to.be.an('object'));"]),
-        Step(name="rm-nat", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}/removeOneToOneNat",
-             body={"networkInterfaceIndex": "0"}, test_script=[*save_from_response("j.id", "opId")]),
-        poll_operation_until_done(),
-        *_delete_instance_steps(),
-    ],
-))
-
-CASES.append(Case(
-    id="INST-NAT-ADD-NEG-ALREADY",
-    title="AddOneToOneNat дважды на тот же NIC → второй раз FailedPrecondition",
-    classes=["NEG", "STATE"], priority="P1",
-    steps=[
-        # # requires kacho-vpc subnet {{existingSubnetId}}
-        *_create_instance_steps("nataa"),
-        Step(name="add-nat-1", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}/addOneToOneNat",
-             body={"networkInterfaceIndex": "0", "oneToOneNatSpec": {"ipVersion": "IPV4"}},
-             test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
-        poll_operation_until_done(), assert_op_success(),
-        Step(name="add-nat-2-dup", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}/addOneToOneNat",
-             body={"networkInterfaceIndex": "0", "oneToOneNatSpec": {"ipVersion": "IPV4"}},
-             test_script=["pm.test('rejected (400 sync or 200+op-error)', () => pm.expect(pm.response.code).to.be.oneOf([200, 400]));",
-                          *save_from_response("j.id", "opId"),
-                          "if (pm.response.code === 400) { pm.test('code 9', () => pm.expect(pm.response.json().code).to.eql(9)); }"]),
-        poll_operation_until_done(),
-        Step(name="assert", method="GET", path="/operations/{{opId}}",
-             test_script=["const j = pm.response.json();",
-                          "pm.test('done', () => pm.expect(j.done).to.eql(true));",
-                          "pm.test('if op-error → code 9', () => { if (j.error) pm.expect(j.error.code).to.eql(9); });"]),
-        Step(name="rm-nat", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}/removeOneToOneNat",
-             body={"networkInterfaceIndex": "0"}, test_script=[*save_from_response("j.id", "opId")]),
-        poll_operation_until_done(),
-        *_delete_instance_steps(),
-    ],
-))
-
-CASES.append(Case(
-    id="INST-NAT-REMOVE-CRUD-OK",
-    title="RemoveOneToOneNat (после Add) → Get → NIC.primary_v4_address.one_to_one_nat отсутствует",
-    classes=["CRUD", "STATE"], priority="P1",
-    steps=[
-        # # requires kacho-vpc subnet {{existingSubnetId}}
-        *_create_instance_steps("natrm"),
-        Step(name="add-nat", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}/addOneToOneNat",
-             body={"networkInterfaceIndex": "0", "oneToOneNatSpec": {"ipVersion": "IPV4"}},
-             test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
-        poll_operation_until_done(), assert_op_success(),
-        Step(name="rm-nat", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}/removeOneToOneNat",
-             body={"networkInterfaceIndex": "0"},
-             test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
-        poll_operation_until_done(), assert_op_success(),
-        Step(name="verify", method="GET", path=f"{INSTANCES}/{{{{instanceId}}}}",
-             test_script=[*assert_status(200),
-                          "const nic = (pm.response.json().networkInterfaces || [])[0];",
-                          "pm.test('NIC 0 has no oneToOneNat', () => pm.expect(nic && nic.primaryV4Address && nic.primaryV4Address.oneToOneNat).to.be.oneOf([undefined, null]));"]),
-        *_delete_instance_steps(),
-    ],
-))
-
-# ===========================================================================
-# INST-UNI — UpdateNetworkInterface
-# ===========================================================================
-
-CASES.append(Case(
-    id="INST-UNI-CRUD-OK",
-    title="UpdateNetworkInterface index=0 mask=security_group_ids → 200 (применяется)",
-    classes=["CRUD", "STATE"], priority="P2",
-    steps=[
-        # # requires kacho-vpc subnet {{existingSubnetId}} + sg {{existingSgId}}
-        *_create_instance_steps("uni"),
-        Step(name="update-nic", method="PATCH", path=f"{INSTANCES}/{{{{instanceId}}}}/updateNetworkInterface",
-             body={"networkInterfaceIndex": "0", "updateMask": "security_group_ids", "securityGroupIds": ["{{existingSgId}}"]},
-             test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
-        poll_operation_until_done(), assert_op_success(),
-        *_delete_instance_steps(),
-    ],
-))
-
-CASES.append(Case(
-    id="INST-UNI-NEG-BAD-INDEX",
-    title="UpdateNetworkInterface index=99 (нет такого NIC) → rejected",
-    classes=["NEG", "STATE"], priority="P2",
-    steps=[
-        # # requires kacho-vpc subnet {{existingSubnetId}}
-        *_create_instance_steps("unibad"),
-        Step(name="update-nic-bad", method="PATCH", path=f"{INSTANCES}/{{{{instanceId}}}}/updateNetworkInterface",
-             body={"networkInterfaceIndex": "99", "updateMask": "security_group_ids", "securityGroupIds": ["{{existingSgId}}"]},
-             test_script=["pm.test('rejected (400 sync or 200+op-error)', () => pm.expect(pm.response.code).to.be.oneOf([200, 400]));",
-                          *save_from_response("j.id", "opId"),
-                          "if (pm.response.code === 400) { pm.test('code 3, 5 or 9', () => pm.expect(pm.response.json().code).to.be.oneOf([3, 5, 9])); }"]),
-        poll_operation_until_done(),
-        Step(name="assert", method="GET", path="/operations/{{opId}}",
-             test_script=["const j = pm.response.json();",
-                          "pm.test('done', () => pm.expect(j.done).to.eql(true));",
-                          "pm.test('if op-error → code 3,5,9', () => { if (j.error) pm.expect(j.error.code).to.be.oneOf([3, 5, 9]); });"]),
-        *_delete_instance_steps(),
-    ],
-))
-
-# ===========================================================================
 # INST-UMETA — UpdateMetadata
 # ===========================================================================
 
@@ -1073,38 +826,6 @@ CASES.append(Case(
              test_script=[*assert_status(200), "pm.test('status RUNNING', () => pm.expect(pm.response.json().status).to.eql('RUNNING'));"]),
         *_delete_instance_steps(),
     ],
-))
-
-# ===========================================================================
-# INST-MV — Move
-# ===========================================================================
-
-CASES.append(Case(
-    id="INST-MV-CRUD-OK",
-    title="Move instance в другой folder → projectId в Get обновлён, status сохранён",
-    classes=["CRUD", "STATE"], priority="P1",
-    steps=[
-        # # requires kacho-vpc subnet {{existingSubnetId}}
-        *_create_instance_steps("mv"),
-        Step(name="move", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}:move",
-             body={"destinationProjectId": "{{_suiteFolderCrossId}}"},
-             test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
-        poll_operation_until_done(), assert_op_success(),
-        Step(name="verify", method="GET", path=f"{INSTANCES}/{{{{instanceId}}}}",
-             test_script=[*assert_status(200),
-                          "pm.test('projectId == cross', () => pm.expect(pm.response.json().projectId).to.eql(pm.environment.get('_suiteFolderCrossId')));",
-                          "pm.test('status still RUNNING', () => pm.expect(pm.response.json().status).to.eql('RUNNING'));"]),
-        *_delete_instance_steps(),
-    ],
-))
-
-CASES.append(Case(
-    id="INST-MV-AUTHZ-NF-SYNC",
-    title="Move несуществующего instance → sync 404 NOT_FOUND",
-    classes=["NEG", "AUTHZ"], priority="P1",
-    steps=[Step(name="mv-nx", method="POST", path=f"{INSTANCES}/{{{{garbageComputeId}}}}:move",
-                body={"destinationProjectId": "{{_suiteFolderId}}"},
-                test_script=[*assert_status(404), *assert_grpc_code(5, "NOT_FOUND")])],
 ))
 
 # ===========================================================================
@@ -1302,20 +1023,14 @@ CASES.extend(security_injection_block(
     "INST", INSTANCES, INSTANCES,
     {"zoneId": "{{existingZoneId}}", "platformId": "{{existingPlatformId}}",
      "resourcesSpec": _resources_spec(),
-     "bootDiskSpec": {"autoDelete": True, "diskSpec": {"name": "bd-sec-{{runId}}", "size": _BOOT_SIZE, "typeId": "{{existingDiskTypeId}}"}},
-     "networkInterfaceSpecs": [{"subnetId": "{{existingSubnetId}}", "primaryV4AddressSpec": {}}]}))
+     "bootDiskSpec": {"autoDelete": True, "diskSpec": {"name": "bd-sec-{{runId}}", "size": _BOOT_SIZE, "typeId": "{{existingDiskTypeId}}"}}}))
 
 # blocked: AttachFilesystem/DetachFilesystem — нет ресурса Filesystem.
 # CASES.append(...)  # blocked:kacho-filesystem
 # blocked: Relocate — нужен cross-zone disk move + cross-service.
 # CASES.append(...)  # blocked
-# AttachNetworkInterface / DetachNetworkInterface — присутствуют в proto; happy-path требует ещё одного
-# subnet'а из kacho-vpc → откладываем (enhancement). Минимум — NEG на несуществующий instance:
-CASES.append(Case(
-    id="INST-ANI-AUTHZ-NF-SYNC",
-    title="AttachNetworkInterface несуществующего instance → sync 404 NOT_FOUND",
-    classes=["NEG", "AUTHZ"], priority="P2",
-    steps=[Step(name="ani-nx", method="POST", path=f"{INSTANCES}/{{{{garbageComputeId}}}}:attachNetworkInterface",
-                body={"networkInterfaceIndex": "1", "subnetId": "{{existingSubnetId}}", "securityGroupIds": ["{{existingSgId}}"]},
-                test_script=[*assert_status(404), *assert_grpc_code(5, "NOT_FOUND")])],
-))
+# KAC-266: AttachNetworkInterface / DetachNetworkInterface / UpdateNetworkInterface /
+# AddOneToOneNat / RemoveOneToOneNat — NIC binding removed from the Instance lifecycle
+# (no auto-NIC). Instance.Create no longer creates/attaches network interfaces, so the
+# NIC-coupled RPC cases were removed. The proto still declares these RPCs (they are
+# inherited Unimplemented) — proto-level cleanup is tracked separately (see KAC-266 notes).

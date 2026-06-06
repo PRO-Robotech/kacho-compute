@@ -156,16 +156,6 @@ func TestDisk_Delete_Attached_FailedPrecondition(t *testing.T) {
 	require.Equal(t, int32(codes.FailedPrecondition), done.Error.Code)
 }
 
-func TestDisk_Move_OK(t *testing.T) {
-	svc, repo, _, _, ops := newDiskSvc(t, true)
-	repo.Seed(&domain.Disk{ID: "d1", ProjectID: "f1", Size: diskSizeMin})
-	op, err := svc.Move(context.Background(), "d1", "f2")
-	require.NoError(t, err)
-	done := portmock.AwaitOpDone(t, ops, op.ID)
-	d := diskFromOp(t, done)
-	require.Equal(t, "f2", d.ProjectId)
-}
-
 func TestDisk_Relocate_Attached_Rejected(t *testing.T) {
 	svc, repo, _, _, ops := newDiskSvc(t, true)
 	repo.Seed(&domain.Disk{ID: "d1", ProjectID: "f", ZoneID: "ru-central1-a", Size: diskSizeMin})

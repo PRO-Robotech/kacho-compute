@@ -264,14 +264,6 @@ func (r *InstanceRepo) SetStatusCAS(ctx context.Context, id string, expected, ne
 	return in, nil
 }
 
-// SetProjectID меняет project_id (для Move) + outbox UPDATED.
-func (r *InstanceRepo) SetProjectID(ctx context.Context, id, folderID string) (*domain.Instance, error) {
-	return r.mutateAndReload(ctx, id, "UPDATED", func(ctx context.Context, tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE instances SET project_id = $2 WHERE id = $1`, id, folderID)
-		return err
-	})
-}
-
 // AttachDisk добавляет строку attached_disks + outbox UPDATED.
 func (r *InstanceRepo) AttachDisk(ctx context.Context, id string, ad domain.AttachedDisk) (*domain.Instance, error) {
 	return r.mutateAndReload(ctx, id, "UPDATED", func(ctx context.Context, tx pgx.Tx) error {

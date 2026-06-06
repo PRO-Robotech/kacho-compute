@@ -33,14 +33,14 @@
 
 ### REQ-RES-01 — публичные ресурсы Disk / Image / Snapshot / Instance + read-only DiskType / Zone     [P1]
 Продукт ДОЛЖЕН предоставлять ресурсы Disk, Image, Snapshot, Instance (folder-scoped, `project_id`
-обязателен в Create; поддерживают Get/List/Create/Update/Delete + ListOperations; Disk/Instance — ещё Move)
-и read-only справочники DiskType, Zone (только Get/List).
+обязателен в Create; поддерживают Get/List/Create/Update/Delete + ListOperations; Disk — ещё Relocate)
+и read-only справочники DiskType, Zone (только Get/List). (Move у Disk/Instance — removed KAC-266.)
 - Validated-by: `*-LIFECYCLE-CONF`, `*-CR-CRUD-OK`, `*-GET-*`, `*-LST-CRUD-OK`, `DT-*`, `ZONE-*`
 - Agent-check: `internal/service/{disk,image,snapshot,instance,disk_type,zone}.go`, `cmd/compute/main.go`, `kacho-proto/.../compute/v1/*_service.proto`.
 
 ### REQ-RES-02 — все мутации возвращают Operation (async LRO)                               [P0]
-`Create`/`Update`/`Delete`/`Move`/`Relocate`/`Start`/`Stop`/`Restart`/`AttachDisk`/`DetachDisk`/
-`AddOneToOneNat`/`RemoveOneToOneNat`/`UpdateNetworkInterface`/`UpdateMetadata` ДОЛЖНЫ возвращать
+`Create`/`Update`/`Delete`/`Relocate`/`Start`/`Stop`/`Restart`/`AttachDisk`/`DetachDisk`/
+`UpdateMetadata` ДОЛЖНЫ возвращать
 `operation.Operation`; реальная работа — в worker-горутине; клиент поллит `OperationService.Get(id)`
 до `done=true`. Возвращать сам ресурс синхронно из мутации — ЗАПРЕЩЕНО. `GetSerialPortOutput` —
 sync (не мутация). DiskType/Zone Create/Update/Delete не существуют (read-only).
@@ -70,11 +70,9 @@ ID ресурсов: Instance/Disk — `epd`; Image/Snapshot — `fd8`. api-gate
 - Agent-check: `internal/protoconv/protoconv.go` — `timestamppb.New(t.Truncate(time.Second))` (единственное место конверсии).
 - Divergence: нет (паритет YC).
 
-### REQ-RES-07 — Move в другой folder: ресурс перемещается, остальное (включая Instance.status) сохраняется   [P1]
-`Move` Disk/Instance в `destinationProjectId` ДОЛЖЕН успешно завершиться; `project_id` обновляется;
-прочие поля (для Instance — `status`) не меняются. Move несуществующего → sync `NotFound`. Move без `destinationProjectId` → `InvalidArgument`.
-- Validated-by: `DISK-MV-CRUD-OK`, `INST-MV-CRUD-OK`, `*-MV-AUTHZ-NF-SYNC`, `DISK-MV-NEG-DEST-NOTFOUND`, `DISK-MV-VAL-NO-DEST`
-- Agent-check: `internal/service/{disk,instance}.go` doMove.
+### REQ-RES-07 — ~~Move в другой folder~~ — REMOVED (KAC-266)   [obsolete]
+`Move` RPC у Disk и Instance удалён из контракта (proto + impl) в KAC-266. Перенос ресурса
+между проектами больше не поддерживается. Кейсы `DISK-MV-*` / `INST-MV-*` удалены.
 
 ---
 
@@ -91,7 +89,9 @@ lowercase/digits/`-`/`_`, длина ≤63. UPPERCASE / digit-start / hyphen-sta
 
 ### REQ-VAL-01 — required-поля Create — sync `InvalidArgument`                                  [P0]
 До создания Operation проверяются required: `project_id` (все), `zone_id` (Disk/Instance),
-`size` (Disk), `disk_id` (Snapshot), `platform_id`/`resources_spec`/`boot_disk_spec`/`≥1 network_interface_spec`/`zone_id` (Instance). Отсутствие → `InvalidArgument`.
+`size` (Disk), `disk_id` (Snapshot), `platform_id`/`resources_spec`/`boot_disk_spec`/`zone_id` (Instance).
+(KAC-266: `network_interface_spec` больше не требуется — Instance создаётся без NIC, no auto-NIC.)
+Отсутствие → `InvalidArgument`.
 - Validated-by: `*-CR-VAL-*-REQUIRED`, `INST-CR-VAL-MISSING-*`, `SNAP-CR-VAL-NO-DISK`, `IMG-CR-VAL-FOLDER-REQUIRED`, `*-CR-VAL-EMPTY-BODY`
 - Agent-check: начало каждого `Create` в `internal/service/*.go` (sync-checks до `operations.New`).
 
@@ -171,10 +171,10 @@ Verbatim YC: BASIC опускает `Instance.metadata`; FULL — включае
 
 ## E. Sync vs Async ошибки + error mapping (`AUTHZ` / общее)
 
-### REQ-AUTHZ-01 — Get/Update/Delete/Move/Start/Stop/... несуществующего ресурса → sync `NotFound`   [P1]
+### REQ-AUTHZ-01 — Get/Update/Delete/Start/Stop/... несуществующего ресурса → sync `NotFound`   [P1]
 Well-formed-но-отсутствующий id → `NotFound` (Get — sync; mutate — sync через AuthZ-Get-guard).
 malformed/wrong-prefix id у реального YC → `InvalidArgument "invalid <res> id '<X>'"`, у нас пока `NotFound` — divergence.
-- Validated-by: `*-GET-NEG-NOTFOUND`, `*-UPD-AUTHZ-NF-SYNC`, `*-DEL-NEG-NOTFOUND`, `*-MV-AUTHZ-NF-SYNC`, `INST-{START,STOP}-AUTHZ-NF-SYNC`, `INST-{SPO,ANI}-*-NF-SYNC`
+- Validated-by: `*-GET-NEG-NOTFOUND`, `*-UPD-AUTHZ-NF-SYNC`, `*-DEL-NEG-NOTFOUND`, `INST-{START,STOP}-AUTHZ-NF-SYNC`, `INST-SPO-*-NF-SYNC`
 - Agent-check: `internal/service/*.go` mutate-методы — Get перед Operation; `internal/repo/*.go` `ErrNotFound`.
 - Divergence: malformed-id → NotFound вместо InvalidArgument; `docs/architecture/07-known-divergences.md` (паритет kacho-vpc gotcha #1).
 
@@ -198,15 +198,15 @@ Disk / Image / Snapshot / Instance / Disk type / Zone / Operation.
 
 ## F. Cross-service refs (`REF`)
 
-### REQ-REF-01 — `project_id` в Create/Move валидируется gRPC-вызовом к resource-manager → `NotFound` если нет   [P0]
-worker каждого Create/Move: `folderClient.Exists(project_id)`; error → `Unavailable "folder check: ..."`; false → `NotFound "Folder with id <X> not found"`.
-- Validated-by: `*-CR-NEG-FOLDER-NOTFOUND`, `DISK-MV-NEG-DEST-NOTFOUND`, `OP-GET-CRUD-FAILED-OP`
-- Agent-check: `internal/clients/folder_client.go`; вызов в `do*` worker'ах. ⚠️ `KACHO_COMPUTE_SKIP_PEER_VALIDATION=true` → no-op (test-config).
+### REQ-REF-01 — `project_id` в Create валидируется gRPC-вызовом к kacho-iam → `NotFound` если нет   [P0]
+worker каждого Create: `projectClient.Exists(project_id)`; error → `Unavailable "folder check: ..."`; false → `NotFound "Folder with id <X> not found"`.
+- Validated-by: `*-CR-NEG-FOLDER-NOTFOUND`, `OP-GET-CRUD-FAILED-OP`
+- Agent-check: `internal/clients/iam_client.go`; вызов в `do*` worker'ах. ⚠️ `KACHO_COMPUTE_SKIP_PEER_VALIDATION=true` → no-op (test-config).
 
-### REQ-REF-02 — Instance NIC.subnet_id / security_group_ids / one_to_one_nat.address → kacho-vpc; subnet.zone_id == instance.zone_id   [P1]
-worker `Instance.Create`: `vpcClient.GetSubnet` (NotFound "Subnet <X> not found"), subnet zone match (иначе InvalidArgument), `GetSecurityGroup`, `GetAddress`.
-- Validated-by: `INST-CR-NEG-SUBNET-NOTFOUND`, `INST-CR-CRUD-OK` (NIC.subnetId совпадает)
-- Agent-check: `internal/clients/vpc_client.go`; NIC-валидация в `InstanceService.doCreate`. ⚠️ требует поднятого kacho-vpc + `KACHO_COMPUTE_SKIP_PEER_VALIDATION!=true`.
+### REQ-REF-02 — ~~Instance NIC cross-service validation~~ — REMOVED (KAC-266)   [obsolete]
+NIC binding убрана из lifecycle Instance (no auto-NIC): Instance.Create больше не создаёт/аттачит
+NIC и не валидирует subnet/security_group/address через kacho-vpc. Кейсы `INST-CR-NEG-SUBNET-NOTFOUND`
+и NIC-ассерты `INST-CR-CRUD-OK` удалены. (One-to-one NAT IPAM через AddOneToOneNat также удалён.)
 
 ### REQ-REF-03 — Disk source image/snapshot, Snapshot source disk, Image source — existence-check в worker'е (не FK)   [P1]
 Та же БД, но НЕ FK (verbatim YC: можно удалить Image/Disk оставив зависимый ресурс). Отсутствие source → `NotFound`. Disk size ≥ image.min_disk_size / snapshot.disk_size, иначе `InvalidArgument`.
@@ -242,8 +242,8 @@ FK `attached_disks.disk_id` → disks ON DELETE RESTRICT.
 - Agent-check: `internal/migrations/0001_initial.sql` FK RESTRICT; `mapRepoErr` 23503 → `FailedPrecondition`.
 - Divergence: точный текст — `# probe-needed`.
 
-### REQ-ATTACH-04 — Instance.Delete: auto_delete=true диск удаляется; auto_delete=false — остаётся; one_to_one_nat addresses освобождаются (best-effort)   [P1]
-worker сначала обрабатывает attached disks по `auto_delete`, затем DELETE instance (cascade чистит instance_network_interfaces + attached_disks).
+### REQ-ATTACH-04 — Instance.Delete: auto_delete=true диск удаляется; auto_delete=false — остаётся   [P1]
+worker сначала обрабатывает attached disks по `auto_delete`, затем DELETE instance (cascade чистит instance_network_interfaces + attached_disks). (KAC-266: no auto-NIC — Instance не создаёт NIC при Create, поэтому teardown NIC-ресурсов больше не нужен; эфемерные one-to-one NAT addresses, если бы они были, освобождались бы best-effort.)
 - Validated-by: `INST-DEL-STATE-AUTODELETE-BOOT-GONE`, `INST-DEL-STATE-NONAUTODELETE-DISK-REMAINS`
 - Agent-check: `internal/service/instance.go` doDelete; `attached_disks.instance_id` FK CASCADE.
 
@@ -251,13 +251,12 @@ worker сначала обрабатывает attached disks по `auto_delete`
 
 ## I. One-to-one NAT / NetworkInterface / Metadata (`NAT`)
 
-### REQ-NAT-01 — AddOneToOneNat на NIC index → NIC.primary_v4_address.one_to_one_nat появляется; повторный Add → `FailedPrecondition`; RemoveOneToOneNat → исчезает   [P1]
-- Validated-by: `INST-NAT-{ADD-CRUD-OK,ADD-NEG-ALREADY,REMOVE-CRUD-OK}`
-- Agent-check: `internal/service/instance.go` doAddOneToOneNat / doRemoveOneToOneNat.
+### REQ-NAT-01 — ~~AddOneToOneNat / RemoveOneToOneNat~~ — REMOVED from active surface (KAC-266)   [obsolete]
+NIC binding убрана из lifecycle Instance (no auto-NIC) — Instance.Create не создаёт NIC, поэтому
+one-to-one NAT на NIC больше не покрывается. Кейсы `INST-NAT-*` удалены.
 
-### REQ-NAT-02 — UpdateNetworkInterface: mask-based update (subnet/SG/primary_v4); bad index → ошибка   [P2]
-- Validated-by: `INST-UNI-{CRUD-OK,NEG-BAD-INDEX}`
-- Agent-check: `internal/service/instance.go` doUpdateNetworkInterface.
+### REQ-NAT-02 — ~~UpdateNetworkInterface~~ — REMOVED from active surface (KAC-266)   [obsolete]
+NIC binding убрана из lifecycle Instance. Кейсы `INST-UNI-*` удалены.
 
 ### REQ-NAT-03 — UpdateMetadata: upsert/delete; FULL-view round-trip отражает изменения; total ≤512 KB   [P1]
 - Validated-by: `INST-UMETA-CRUD-OK`
