@@ -1,7 +1,7 @@
 # 05 — Database
 
 `kacho_compute` (`pg-compute` StatefulSet в helm umbrella). **Database-per-service**
-— никаких JOIN'ов с БД resource-manager / vpc или внешними источниками
+— никаких JOIN'ов с БД kacho-iam / vpc или внешними источниками
 (workspace `CLAUDE.md` §запрет 8). Все cross-service refs (folder_id, subnet_id,
 SG, address, source image/snapshot/disk) — НЕ FK, валидируются gRPC-вызовом /
 existence-check в БД в worker'е (см. [`02-data-flows.md`](02-data-flows.md)).

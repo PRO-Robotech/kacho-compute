@@ -94,4 +94,4 @@ ENV=environments/yc.postman_environment.json \
 - **Risk-prioritization**: high-risk зоны (security, data-integrity FK, Instance state-машина, Disk-delete-while-attached) — P0, больше кейсов.
 
 См. подробности в `docs/TAXONOMY.md`. Cross-service зависимости (Instance NIC → kacho-vpc subnet/SG;
-folder → resource-manager) и флаг `KACHO_COMPUTE_SKIP_PEER_VALIDATION` — см. там же и в `docs/RESULTS.md` §«Деплоймент-замечания».
+folder → kacho-iam — legacy-имя колонки-владельца project_id) и флаг `KACHO_COMPUTE_SKIP_PEER_VALIDATION` — см. там же и в `docs/RESULTS.md` §«Деплоймент-замечания».

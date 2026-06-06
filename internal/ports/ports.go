@@ -146,9 +146,11 @@ type RegionRepo interface {
 	CountZones(ctx context.Context, regionID string) (int, error)
 }
 
-// ProjectClient — port для проверки существования Folder в kacho-resource-manager.
+// ProjectClient — port для проверки существования Project в kacho-iam
+// (ProjectService.Get). Аргумент projectID — id владельца-проекта (в схеме
+// kacho-compute хранится в legacy-именованной колонке `folder_id`).
 type ProjectClient interface {
-	Exists(ctx context.Context, folderID string) (bool, error)
+	Exists(ctx context.Context, projectID string) (bool, error)
 }
 
 // ZoneInfo — минимальные данные о зоне, нужные compute'у: id + region.

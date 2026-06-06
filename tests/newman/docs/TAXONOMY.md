@@ -86,8 +86,8 @@
 ## Cross-service зависимости
 
 - **Instance** NIC.subnet_id / security_group_ids → `kacho-vpc` (нужен поднятый kacho-vpc + seeded subnet/SG в e2e-стенде; кейсы помечены `# requires kacho-vpc subnet {{existingSubnetId}}`).
-- **все Create/Move** project_id → `kacho-resource-manager` (NEG-FOLDER-NOTFOUND-кейсы).
-- При `KACHO_COMPUTE_SKIP_PEER_VALIDATION=true` (test-config без поднятого VPC/RM) cross-service existence-checks становятся no-op → кейсы `*-NEG-SUBNET-NOTFOUND` / `*-NEG-FOLDER-NOTFOUND` / `OP-GET-CRUD-FAILED-OP` не сработают — помечены `# requires peer-validation enabled`.
+- **все Create/Move** project_id → `kacho-iam` (`ProjectService.Get`; NEG-FOLDER-NOTFOUND-кейсы; project_id хранится в legacy-именованной колонке `folder_id`).
+- При `KACHO_COMPUTE_SKIP_PEER_VALIDATION=true` (test-config без поднятого VPC/iam) cross-service existence-checks становятся no-op → кейсы `*-NEG-SUBNET-NOTFOUND` / `*-NEG-FOLDER-NOTFOUND` / `OP-GET-CRUD-FAILED-OP` не сработают — помечены `# requires peer-validation enabled`.
 
 ## Test data lifecycle
 

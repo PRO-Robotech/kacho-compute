@@ -58,20 +58,20 @@ disk data не существует; serial-port output синтетически
        kacho-api-gateway
        /      |          \
       v       v public    v internal :9091
-   resource  vpc       kacho-compute
-   -manager  :9090     ┌─────────────────┐
-   (folder)  (subnet/  │  service layer  │
-             SG/addr)  └─┬───────┬───────┘
-        ^         ^      │       │ folderClient
-        └─────────┼──────┘       └──→ resource-manager.FolderService.Exists
+   kacho-iam vpc       kacho-compute
+             :9090     ┌─────────────────┐
+   (Account/ (subnet/  │  service layer  │
+    Project) SG/addr)  └─┬───────┬───────┘
+        ^         ^      │       │ projectClient
+        └─────────┼──────┘       └──→ kacho-iam.ProjectService.Get
                   │ vpcClient (Subnet/SecurityGroup/Address .Get)
                   v
             pg-compute (своя БД kacho_compute)
 ```
 
 Внешние зависимости:
-- `kacho-resource-manager.FolderService.Exists` — existence-check `folder_id`
-  в Create (как в VPC).
+- `kacho-iam.ProjectService.Get` (`projectClient.Exists`) — existence-check
+  владельца-проекта в Create; колонка-владелец в схеме — legacy-имя `folder_id`.
 - `kacho-vpc.{SubnetService.Get, SecurityGroupService.Get, AddressService.Get,
   NetworkInterfaceService.*}` — IPAM эфемерных Address + delete kacho-vpc
   `NetworkInterface` при `Instance.Delete`. ⚠️ авто-создание/привязка NIC при

@@ -83,7 +83,7 @@ sequenceDiagram
   autonumber
   participant U as Client
   participant S as DiskService
-  participant RM as resource-manager (folderClient)
+  participant RM as kacho-iam (projectClient)
   participant ZR as ZoneRegistry (zones table)
   participant DTR as DiskTypeRepo (disk_types table)
   participant DB as pg-compute
@@ -94,7 +94,7 @@ sequenceDiagram
 
   rect rgb(255,247,230)
   Note over S: async worker
-  S->>RM: folderClient.Exists(folder_id)
+  S->>RM: projectClient.Exists(folder_id)
   alt folder not found
     S->>DB: UPDATE operation error=NotFound "Folder with id <X> not found"
   else folder OK
@@ -131,7 +131,7 @@ sequenceDiagram
   autonumber
   participant U as Client
   participant S as ImageService
-  participant RM as folderClient
+  participant RM as kacho-iam (projectClient)
   participant DB as pg-compute
 
   U->>S: Create(folder_id, name?, family?, min_disk_size?, source{image_id|disk_id|snapshot_id|uri}, os?, ...)
@@ -140,7 +140,7 @@ sequenceDiagram
 
   rect rgb(255,247,230)
   Note over S: async worker
-  S->>RM: folderClient.Exists(folder_id)
+  S->>RM: projectClient.Exists(folder_id)
   alt source = image_id
     S->>DB: SELECT images WHERE id=$image_id → NotFound if absent; inherit os, family if not set
   else source = disk_id
@@ -168,7 +168,7 @@ sequenceDiagram
   autonumber
   participant U as Client
   participant S as SnapshotService
-  participant RM as folderClient
+  participant RM as kacho-iam (projectClient)
   participant DB as pg-compute
 
   U->>S: Create(folder_id, disk_id, name?, ...)
@@ -177,7 +177,7 @@ sequenceDiagram
 
   rect rgb(255,247,230)
   Note over S: async worker
-  S->>RM: folderClient.Exists(folder_id)
+  S->>RM: projectClient.Exists(folder_id)
   S->>DB: SELECT disks WHERE id=$disk_id
   alt disk not found
     S->>DB: UPDATE operation error=NotFound "Disk <X> not found"
@@ -208,7 +208,7 @@ sequenceDiagram
   autonumber
   participant U as Client
   participant S as InstanceService
-  participant RM as folderClient
+  participant RM as kacho-iam (projectClient)
   participant ZR as ZoneRegistry
   participant DB as pg-compute
 
@@ -218,7 +218,7 @@ sequenceDiagram
 
   rect rgb(255,247,230)
   Note over S: async worker
-  S->>RM: folderClient.Exists(folder_id) → NotFound if absent
+  S->>RM: projectClient.Exists(folder_id) → NotFound if absent
   S->>ZR: zone existence (zones table)
   Note over S: NIC не создаётся и не валидируется (auto-NIC удалён в KAC-266)
   alt boot_disk_spec.disk_id
@@ -392,7 +392,7 @@ durable-consumer'ов (сейчас не обязательна — клиент
 | Instance create (без авто-NIC, KAC-266) | `internal/service/instance.go::doCreate` |
 | Attach/Detach/NAT/UpdateNIC | `internal/service/instance.go` |
 | Instance delete + auto_delete | `internal/service/instance.go::doDelete` |
-| Cross-service clients | `internal/clients/resourcemanager_client.go`, `internal/clients/vpc_client.go` |
+| Cross-service clients | `internal/clients/iam_client.go`, `internal/clients/vpc_client.go` |
 | Outbox emit | `internal/repo/*.go` (в той же TX, что domain-write) |
 | Outbox + LISTEN/NOTIFY | `internal/handler/internal_watch_handler.go` |
 | Platform validation | `internal/service/platforms.go` |
