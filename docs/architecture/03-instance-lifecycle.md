@@ -187,10 +187,9 @@ read-only denorm-зеркало. id бэкующего NIC — `compute.v1.Netwo
   освобождает его `Address`-ресурсы). Best-effort: VPC недоступен → log warning,
   операцию не валим (как и с one_to_one_nat addresses).
 
-Новые runtime cross-domain edges (зафиксированы в workspace `CLAUDE.md`
+Новый runtime cross-domain edge (зафиксирован в workspace `CLAUDE.md`
 §«Кросс-репо зависимости»): `kacho-compute → kacho-vpc` (NIC create/attach/detach
-+ эфемерный Address IPAM) и `kacho-vpc-implement → kacho-compute` (читает
-`Hypervisor.node_index`).
++ эфемерный Address IPAM).
 
 ## `Update` resources_spec / platform_id требует STOPPED
 

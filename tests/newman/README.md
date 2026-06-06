@@ -20,7 +20,6 @@ tests/newman/
 │   ├── disk.py / image.py / snapshot.py / instance.py   — мутируемые ресурсы (Disk/Image/Snapshot/Instance)
 │   ├── disk-type.py / zone.py                            — read-only справочники
 │   ├── region-zone.py                                   — geography: Region (новый ресурс) + Zone admin-CRUD (InternalRegion/ZoneService на internal mux; эпик KAC-15)
-│   ├── hypervisor.py                                    — InternalHypervisorService (internal-only, эпик KAC-2; REST = grpc-gateway-дефолт POST /kacho.cloud.compute.v1.InternalHypervisorService/<Method>)
 │   └── operation.py                                     — OperationService (Get/Cancel через api-gateway OpsProxy)
 ├── collections/             — СГЕНЕРИРОВАННЫЕ Postman-коллекции (по ресурсу) — НЕ править руками
 │   └── {…}.postman_collection.json

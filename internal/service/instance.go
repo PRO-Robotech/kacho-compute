@@ -1285,7 +1285,7 @@ func (s *InstanceService) GetSerialPortOutput(ctx context.Context, id string) (s
 	if err != nil {
 		return "", mapRepoErr(err)
 	}
-	return fmt.Sprintf("[control-plane] serial port output for instance %s (status=%s) is not available — no real hypervisor.\n", in.ID, instanceStatusName(in.Status)), nil
+	return fmt.Sprintf("[control-plane] serial port output for instance %s (status=%s) is not available (control-plane only).\n", in.ID, instanceStatusName(in.Status)), nil
 }
 
 // ListOperations возвращает операции для конкретной ВМ.

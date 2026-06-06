@@ -6,10 +6,9 @@
 вычислительные ресурсы: **Instance** (виртуальные машины), **Disk** (тома),
 **Image** (образы), **Snapshot** (снимки дисков) + read-only справочники
 **DiskType**, **Region**, **Zone** (Geography — owner kacho-compute с эпика
-`KAC-15`) + internal-only инфра-реестр **Hypervisor** (физические хосты;
-placement / HW инвентарь — на публичной поверхности не появляется). Реального
-data-plane нет — сервис только хранит конфигурацию, валидирует её, имитирует
-жизненный цикл (state-машина Instance) и эмитит события об изменениях через outbox.
+`KAC-15`). Реального data-plane нет — сервис только хранит конфигурацию,
+валидирует её, имитирует жизненный цикл (state-машина Instance) и эмитит события
+об изменениях через outbox.
 Compute-NIC бэкуется ресурсом kacho-vpc `NetworkInterface` (`nic_id`, эпик `KAC-9`).
 
 Внешний контракт повторяет Yandex Cloud Compute API (`kacho.cloud.compute.v1`
@@ -36,8 +35,6 @@ texts, status codes, timestamp precision, regex'ы, behavioural semantics.
                   │   InternalDiskTypeService (admin CRUD :9091)  │
                   │   InternalRegionService   (admin CRUD :9091)  │
                   │   InternalZoneService     (admin CRUD :9091)  │
-                  │   InternalHypervisorService (infra-registry,  │
-                  │     sync RPC, :9091; НЕ на external endpoint)  │
                   └───────────────────────────────────────────────┘
 ```
 
@@ -92,20 +89,11 @@ prefix `epd`).
   `/compute/v1/diskTypes`, `/compute/v1/regions`, `/compute/v1/zones` — только на
   cluster-internal listener, НЕ на external TLS endpoint (`api.kacho.local:443`,
   advertised для внешних клиентов — см. workspace `CLAUDE.md` §запрет 6).
-- `InternalHypervisorService.{RegisterHypervisor,GetHypervisor,ListHypervisors,
-  UpdateHypervisorState,DeregisterHypervisor}` — **синхронные RPC (не Operation)**:
-  инфра-реестр гипервизоров (placement / HW инвентарь — internal-only ресурс, см.
-  workspace `CLAUDE.md` §«Инфра-чувствительные данные»). Проброшено через
-  api-gateway internal mux на `/compute/v1/hypervisors...`, `:updateState` —
-  **только** cluster-internal listener; на external TLS endpoint `GET
-  /compute/v1/hypervisors` → 404. `node_index` (0-based) аллоцируется next-free из
-  sequence + free-list; consumers — compute reconciler (placement), kacho-vpc-implement
-  (читает `node_index` → SRv6-локатор), admin-UI.
 
 ## Вне скоупа (proto vendored, реализация отложена)
 
 - **Реальный data plane** — control plane only, как и весь Kachō. Instance.status
-  переходит детерминированной state-машиной без реальных гипервизоров; disk data
+  переходит детерминированной state-машиной без реального data-plane; disk data
   не существует; serial-port output синтетический; image download (uri-source)
   мгновенный. См. [`07-known-divergences.md`](07-known-divergences.md) §5.
 - **`InstanceGroupService`** (`kacho.cloud.compute.v1.instancegroup`) — отдельный
