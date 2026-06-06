@@ -72,7 +72,8 @@ timestamp precision, regex'ы, behavioural semantics, state-машина Instanc
   (`blocked:kacho-filesystem` — нет ресурса Filesystem) / Relocate
   (`blocked` — нужен cross-zone disk move) / SimulateMaintenanceEvent (no-op) +
   access-bindings. **Cross-service refs** валидируются через peer-сервисы
-  (VPC: subnet_id / security_group_id / address; resource-manager: folder_id).
+  (VPC: subnet_id / security_group_id / address; kacho-iam: folder_id —
+  legacy-имя колонки-владельца, проверяется как Project через `ProjectService.Get`).
 - **DiskType** — Get / List (read-only справочник; seed: `network-hdd`,
   `network-ssd`, `network-ssd-nonreplicated`, `network-ssd-io-m3`).
 - **Region / Zone** — Get / List (read-only публичный справочник). ⚠️ **kacho-compute —
@@ -227,7 +228,7 @@ func (s *DiskService) Create(ctx context.Context, req CreateDiskReq) (*operation
 ```
 
 `doCreate` внутри:
-- folder existence через `folderClient.Exists` → `NotFound "Folder with id <X> not found"`
+- project (владелец) existence через `projectClient.Exists` (`kacho-iam.ProjectService.Get`) → `NotFound "Folder with id <X> not found"` (legacy error-text; колонка-владелец — `folder_id`)
 - zone existence sync через `ZoneRegistry` (таблица `zones`) → `InvalidArgument`
   (паритет с VPC; TODO probe — YC может давать `NotFound "Zone <X> not found"`).
 - type_id existence через `diskTypeRepo.Get` → unknown → `NotFound "Disk type <X> not found"`
@@ -321,7 +322,7 @@ Pagination — cursor `(created_at, id)` ASC,ASC; `page_token` opaque base64;
 - `secondary_disk_specs` / `boot_disk_spec`: ровно один из {`disk_id`, `disk_spec`}.
 
 **Async (внутри Operation worker):**
-- folder existence (`folderClient.Exists` → `NotFound`).
+- project (владелец) existence (`projectClient.Exists` → `NotFound`; колонка-владелец — legacy-имя `folder_id`).
 - zone / type_id / source image|snapshot|disk existence → `NotFound` / `InvalidArgument`.
 - Instance.Create: для каждого `network_interface_spec` — subnet existence
   (`vpcClient.GetSubnet` → `NotFound "Subnet <X> not found"`), subnet.zone_id ==
@@ -404,17 +405,20 @@ Relocate — меняет `zone_id`; precondition: disk не attached
 ## 10. Cross-service clients (`internal/clients/`)
 
 Реализуют port-интерфейсы из `internal/service/ports.go`:
-- `folderClient` → `kacho-resource-manager.FolderService.Exists` (как в VPC).
-  Используется в worker'е каждого Create/Move. error → `Unavailable "folder check: <err>"`;
-  `false` → `NotFound "Folder with id <X> not found"`. Retry on `Unavailable` —
-  `kacho-corelib/retry`.
+- `projectClient` → `kacho-iam.ProjectService.Get` (порт `ProjectClient`,
+  реализация — `internal/clients/iam_client.go`; KAC-106 переключил с
+  упразднённого `kacho-resource-manager.FolderService`). Используется в worker'е
+  каждого Create/Move для existence-check владельца-проекта (id хранится в
+  legacy-именованной колонке `folder_id`). error → `Unavailable "folder check: <err>"`;
+  `false` → `NotFound "Folder with id <X> not found"` (legacy error-text).
+  Retry on `Unavailable` — `kacho-corelib/retry`.
 - `vpcClient` → `kacho.cloud.vpc.v1.{SubnetService.Get, SecurityGroupService.Get,
   AddressService.Get}` (для Instance NIC validation). error → `Unavailable`;
   not-found → `NotFound "Subnet <X> not found"` и т.п. Retry on `Unavailable`.
 - `imageRepo` / `snapshotRepo` / `diskTypeRepo` / `zoneRepo` — **НЕ clients**,
   это локальные repo (та же БД); используются для existence-check source-ресурсов.
 
-Конфиг адресов: `KACHO_COMPUTE_RESOURCE_MANAGER_GRPC_ADDR`,
+Конфиг адресов: `KACHO_COMPUTE_IAM_GRPC_ADDR`,
 `KACHO_COMPUTE_VPC_GRPC_ADDR` + `*_TLS` флаги (см. `internal/config/config.go`).
 В dev/test peer-сервисы могут быть недоступны — `KACHO_COMPUTE_SKIP_PEER_VALIDATION=true`
 переводит cross-service existence-check в no-op (для unit/newman без поднятого VPC).

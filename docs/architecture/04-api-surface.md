@@ -178,7 +178,8 @@ SimulateMaintenanceEvent/Set|UpdateAccessBindings`) возвращают
 `done=true` (REST: `GET /operations/{id}`, БЕЗ `/compute/v1/`). api-gateway имеет
 in-process `opsproxy` — один URL `/operations/{id}` маршрутизируется по 3-char
 prefix id на нужный backend (`epd...` → kacho-compute; `enp...`/`e9b...` →
-kacho-vpc; `b1g...` → resource-manager). `PrefixOperationCompute == PrefixInstance
+kacho-vpc; `b1g...` → kacho-iam — Account/Project, заменил resource-manager в
+KAC-124). `PrefixOperationCompute == PrefixInstance
 == "epd"`. Неизвестный prefix → `400 INVALID_ARGUMENT "operation_id has unknown
 prefix"` (intentional fail-fast — частично расходится с YC, как и у VPC; общий
 issue в `kacho-api-gateway`). `response` для Delete/Stop/Restart/

@@ -46,7 +46,7 @@ erDiagram
 
   DISKS {
     text id PK
-    text folder_id "cross-service → resource-manager.folders.id (no FK)"
+    text folder_id "legacy-имя; cross-service → kacho-iam.projects.id (no FK)"
     text name "partial UNIQUE (folder_id, name) WHERE name<>''"
     text description
     jsonb labels
@@ -281,7 +281,7 @@ Per-subscriber cursor для LISTEN/NOTIFY restart-сценария. PK `subscri
 
 | Колонка                                          | Owner-сервис             | Owner-метод                                     | ON DELETE-симуляция         |
 |--------------------------------------------------|--------------------------|-------------------------------------------------|------------------------------|
-| `disks.folder_id` / `instances.folder_id` / etc. | `kacho-resource-manager` | `FolderService.Exists`                          | n/a (validate-on-write)      |
+| `disks.folder_id` / `instances.folder_id` / etc. (legacy-имя = id владельца-проекта) | `kacho-iam` | `ProjectService.Get` (`projectClient.Exists`) | n/a (validate-on-write)      |
 | `disks.zone_id` / `instances.zone_id`            | **kacho-compute self**   | local `zones`-table — **same-DB ref, no FK** by choice (admin справочник; service-level existence-check `ZoneRegistry`) | n/a |
 | `disks.type_id`                                  | **kacho-compute self**   | local `disk_types`-table — same-DB ref, no FK   | n/a                          |
 | `disks.source_image_id`                          | **kacho-compute self**   | local `images`-table — **same-DB but no FK** (YC семантика: source можно удалить) | n/a (graceful dangling) |

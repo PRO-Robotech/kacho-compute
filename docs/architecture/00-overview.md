@@ -59,8 +59,9 @@ ListOperations / AttachDisk / DetachDisk / AddOneToOneNat /
 RemoveOneToOneNat / UpdateNetworkInterface / AttachNetworkInterface /
 DetachNetworkInterface / UpdateMetadata / GetSerialPortOutput +
 access-bindings. **Cross-service refs** валидируются через peer-сервисы (VPC:
-`subnet_id` / `security_group_id` / NAT `address`; resource-manager:
-`folder_id`). ⚠️ **`Instance.Create` создаётся без авто-NIC** — auto-NIC
+`subnet_id` / `security_group_id` / NAT `address`; kacho-iam:
+`folder_id` — legacy-имя колонки-владельца, проверяется как Project через
+`ProjectService.Get`). ⚠️ **`Instance.Create` создаётся без авто-NIC** — auto-NIC
 материализация (`materializeNICs`) удалена в `KAC-266`: инстанс создаётся без
 сетевых интерфейсов, NIC больше не создаётся/привязывается на Create; правильная
 сетевая модель (явная привязка NIC) — будущая переделка. `AttachFilesystem` /
@@ -178,7 +179,7 @@ internal/
                             Внутренние setters: InternalDiskType/Zone service-логика.
                           Port-интерфейсы: DiskRepo, ImageRepo, SnapshotRepo, InstanceRepo,
                             DiskTypeRepo, ZoneRepo (== ZoneRegistry), OperationsRepo,
-                            FolderClient, VPCClient. Платформенные таблицы — platforms.go.
+                            ProjectClient, VPCClient. Платформенные таблицы — platforms.go.
                             mapRepoErr / stripSentinel — maperr.go.
 
   ports/                  leaf-пакет: sentinel-ошибки (ErrNotFound / ErrAlreadyExists /
@@ -188,7 +189,7 @@ internal/
   repo/                   pgx-adapter: реализует port-интерфейсы из service + outbox emit
                           (в той же TX, что и domain-INSERT). По файлу на ресурс.
 
-  clients/                gRPC-adapter: folderClient (resource-manager.FolderService),
+  clients/                gRPC-adapter: projectClient (iam.ProjectService.Get, iam_client.go),
                           vpcClient (vpc.{Subnet,SecurityGroup,Address}Service.Get). Retry
                           on Unavailable через kacho-corelib/retry. SkipPeerValidation → no-op.
 
@@ -225,8 +226,10 @@ Instance, те же precondition-ошибки. Любой newman-кейс дол
 
 ## Что НЕ owns kacho-compute
 
-- Org/Cloud/Folder — это `kacho-resource-manager`. Compute только проверяет
-  существование folder через `folderClient`.
+- Account/Project — это `kacho-iam` (Org/Cloud/Folder из `kacho-resource-manager`
+  упразднены в KAC-124). Compute только проверяет существование владельца-проекта
+  через `projectClient` (`ProjectService.Get`); колонка-владелец в схеме хранит
+  его id под legacy-именем `folder_id`.
 - Network/Subnet/SecurityGroup/Address/**NetworkInterface** — это `kacho-vpc`.
   Compute создаёт/attach'ит kacho-vpc `NetworkInterface` для Instance-NIC'ов и
   валидирует ссылки через `vpcClient` (не FK); `nic_id` бэкующего NIC хранится в

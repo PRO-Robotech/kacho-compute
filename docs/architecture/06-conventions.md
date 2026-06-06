@@ -13,7 +13,7 @@ Compute-specific правила, error mapping, top-10 gotchas. Workspace-уро
 | Proto package | `kacho.cloud.compute.v1` |
 | Имя репо | `kacho-compute` |
 | Postgres database | `kacho_compute` |
-| Env-переменные | `KACHO_COMPUTE_<NAME>` (`KACHO_COMPUTE_DB_HOST`, `KACHO_COMPUTE_GRPC_PORT`, `KACHO_COMPUTE_INTERNAL_PORT`, `KACHO_COMPUTE_VPC_GRPC_ADDR`, `KACHO_COMPUTE_RESOURCE_MANAGER_GRPC_ADDR`, `KACHO_COMPUTE_SKIP_PEER_VALIDATION`, `KACHO_COMPUTE_WATCH_MAX_STREAMS`, `KACHO_COMPUTE_AUTH_MODE`, ...) |
+| Env-переменные | `KACHO_COMPUTE_<NAME>` (`KACHO_COMPUTE_DB_HOST`, `KACHO_COMPUTE_GRPC_PORT`, `KACHO_COMPUTE_INTERNAL_PORT`, `KACHO_COMPUTE_VPC_GRPC_ADDR`, `KACHO_COMPUTE_IAM_GRPC_ADDR`, `KACHO_COMPUTE_SKIP_PEER_VALIDATION`, `KACHO_COMPUTE_WATCH_MAX_STREAMS`, `KACHO_COMPUTE_AUTH_MODE`, ...) |
 | Коммиты | Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`, `test:`, `ci:`, `refactor:`); подпись — git-config репозитория; **НЕ** добавлять `Co-Authored-By` (локальный проект); коммит, закрывающий issue — trailer `Closes #N` |
 
 **НЕ упоминать «yandex»** в handwritten-коде, README, комментариях, env-name,
@@ -86,9 +86,11 @@ Compute-specific правила, error mapping, top-10 gotchas. Workspace-уро
 - DiskType/Zone `Get/List`: `disk_type_id`/`zone_id` required (`(required) = true`).
 
 **Async (внутри Operation worker):**
-- folder existence (`folderClient.Exists` → `NotFound "Folder with id <X> not
-  found"`; error → `Unavailable "folder check: <err>"`; retry on `Unavailable`
-  через `kacho-corelib/retry`).
+- project (владелец) existence (`projectClient.Exists` через
+  `kacho-iam.ProjectService.Get` → `NotFound "Folder with id <X> not
+  found"` — error-text — legacy-формулировка, колонка-владелец в схеме хранит
+  projectId под именем `folder_id`; error → `Unavailable "folder check: <err>"`;
+  retry on `Unavailable` через `kacho-corelib/retry`).
 - zone / type_id / source image|snapshot|disk existence → `NotFound` /
   `InvalidArgument`.
 - Instance.Create: ⚠️ **без авто-NIC** — auto-NIC материализация `materializeNICs`
@@ -190,8 +192,8 @@ disk <id> is being used"` (FK RESTRICT); иначе DELETE.
 
 Все межсервисные ссылки — **НЕ FK** (database-per-service; workspace `CLAUDE.md`
 §запрет 4). Валидируются gRPC-вызовом к peer-сервису в worker'е Create/Update:
-- `folderClient` → `kacho-resource-manager.FolderService.Exists` (worker каждого
-  Create).
+- `projectClient` → `kacho-iam.ProjectService.Get` (existence-check владельца-проекта
+  в worker'е каждого Create; колонка-владелец в схеме — legacy-имя `folder_id`).
 - `vpcClient` → `kacho.cloud.vpc.v1.{SubnetService.Get, SecurityGroupService.Get,
   AddressService.Get, NetworkInterfaceService.*}` + `InternalAddressService` на
   kacho-vpc — IPAM-аллокация эфемерных Address + delete kacho-vpc `NetworkInterface`
@@ -203,7 +205,7 @@ disk <id> is being used"` (FK RESTRICT); иначе DELETE.
   Geography (`zones`/`regions`) — kacho-compute owns (эпик `KAC-15`, нет proxy в
   kacho-vpc).
 
-Конфиг адресов: `KACHO_COMPUTE_RESOURCE_MANAGER_GRPC_ADDR`,
+Конфиг адресов: `KACHO_COMPUTE_IAM_GRPC_ADDR`,
 `KACHO_COMPUTE_VPC_GRPC_ADDR` + `*_TLS` флаги. `KACHO_COMPUTE_SKIP_PEER_VALIDATION=true`
 переводит cross-service existence-check / NIC-materialization в no-op (синтетический
 NIC, `nic_id=''`) — для unit/newman/load-тестов без поднятых peer-сервисов. Retry on

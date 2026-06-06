@@ -39,11 +39,11 @@ Postgres-БД, шаринг через прямой SQL запрещён.
                   kacho-api-gateway
             /             |               \
            v public       v public          v internal :9091
-   resource-manager   kacho-vpc          kacho-compute (этот сервис)
-   (Org/Cloud/Folder) (Subnet/SG/Address)  ┌──────────────────────┐
+   kacho-iam          kacho-vpc          kacho-compute (этот сервис)
+   (Account/Project)  (Subnet/SG/Address)  ┌──────────────────────┐
         ^         ^      ^                  │  service layer       │
         │         │      └── vpcClient ─────┤  (Subnet/SG/Address  │
-        │         └────────── folderClient ─┤   .Get; Folder.Exists)│
+        │         └────────── projectClient ┤   .Get; Project.Exists)│
         │                                   └─┬────────────────────┘
         │                                     v
         └─────────────────────────────  pg-compute (своя БД kacho_compute)
@@ -54,7 +54,7 @@ Postgres-БД, шаринг через прямой SQL запрещён.
 | Сосед | Канал | Что делает |
 |---|---|---|
 | `kacho-api-gateway` | gRPC `:9090` → REST `/compute/v1/...` + opsproxy `/operations/{id}` | Маршрутизирует публичные RPC, преобразует ошибки в HTTP; internal mux на cluster-internal listener для `/compute/v1/diskTypes`,`/compute/v1/regions`,`/compute/v1/zones` (`Internal*` admin) — НЕ на external TLS endpoint |
-| `kacho-resource-manager` | gRPC client | `folderClient.Exists(folderID)` — existence-check в Create |
+| `kacho-iam` | gRPC client | `projectClient.Exists(projectID)` — existence-check владельца-проекта в Create (`ProjectService.Get`; колонка-владелец в схеме — legacy-имя `folder_id`) |
 | `kacho-vpc` | gRPC client | `vpcClient.{GetSubnet, GetSecurityGroup, GetAddress, NetworkInterfaceService.*, InternalAddressService}` — валидация ссылок Instance + delete kacho-vpc `NetworkInterface` при `Instance.Delete` (если у NIC есть `nic_id`) + IPAM эфемерных Address. ⚠️ авто-создание/привязка NIC при `Instance.Create` удалены в `KAC-266` (инстанс создаётся без сетевых интерфейсов; правильная сетевая модель — будущая переделка) |
 | Postgres (`kacho_compute`) | pgx + LISTEN/NOTIFY | Источник истины |
 | Внутренние подписчики на изменения | gRPC server-stream `:9091` | `InternalWatchService.Watch` — events из `compute_outbox` |
@@ -104,7 +104,7 @@ Database-per-service. Подробно — [05-database.md](architecture/05-data
 **Конфигурация** (`internal/config/config.go`, envconfig): `KACHO_COMPUTE_DB_*`
 (host/port/user/password/name/sslmode/max_conns), `KACHO_COMPUTE_GRPC_PORT`
 (9090), `KACHO_COMPUTE_INTERNAL_PORT` (9091), `KACHO_COMPUTE_WATCH_MAX_STREAMS`
-(32), `KACHO_COMPUTE_RESOURCE_MANAGER_GRPC_ADDR` / `_TLS`,
+(32), `KACHO_COMPUTE_IAM_GRPC_ADDR` / `_TLS`,
 `KACHO_COMPUTE_VPC_GRPC_ADDR` / `_TLS`, `KACHO_COMPUTE_SKIP_PEER_VALIDATION`
 (no-op cross-service checks для тестов), `KACHO_COMPUTE_AUTH_MODE`
 (`dev`/`production`/`production-strict`).
@@ -123,7 +123,7 @@ Database-per-service. Подробно — [05-database.md](architecture/05-data
   `SnapshotService`, `InstanceService`, `DiskTypeService`, `RegionService`,
   `ZoneService` + internal service-логика. Port-интерфейсы: `DiskRepo`,
   `ImageRepo`, `SnapshotRepo`, `InstanceRepo`, `DiskTypeRepo`,
-  `ZoneRepo`(=`ZoneRegistry`), `RegionRepo`, `OperationsRepo`, `FolderClient`,
+  `ZoneRepo`(=`ZoneRegistry`), `RegionRepo`, `OperationsRepo`, `ProjectClient`,
   `VPCClient`. `platforms.go` — per-platform валидация resources. `maperr.go` —
   `mapRepoErr` / `stripSentinel`.
 - **`ports/`** — leaf-пакет: sentinel-ошибки (`ErrNotFound` / `ErrAlreadyExists` /
@@ -131,7 +131,8 @@ Database-per-service. Подробно — [05-database.md](architecture/05-data
   без import-cycle).
 - **`repo/`** — pgx-adapter: реализует port-интерфейсы из service + outbox emit
   (в той же TX, что domain-write). По файлу на ресурс.
-- **`clients/`** — gRPC-adapter: `folderClient` (resource-manager.FolderService),
+- **`clients/`** — gRPC-adapter: `projectClient` (iam.ProjectService.Get,
+  `internal/clients/iam_client.go`),
   `vpcClient` (vpc.{Subnet,SecurityGroup,Address}Service.Get + `NetworkInterfaceService`
   delete + `InternalAddressService` IPAM). Авто-создание/привязка NIC при
   `Instance.Create` удалены в `KAC-266` (инстанс создаётся без сетевых
@@ -157,8 +158,8 @@ repo'ы → clients → services → handlers → два gRPC-сервера →
 size/cores, UpdateMask, oneof-checks), (2) `resID = ids.NewID(...)`,
 `operations.New(ids.PrefixOperationCompute, "Create xxx <name>", &CreateXxxMetadata{...})`,
 `opsRepo.Create(op)`, (3) `operations.Run(ctx, opsRepo, op.ID, fn doCreate)` →
-возврат `&Operation` клиенту. Worker внутри `doCreate`: existence-checks (folder
-через `folderClient`; zone/type/source — локально; Instance NIC — через
+возврат `&Operation` клиенту. Worker внутри `doCreate`: existence-checks (project
+через `projectClient`; zone/type/source — локально; Instance NIC — через
 `vpcClient`) → `BEGIN; INSERT; INSERT compute_outbox; COMMIT` → `anypb.New(
 protoconv.Xxx(created))`; при ошибке — `error` через `mapRepoErr` → `google.rpc.
 Status`. Delete/Stop/Restart/SimulateMaintenanceEvent → response
@@ -389,7 +390,7 @@ Unavailable), `shutdown` (graceful), `migrations/common` (`0001_operations.sql`,
    `internal/config/config.go` (есть); затем `internal/domain/` → `internal/ports/`
    (sentinel + portmock) → `internal/service/` (use-cases + port-интерфейсы +
    `platforms.go` + `maperr.go`) → `internal/repo/` (pgx + outbox) →
-   `internal/clients/` (folderClient + vpcClient) → `internal/handler/` (public +
+   `internal/clients/` (projectClient + vpcClient) → `internal/handler/` (public +
    internal + watch) → `internal/protoconv/` → `cmd/compute/main.go`. Тесты — на
    каждую функциональность (unit + integration + newman).
 4. **`kacho-api-gateway`** — регистрация публичных RPC (public mux:
