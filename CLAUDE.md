@@ -1,610 +1,280 @@
 # kacho-compute — CLAUDE.md
 
-Compute-специфичный CLAUDE.md, дополняющий общий workspace `CLAUDE.md` (лежит в
-корне `kacho-workspace/`, подцепляется автоматически через parent-walkup
-discovery Claude Code). Этот файл — обязательный контекст при работе из
-`project/kacho-compute/` и любых его подпапок.
-
-> **Происхождение:** сервис написан заново на проверенных паттернах `kacho-vpc`
-> (flat resources + Operations LRO + Clean Architecture + verbatim YC parity).
-> Где видишь «как в VPC» — буквально смотри одноимённый файл в `../kacho-vpc/`.
-
-## 0. Шесть базовых принципов проекта (обязательно)
-
-1. **`kacho-corelib`** — единый репо общих переиспользуемых компонентов
-   (`ids`, `operations`, `validate`, `filter`, `db`, `grpcsrv`, `grpcclient`,
-   `outbox`, `observability`, `config`, `errors`, `retry`, `shutdown`,
-   `migrations/common`). Перед написанием новой утилиты в `kacho-compute` —
-   проверь, нет ли её в corelib; если нужна 2+ сервисам — выноси в corelib, не
-   дублируй per-service. В compute-репо живёт ТОЛЬКО compute-доменная логика.
-2. **`kacho-proto`** — единый центральный репо всех `.proto`. Для **external**
-   (verbatim-YC) сервисов proto обязан повторять Yandex Cloud Compute API
-   1-в-1 (proto-форма, имена полей, enum-значения, `google.api.http`
-   annotations, `(kacho.cloud.api.operation)` options). Для **internal**
-   (`Internal*`) сервисов — на наше усмотрение (контракт может меняться
-   свободно, наружу не публикуется). Compute-домен уже зафиксирован в
-   `kacho-proto/proto/kacho/cloud/compute/v1/*.proto` (vendored от YC,
-   переименован пакет `yandex.cloud.compute.v1` → `kacho.cloud.compute.v1`,
-   gen/go сгенерирован). Новый internal `.proto` — кладём в тот же каталог.
-3. **Тесты на КАЖДУЮ функциональность** — и Go-unit (`internal/service/*_test.go`,
-   `internal/handler/*_test.go`, `internal/repo/*integration_test.go`), и
-   newman e2e (`tests/newman/cases/*.py`). Каждый RPC и каждый класс кейсов
-   (CRUD/VAL/NEG/BVA/CONF/STATE/...) покрыт обоими уровнями. Критерий приёмки:
-   **любой newman-кейс для kacho-compute должен зеленеть и против реального YC
-   Compute API** (verbatim parity).
-4. **Откладываем на потом ТОЛЬКО кейсы, которым нужен ещё не реализованный
-   сервис.** Например `Disk.Create` со ссылкой на `kms_key_id` требует
-   `kacho-kms` (нет → метка `blocked:kacho-kms`, в теле issue «при каких
-   условиях браться»). `Image.Create` через `os_product_ids` ссылается на
-   marketplace — тоже blocked. Всё остальное (включая полный Instance
-   lifecycle, attach/detach, NAT) реализуем сразу.
-5. **Подробная прописанная архитектура** живёт в `docs/architecture/*.md`
-   (см. §17). Туда же — `docs/architecture/07-known-divergences.md` для
-   by-design расхождений с verbatim YC (НЕ issues).
-6. **Для каждого модуля — UI**, встроенный в `kacho-ui` (Vite + React SPA).
-   Compute-views в `kacho-ui/src/pages/compute/` (Instances / Disks / Images /
-   Snapshots — list + detail + create-wizard). UI ходит в REST api-gateway
-   (`/compute/v1/...`). Generic-механизм CRUD-страниц, не копипаста под каждый
-   ресурс (memory feedback «Fix systemically»).
+Compute-специфичный файл, дополняющий workspace `CLAUDE.md` + `.claude/rules/*`
+(parent-walkup). Здесь — **только compute-специфика**; общие правила (API-конвенции,
+clean-arch, data-integrity, security, git/YouTrack, testing, vault, AI-оснастка) —
+в workspace rules, не дублируются. Глубокий reference — `docs/architecture/`.
 
 ## 1. Что это за сервис
 
-Sub-phase 0.4 продукта Kachō. gRPC-сервис управления вычислительными ресурсами:
-**Instance, Disk, Image, Snapshot** + read-only справочники **DiskType, Zone**.
-Цель — verbatim parity с Yandex Cloud Compute API (`kacho.cloud.compute.v1`
-== зеркало `yandex.cloud.compute.v1`): proto-форма, error texts, status codes,
-timestamp precision, regex'ы, behavioural semantics, state-машина Instance.
+gRPC control-plane вычислительных ресурсов: **Instance, Disk, Image, Snapshot** +
+read-only справочник **DiskType** + домен **Geography (Region / Zone)**. Control-plane
+only (нет реального data plane: status переходит детерминированной state-машиной без
+гипервизоров; disk data не существует; serial-port output синтетический; image download
+мгновенный).
 
-В скоупе (public, verbatim-YC):
-- **Disk** — Get / List / Create / Update / Delete / ListOperations / Move /
-  Relocate / ListSnapshotSchedules (`blocked:kacho-snapshot-schedule`) +
-  access-bindings RPC (no-op скелет под AAA).
-- **Image** — Get / GetLatestByFamily / List / Create / Update / Delete /
-  ListOperations + access-bindings. Create-источники: `image_id`,
-  `snapshot_id`, `disk_id`, `uri` (downloads via signed URL — для control-plane
-  заглушка: статус сразу `READY`); `os_product_ids` → blocked (marketplace).
-- **Snapshot** — Get / List / Create (из Disk) / Update / Delete /
-  ListOperations + access-bindings.
-- **Instance** — Get / List / Create / Update / Delete / Start / Stop / Restart /
-  Move / ListOperations / AttachDisk / DetachDisk / AddOneToOneNat /
-  RemoveOneToOneNat / UpdateNetworkInterface / UpdateMetadata /
-  GetSerialPortOutput / AttachFilesystem / DetachFilesystem
-  (`blocked:kacho-filesystem` — нет ресурса Filesystem) / Relocate
-  (`blocked` — нужен cross-zone disk move) / SimulateMaintenanceEvent (no-op) +
-  access-bindings. **Cross-service refs** валидируются через peer-сервисы
-  (VPC: subnet_id / security_group_id / address; kacho-iam: folder_id —
-  legacy-имя колонки-владельца, проверяется как Project через `ProjectService.Get`).
-- **DiskType** — Get / List (read-only справочник; seed: `network-hdd`,
-  `network-ssd`, `network-ssd-nonreplicated`, `network-ssd-io-m3`).
-- **Region / Zone** — Get / List (read-only публичный справочник). ⚠️ **kacho-compute —
-  owner Geography** (эпик `KAC-15`: перенесено из kacho-vpc; см. workspace CLAUDE.md
-  §«Кросс-доменные ссылки на ресурсы» / §«Карта владельцев доменов»). Схема `kacho_compute`
-  держит таблицы `regions`(`id,name,created_at`) и `zones`(`id,region_id,name,status,created_at`),
-  seed (`ru-central1` + `ru-central1-{a,b,d}`) — в миграции. **Никакого proxy в kacho-vpc** и
-  `skipPeer`-fallback больше нет — compute читает зоны из своей таблицы; `disk_types.zone_ids`,
-  `Disk.zone_id`, `Instance.zone_id` валидируются локально. Другие сервисы (kacho-vpc — `Subnet.zone_id`,
-  `AddressPool.zone_id`, `Address.zone_id`) валидируют `zone_id` вызовом нашего `ZoneService.Get`.
-  Admin-CRUD — `InternalRegionService`/`InternalZoneService` (порт 9091, `/compute/v1/regions`,
-  `/compute/v1/zones`). `Region.Delete` блокируется (FK RESTRICT) если есть `zones`; `Zone.Delete`
-  проверяет своих dependents (instances/disks/disk_types); кросс-сервисных dependents (vpc-подсети) НЕ
-  проверяет — admin-ответственность. (До merge'а KAC-15 — старое: seed-mirror `zones`, proxy в vpc.)
-- **OperationService** — Get / Cancel (per-сервисная таблица `operations`,
-  prefix `epd`).
-- Internal endpoints (порт 9091, не выставляется на external TLS endpoint):
-  - `InternalWatchService` — outbox stream через LISTEN/NOTIFY (`compute_outbox`),
-    для будущих consumer'ов и observability.
-  - `InternalDiskTypeService` / `InternalZoneService` — admin CRUD справочников
-    (kacho-only, нет в verbatim-YC; проброшено через api-gateway internal mux на
-    `/compute/v1/diskTypes`, `/compute/v1/zones` — см. workspace CLAUDE.md §запрет 6).
+Конвенции API — общие для всего Kachō (`@.claude/rules/api-conventions.md`): flat-resource
++ async `Operation` на мутациях, camelCase JSON, error-format, update_mask discipline
+(§4 — compute-specific immutable-поля), timestamp-to-seconds.
 
-Вне скоупа (не реализуем сейчас; proto есть, но handler возвращает
-`Unimplemented` / `blocked:*`):
-- Реальный data plane (control plane only, как и весь Kachō) — Instance.status
-  переходит детерминированной state-машиной без реальных гипервизоров; disk
-  data не существует; serial-port output — синтетический; image download — мгновенный.
-- `InstanceGroupService` (`kacho.cloud.compute.v1.instancegroup`) — отдельный
-  крупный домен, отложен (метка `enhancement`, не `blocked`).
-- `DiskPlacementGroupService` / `PlacementGroupService` / `HostGroupService` /
-  `HostTypeService` / `GpuClusterService` / `FilesystemService` /
-  `SnapshotScheduleService` / `ReservedInstancePoolService` /
-  `MaintenanceService` — proto vendored, реализация отложена (`blocked:*` либо
-  `enhancement` в зависимости от того, нужен ли отдельный store).
+В скоупе:
+- **Disk** — Get/List/Create/Update/Delete/ListOperations/Move/Relocate +
+  ListSnapshotSchedules (`blocked:kacho-snapshot-schedule`).
+- **Image** — Get/GetLatestByFamily/List/Create/Update/Delete/ListOperations. Create-источники:
+  `image_id`/`snapshot_id`/`disk_id`/`uri` (download — заглушка, статус сразу `READY`);
+  `os_product_ids` → `blocked:kacho-marketplace`.
+- **Snapshot** — Get/List/Create (из Disk)/Update/Delete/ListOperations.
+- **Instance** — Get/List/Create/Update/Delete/Start/Stop/Restart/Move/ListOperations/
+  AttachDisk/DetachDisk/AddOneToOneNat/RemoveOneToOneNat/UpdateNetworkInterface/
+  UpdateMetadata/GetSerialPortOutput; AttachFilesystem/DetachFilesystem
+  (`blocked:kacho-filesystem`); SimulateMaintenanceEvent (no-op). Cross-service refs —
+  §6.
+- **DiskType** — Get/List (read-only; seed: `network-hdd`, `network-ssd`,
+  `network-ssd-nonreplicated`, `network-ssd-io-m3`).
+- **Region / Zone** — Get/List (read-only). ⚠️ **kacho-compute — owner Geography** (эпик
+  `KAC-15`: перенесено из kacho-vpc). Схема `kacho_compute` держит `regions`(`id,name,created_at`)
+  и `zones`(`id,region_id,name,status,created_at`), seed (`ru-central1` + зоны) — в миграции.
+  `disk_types.zone_ids`/`Disk.zone_id`/`Instance.zone_id` валидируются локально; другие
+  сервисы валидируют свой `zone_id` вызовом нашего `ZoneService.Get` (edge vpc→compute, §6).
+- **OperationService** — Get/Cancel (per-сервисная таблица `operations`, prefix `epd`).
 
-## 2. Доменная модель и связи
+Internal endpoints (:9091, не на external TLS):
+- `InternalWatchService` — outbox stream через LISTEN/NOTIFY (`compute_outbox`).
+- `InternalDiskTypeService` / `InternalRegionService` / `InternalZoneService` — admin CRUD
+  справочников (admin-only — §9).
 
-> Полная mermaid-ER-схема всех таблиц `kacho_compute` (PK/FK/ON DELETE policy /
-> UNIQUE / CHECK, partial UNIQUE на boot disk / device_name) — см.
-> [`docs/architecture/er-diagram.md`](docs/architecture/er-diagram.md) (KAC-98,
-> Skill `evgeniy §5 E.6`). Раздел ниже — ASCII-сводка для быстрого ориентира.
+Вне скоупа (proto есть, handler `Unimplemented` / `blocked:*`): реальный data plane;
+`InstanceGroupService` (`enhancement`); `DiskPlacementGroup`/`PlacementGroup`/`HostGroup`/
+`HostType`/`GpuCluster`/`Filesystem`/`SnapshotSchedule`/`ReservedInstancePool`/`Maintenance`.
+
+## 2. Доменная модель и FK contract
 
 ```
-                ┌──────────── Image ◄─────┐ (source)
-Instance (1) ───┤                          │
-   │            └─ boot_disk / secondary_disks (N) ──→ Disk (N)
-   │                                                     │
-   │  attached_disk: instance ↔ disk (M:N через          │ (source)
-   │  attached_disks таблицу; auto_delete flag)           ▼
-   ├─ network_interfaces[] (N): subnet_id, primary_v4_address
-   │     {one_to_one_nat: address_id?}, security_group_ids[]   Snapshot (N)
-   ├─ filesystem_specs[] → blocked:kacho-filesystem
-   └─ status: state-машина (см. §8)
-
-Disk      — zone-level, type_id → DiskType, может иметь source = image|snapshot
-Image     — folder-level, family (GetLatestByFamily), source = image|snapshot|disk|uri
-Snapshot  — folder-level, source_disk_id (обязателен в Create)
-DiskType  — глобальный read-only справочник (id = "network-ssd" и т.п.)
-Zone      — глобальный read-only справочник (id = "ru-central1-a" и т.п.)
+Image ◄── (source) ── Disk ──► DiskType (type_id)
+  ▲                     ▲
+  │ (source)            │ (source: image|snapshot)
+Instance (1) ─┬─ attached_disks (M:N, auto_delete flag, is_boot) ──► Disk (N)
+              ├─ instance_network_interfaces[] (N): subnet_id, primary_v4_address,
+              │     {one_to_one_nat: address_id?}, security_group_ids[]
+              └─ status: state-машина (§5)
+Snapshot ── (source) ── Disk (source_disk_id)
+Region (1) ──► (N) Zone   |   DiskType / Region / Zone — read-only справочники
 ```
 
-Все мутируемые ресурсы (Instance/Disk/Image/Snapshot) — **folder-level**
-(`folder_id` обязателен в Create). Все таблицы **flat** (без K8s envelope
-`resource_version`/`generation`/`deletion_timestamp`/`finalizers`/`spec`/`status`
-как JSONB) — как в kacho-vpc 1.0. `cloud_id`/`organization_id` в схеме
-отсутствуют — фильтрация только по `folder_id` (как в VPC).
+Все мутируемые ресурсы (Instance/Disk/Image/Snapshot) — **project-level** (id проекта
+обязателен в Create; DB-колонка-владелец — `project_id`). Все таблицы **flat** (без
+K8s-envelope). Полная ER-схема — `docs/architecture/er-diagram.md`.
 
-**FK contract (same-DB only — запрет workspace CLAUDE.md §4: НЕ каскадить
-через границу сервиса):**
-- `disks.source_image_id` / `disks.source_snapshot_id` — **НЕ FK** (Image живёт
-  в этой же БД, но YC семантика: можно удалить Image, у которого есть Disk; Disk
-  просто хранит «откуда создан»). При Create — existence-check в worker'е.
-- `snapshots.source_disk_id` — НЕ FK по той же причине (можно удалить Disk,
-  оставив Snapshot). Existence-check только на Snapshot.Create.
-- `attached_disks (instance_id, disk_id)` — FK ON DELETE RESTRICT на disk_id
-  (нельзя удалить Disk пока attached → verbatim YC `"The disk is being used"`);
-  на instance_id — ON DELETE CASCADE (Instance.Delete worker сам решает судьбу
-  дисков по `auto_delete`: true → DELETE disk; false → остаётся; затем CASCADE
-  чистит attached_disks-строки).
-- `instance_network_interfaces (instance_id, index)` — FK ON DELETE CASCADE
-  (same-table children, не cross-service).
-- `instances.boot_disk_id` — диск из `attached_disks` с `is_boot=true`; не отдельный FK.
-- Cross-service refs (`network_interfaces[].subnet_id` → VPC subnet,
-  `.security_group_ids[]` → VPC SG, `.one_to_one_nat.address_id` → VPC address,
-  `instances.folder_id` → RM folder) — **НЕ FK**, валидируются gRPC-вызовом к
-  peer-сервису в worker'е Create/Update (через `internal/clients`).
+**FK (same-DB only — workspace `@.claude/rules/data-integrity.md`; cross-service refs — §6):**
+- `disks.source_image_id` / `disks.source_snapshot_id` — **НЕ FK** (Image можно удалить,
+  Disk хранит «откуда создан»). Existence-check в worker'е Create.
+- `snapshots.source_disk_id` — **НЕ FK** (Disk можно удалить, оставив Snapshot).
+  Existence-check только на Snapshot.Create.
+- `attached_disks.disk_id` → disks **ON DELETE RESTRICT** (нельзя удалить attached Disk →
+  `"The disk is being used"`); `attached_disks.instance_id` → instances **ON DELETE CASCADE**
+  (Instance.Delete worker решает судьбу дисков по `auto_delete`, затем CASCADE чистит строки).
+- `instance_network_interfaces.instance_id` → instances **ON DELETE CASCADE** (same-table children).
+- `instances.boot_disk_id` — диск из `attached_disks` c `is_boot=true`, не отдельный FK.
+- `zones.region_id` → regions **ON DELETE RESTRICT** (`Region.Delete` блокируется при наличии зон).
+- partial UNIQUE `(project_id, name) WHERE name <> ''` для disks/images/snapshots/instances.
 
-## 3. Resource ID format
+## 3. Resource ID prefixes (`kacho-corelib/ids`)
 
-Все ресурсы получают ID через `kacho-corelib/ids.NewID(<prefix>)`. Префиксы —
-3 символа + 17-char crockford-base32 (всего 20). **Источник истины — `kacho-corelib/ids/ids.go`**:
+3-char prefix + 17-char crockford-base32. Источник истины — `kacho-corelib/ids/ids.go`:
 
-| Ресурс           | Prefix const                | Значение | Пример                |
-|------------------|-----------------------------|----------|-----------------------|
-| Instance         | `ids.PrefixInstance`        | `epd`    | `epd + 17 base32`     |
-| Disk             | `ids.PrefixDisk`            | `epd`    | `epd + ...`           |
-| Image            | `ids.PrefixImage`           | `fd8`    | `fd8 + ...`           |
-| Snapshot         | `ids.PrefixSnapshot`        | `fd8`    | `fd8 + ...`           |
-| Operation (CMP)  | `ids.PrefixOperationCompute` (== `ids.PrefixInstance`) | `epd` | `epd + ...` |
-| DiskType         | литерал-строка (`network-ssd` и т.п.) | — | не prefix-id |
-| Zone             | литерал-строка (`ru-central1-a` и т.п.) | — | не prefix-id |
+| Ресурс | const | Prefix |
+|---|---|---|
+| Instance | `ids.PrefixInstance` | `epd` |
+| Disk | `ids.PrefixDisk` | `epd` |
+| Image | `ids.PrefixImage` | `fd8` |
+| Snapshot | `ids.PrefixSnapshot` | `fd8` |
+| Operation (compute) | `ids.PrefixOperationCompute` (== `PrefixInstance`) | `epd` |
+| DiskType / Zone / Region | литерал-строка (`network-ssd`, `ru-central1-a`, …) | — |
 
-⚠️ Instance/Disk **делят `epd`**; Image/Snapshot **делят `fd8`** — умышленно
-(зеркалит VPC где Network/RT/SG/GW/PE делят `enp`, Subnet/Address делят `e9b`).
-**Все compute-операции** независимо от ресурса получают prefix `epd`
-(`PrefixOperationCompute == PrefixInstance`) — api-gateway opsproxy
-маршрутизирует `OperationService.Get(id)` по первым 3 символам id, поэтому все
-операции домена должны идти в один backend. `ImageService.Create` вернёт
-operation с id `epd...`, внутри которого `response` = Image с id `fd8...`
-(так же как в VPC `SubnetService.Create` → op `enp...`, внутри Subnet `e9b...`).
+⚠️ Instance/Disk делят `epd`; Image/Snapshot делят `fd8` — умышленно (по образцу
+kacho-vpc, где ресурсы группируются по доменному префиксу). **Все compute-операции** независимо
+от ресурса получают prefix `epd` — api-gateway opsproxy маршрутизирует `OperationService.Get(id)`
+по первым 3 символам, поэтому все операции домена идут в один backend. `ImageService.Create`
+вернёт operation `epd…`, внутри которого `response` = Image с id `fd8…`. Колонки `id` — `TEXT`.
 
-Колонки `id` — `TEXT` (как в VPC после squash; не UUID).
-**Не валидировать id-формат sync** на входе RPC (`(length) = "<=50"` из proto —
-это max-длина, не format) — verbatim YC: well-formed-но-несуществующий id даёт
-**async `NotFound`**; malformed/wrong-prefix id у реального YC → sync
-`InvalidArgument "invalid <res> id '<X>'"` (probe 2026-05-11), у нас пока
-ловится на DB-уровне → `NotFound` — расхождение, см. `docs/architecture/07-known-divergences.md`
-(паритет с поведением kacho-vpc, gotcha #1).
+Не валидировать id-формат sync на входе RPC (`(length) = "<=50"` из proto — max-длина, не
+format): well-formed-но-несуществующий id → async `NotFound` (ловится на DB-уровне).
+By-design нюанс malformed/wrong-prefix id зафиксирован в `docs/architecture/07-known-divergences.md`.
 
-## 4. Архитектурные паттерны (compute-специфичные)
+## 4. Compute-specific update_mask immutable-поля
 
-### 4.1 Operations (Long Running Operations)
-
-Все мутации (`Create/Update/Delete/Start/Stop/Restart/Move/AttachDisk/...`)
-возвращают `*operation.Operation`, реальная работа — в worker-горутине через
-`operations.Run(ctx, opsRepo, opID, fn)`. Шаблон идентичен VPC (см.
-`../kacho-vpc/internal/service/route_table.go`):
-
-```go
-func (s *DiskService) Create(ctx context.Context, req CreateDiskReq) (*operations.Operation, error) {
-    // 1. SYNC: required-поля + format-валидация + sanitization
-    if req.FolderID == "" { return nil, status.Error(codes.InvalidArgument, "folder_id required") }
-    if req.ZoneID == "" { return nil, status.Error(codes.InvalidArgument, "zone_id required") }
-    if err := corevalidate.NameCompute("name", req.Name); err != nil { return nil, err }
-    if err := validateDiskSize("size", req.Size); err != nil { return nil, err }
-    // ...
-
-    // 2. Создать Operation (prefix всегда PrefixOperationCompute)
-    diskID := ids.NewID(ids.PrefixDisk)
-    op, err := operations.New(ids.PrefixOperationCompute, fmt.Sprintf("Create disk %s", req.Name),
-        &computev1.CreateDiskMetadata{DiskId: diskID})
-    if err != nil { return nil, err }
-    if err := s.opsRepo.Create(ctx, op); err != nil { return nil, err }
-
-    // 3. ASYNC: Worker
-    operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-        return s.doCreate(ctx, diskID, req)
-    })
-    return &op, nil
-}
-```
-
-`doCreate` внутри:
-- project (владелец) existence через `projectClient.Exists` (`kacho-iam.ProjectService.Get`) → `NotFound "Folder with id <X> not found"` (legacy error-text; колонка-владелец — `folder_id`)
-- zone existence sync через `ZoneRegistry` (таблица `zones`) → `InvalidArgument`
-  (паритет с VPC; TODO probe — YC может давать `NotFound "Zone <X> not found"`).
-- type_id existence через `diskTypeRepo.Get` → unknown → `NotFound "Disk type <X> not found"`
-  (если type_id пуст — default `network-ssd`).
-- если есть `image_id` / `snapshot_id` — existence-check (та же БД) → `NotFound`;
-  size >= image.min_disk_size / snapshot.disk_size, иначе `InvalidArgument`.
-- repo.Insert (status сразу `READY` — control plane only)
-- `return anypb.New(protoconv.Disk(created))` — успех; outbox-event `Disk CREATED`.
-
-### 4.2 Operation Delete-response = Empty
-
-Согласно proto-options всех Delete RPC: `metadata: "DeleteXxxMetadata", response:
-"google.protobuf.Empty"`. Worker возвращает `anypb.New(&emptypb.Empty{})`,
-metadata уже в `Operation.metadata`. То же для DetachDisk / RemoveOneToOneNat и
-других lifecycle-операций — смотри proto-option каждого RPC (`response: "Instance"`
-→ возвращаем Instance; `response: "google.protobuf.Empty"` → Empty).
-
-### 4.3 Outbox + LISTEN/NOTIFY
-
-Каждая успешная мутация в `service/*.go` (через worker) пишет событие в
-`compute_outbox` в той же транзакции, что и сам ресурс. Триггер
-`compute_outbox_notify_trg` шлёт `pg_notify('compute_outbox', sequence_no::text)`.
-`InternalWatchHandler.Watch` — копия VPC-логики (dedicated pgx.Conn вне пула,
-`LISTEN compute_outbox`, catchup batch 100, `WaitForNotification` timeout 30s,
-per-stream semaphore `KACHO_COMPUTE_WATCH_MAX_STREAMS` default 32). Файл
-`internal/handler/internal_watch_handler.go` — структурно идентичен
-`../kacho-vpc/internal/handler/internal_watch_handler.go`.
-
-### 4.4 UpdateMask discipline
-
-YC verbatim: каждый Update RPC принимает `google.protobuf.FieldMask`.
-**Decision table** (как в VPC §4.4):
-- mask содержит unknown поле → `InvalidArgument` (через `corevalidate.UpdateMask` с known-set).
-- mask содержит **immutable** поле → `InvalidArgument` (`"<field> is immutable after <Resource>.Create"`).
-- mask пустой → full-object PATCH: применяются все mutable поля; immutable из тела
-  **silently игнорируются** (verbatim YC).
-- mask содержит mutable поле → применяется; валидируется по тем же правилам, что Create.
-
-**Immutable fields:**
-- Disk: `type_id`, `zone_id`, `block_size`, `source` (image_id/snapshot_id) —
-  immutable; mutable: `name`, `description`, `labels`, `size` (только увеличение —
-  `InvalidArgument "Disk size can only be increased"` при уменьшении),
-  `disk_placement_policy`. ⚠️ верхняя граница `size` в Update меньше чем в Create
-  (`4194304-4398046511104` vs `4194304-28587302322176`) — из proto `(value)`.
-- Image: `family`, `min_disk_size`, `os`, `product_ids`, `pooled` — immutable;
-  mutable: `name`, `description`, `labels`.
-- Snapshot: `source_disk_id`, `disk_size`, `storage_size` — immutable; mutable:
+Дисциплина update_mask — общая (`@.claude/rules/api-conventions.md §update_mask`). Per-ресурс:
+- **Disk**: immutable `type_id`, `zone_id`, `block_size`, `source` (image_id/snapshot_id);
+  mutable `name`, `description`, `labels`, `size` (только увеличение — иначе `InvalidArgument
+  "Disk size can only be increased"`), `disk_placement_policy`. ⚠️ верхняя граница `size` в
+  Update меньше, чем в Create (Update `4194304..4398046511104` vs Create `4194304..28587302322176`).
+- **Image**: immutable `family`, `min_disk_size`, `os`, `product_ids`, `pooled`; mutable
   `name`, `description`, `labels`.
-- Instance: `zone_id`, `boot_disk` — immutable (изменяются через AttachDisk/Relocate);
-  mutable: `name`, `description`, `labels`, `service_account_id`, `network_settings`,
-  `placement_policy`, `scheduling_policy`. `metadata` — через `UpdateMetadata` RPC,
-  не через Update. `resources_spec` (cores/memory) и `platform_id` — изменяются
-  только когда Instance STOPPED (verbatim YC `FailedPrecondition "Instance must be stopped"`).
+- **Snapshot**: immutable `source_disk_id`, `disk_size`, `storage_size`; mutable `name`,
+  `description`, `labels`.
+- **Instance**: immutable `zone_id`, `boot_disk` (меняются через AttachDisk/Relocate); mutable
+  `name`, `description`, `labels`, `service_account_id`, `network_settings`, `placement_policy`,
+  `scheduling_policy`. `metadata` — через `UpdateMetadata` RPC. `resources_spec` (cores/memory)
+  и `platform_id` — только когда Instance STOPPED (иначе `FailedPrecondition "Instance must be stopped"`).
 
-### 4.5 Filter parsing & Pagination
+## 5. Instance state-машина (control-plane имитация)
 
-`List*` RPC принимают `filter` строку YC-syntax (`name="<v>"`; для текущей фазы
-только `name=`), парсится через `kacho-corelib/filter.Parse` с whitelist полей.
-`order_by` (`"createdAt desc"`, default `"id asc"`) — пока игнорируется/частично.
-Pagination — cursor `(created_at, id)` ASC,ASC; `page_token` opaque base64;
-`page_size` через `corevalidate.PageSize` (0→50, max 1000); garbage token →
-`InvalidArgument`. Зеркаль `../kacho-vpc/internal/repo/paging.go`.
+`Instance.Status`: `PROVISIONING, RUNNING, STOPPING, STOPPED, STARTING, RESTARTING, UPDATING,
+ERROR, CRASHED, DELETING`. Нет гипервизора → переходы детерминированы **внутри worker'а
+операции** (меняет status → конечное состояние синхронно в той же TX, без таймеров).
 
-### 4.6 Instance state-машина — см. §8
+| RPC | precondition (иначе `FailedPrecondition`) | end status | response |
+|---|---|---|---|
+| Create | — | RUNNING | Instance |
+| Start | status ∈ {STOPPED} | RUNNING | Instance |
+| Stop | status ∈ {RUNNING} | STOPPED | Instance |
+| Restart | status ∈ {RUNNING} | RUNNING | Instance |
+| Update (resources_spec/platform_id) | status ∈ {STOPPED} | STOPPED | Instance |
+| Update (name/labels/…) / UpdateMetadata | any | unchanged | Instance |
+| AttachDisk | status ∈ {RUNNING, STOPPED}; disk READY & same zone & not attached | unchanged | Instance |
+| DetachDisk | status ∈ {RUNNING, STOPPED}; disk attached & not boot | unchanged | Instance |
+| Add/RemoveOneToOneNat / UpdateNetworkInterface | status ∈ {RUNNING, STOPPED}; NIC index valid | unchanged | Instance |
+| Move | any | unchanged | Instance |
+| GetSerialPortOutput | any → синтетический текст (sync, не операция) | — | GetSerialPortOutputResponse |
+| Delete | any (отвязывает диски по auto_delete) | (deleted) | Empty |
 
-## 5. Validation layering
+Precondition error-тексты — **канонический Kachō-контракт** (зафиксирован в
+`docs/architecture/` и проверяется newman-ассертами): `"Instance must be stopped"`,
+`"Instance is not running"`, `"The disk is being used"`. Меняются только осознанно через
+тикет. `status_message` в control-plane всегда пусто.
 
-**Sync (до создания Operation):**
-- Required: `folder_id` (Create), `zone_id` (Disk/Instance Create), `name` где
-  proto помечает; `Snapshot.Create` требует `disk_id`; `Image.Create` — один из
-  source (`image_id`/`snapshot_id`/`disk_id`/`uri`); `Instance.Create` требует
-  `zone_id`, `platform_id`, `resources_spec`, `boot_disk_spec`, минимум 1
-  `network_interface_spec`.
-- Format: `corevalidate.NameCompute` для Disk/Image/Snapshot/Instance — proto
-  `(pattern) = "|[a-z]([-_a-z0-9]{0,61}[a-z0-9])?"` (**lowercase**-only +
-  digits + hyphens + underscore, empty allowed, start с буквы). ⚠️ это НЕ
-  `NameVPC` (там uppercase разрешён) — нужен отдельный `corevalidate.NameCompute`
-  в corelib `validate/validate.go` (regex `^([a-z]([-_a-z0-9]{0,61}[a-z0-9])?)?$`).
-  Probe реального YC для точного контракта (`docs/architecture/07-known-divergences.md`).
-- `Description` ≤256, `Labels` ≤64 пар (key regex `[a-z][-_./\\@0-9a-z]*`).
-- `zone_id` — required + existence через `ZoneRegistry`.
-- Disk `size` — `[4194304 .. 28587302322176]` на Create, `[4194304 .. 4398046511104]`
-  на Update (из proto `(value)`).
-- `block_size` — default 4096; whitelist {4096, 8192, ...} (probe YC точный set).
-- Instance `resources_spec`: `cores` per-platform set, `memory` кратно GB и
-  в range, `core_fraction` ∈ {0,5,20,50,100}, `gpus` per-platform. Сложная
-  per-platform валидация — `internal/service/platforms.go` (таблица платформ
-  `standard-v1/v2/v3`, `highfreq-v3`, `gpu-*`).
-- `metadata` — суммарно ≤256 KiB.
-- UpdateMask: known-set + immutable check.
-- `secondary_disk_specs` / `boot_disk_spec`: ровно один из {`disk_id`, `disk_spec`}.
+**Disk lifecycle**: `Status` = `CREATING, READY, ERROR, DELETING`. Create → insert READY
+(мгновенно). Delete пока attached (строка в `attached_disks`) → `FailedPrecondition "The disk
+<id> is being used"` (FK RESTRICT). Relocate меняет `zone_id`; precondition — disk не attached.
+`instance_ids` в Disk вычисляется из `attached_disks`.
 
-**Async (внутри Operation worker):**
-- project (владелец) existence (`projectClient.Exists` → `NotFound`; колонка-владелец — legacy-имя `folder_id`).
-- zone / type_id / source image|snapshot|disk existence → `NotFound` / `InvalidArgument`.
-- Instance.Create: для каждого `network_interface_spec` — subnet existence
-  (`vpcClient.GetSubnet` → `NotFound "Subnet <X> not found"`), subnet.zone_id ==
-  instance.zone_id (иначе `InvalidArgument`), security_group_ids
-  (`vpcClient.GetSecurityGroup`), one_to_one_nat.address (`vpcClient.GetAddress`).
-- Repo Insert/Update — UNIQUE violation `(folder_id, name)` partial
-  `WHERE name <> ''` для всех 4 ресурсов → `ALREADY_EXISTS`; FK violation
-  (`attached_disks`) → `FailedPrecondition`.
-- Все ошибки маппятся через `mapRepoErr` в gRPC-status (см. §6).
+**Hard-delete** (не soft): `DELETE FROM <table> WHERE id=$1`, без tombstones. Instance.Delete:
+worker обрабатывает attached disks (auto_delete=true → DELETE disk; иначе строка
+attached_disks уйдёт CASCADE), затем DELETE instance (CASCADE чистит NIC + attached_disks),
+затем освобождает one_to_one_nat addresses через `vpcClient` (best-effort: VPC недоступен →
+log warning, не fail операции).
 
-## 6. Error mapping
+## 6. Cross-service refs (`internal/clients/`)
 
-`internal/service/maperr.go::mapRepoErr` — единая точка трансляции (копия VPC):
+Регламент cross-domain ссылок — `@.claude/rules/data-integrity.md`. Compute-edges (НЕ FK,
+валидируются gRPC-вызовом peer-сервиса в worker'е Create/Update; peer недоступен → `Unavailable`):
+- **owner-проект** → `kacho-iam.ProjectService.Get` (`internal/clients/iam_client.go`, порт
+  `ProjectClient`). Existence-check на каждом Create/Move; not-found → `NotFound "Project with
+  id <X> not found"`; недоступен → `Unavailable "project check: <err>"`. Колонка-владелец — `project_id`.
+- **VPC** → `vpc.v1.{SubnetService.Get, SecurityGroupService.Get, AddressService.Get}` для
+  Instance NIC: subnet existence + `subnet.zone_id == instance.zone_id`, security_group_ids,
+  one_to_one_nat.address. not-found → `NotFound "<Resource> <X> not found"`.
+- **Входящее ребро vpc→compute** (compute — owner Geography): kacho-vpc валидирует
+  `Subnet/AddressPool/Address.zone_id` вызовом нашего `ZoneService.Get`.
+- `imageRepo`/`snapshotRepo`/`diskTypeRepo`/`zoneRepo` — **НЕ clients**, локальные repo (та же
+  БД), existence-check source-ресурсов и zone/type_id.
 
-| Sentinel error           | gRPC code             | Verbatim YC text source           |
-|--------------------------|-----------------------|------------------------------------|
-| `ErrNotFound`            | `NOT_FOUND`           | `"<Resource> <id> not found"` (`Disk`, `Image`, `Snapshot`, `Instance`, `Disk type`, `Zone`) |
-| `ErrAlreadyExists`       | `ALREADY_EXISTS`      | `"<resource> with name '<n>' already exists ..."` (probe verbatim YC text) |
-| `ErrFailedPrecondition`  | `FAILED_PRECONDITION` | varies (`"The disk is being used"`, `"Instance must be stopped"` — probe verbatim) |
-| `ErrInvalidArg`          | `INVALID_ARGUMENT`    | varies (size, block_size, cores...) |
-| `ErrInternal`            | `INTERNAL`            | `"internal database error"` (no leak) |
+Конфиг: `KACHO_COMPUTE_IAM_GRPC_ADDR`, `KACHO_COMPUTE_VPC_GRPC_ADDR` + `*_TLS`. Retry on
+`Unavailable` — `kacho-corelib/retry`. `KACHO_COMPUTE_SKIP_PEER_VALIDATION=true` переводит
+cross-service existence-check в no-op (unit/newman без поднятого peer).
 
-`stripSentinel` удаляет sentinel-префикс. Файлы `internal/service/errors.go` +
-`internal/ports/errors.go` — type-alias'ы как в VPC (sentinel-ы живут в
-leaf-пакете `internal/ports` чтобы `portmock` мог их возвращать без import-cycle).
+## 7. Compute-specific error-mapping
 
-## 7. Hard-delete (не soft-delete)
+`internal/service/maperr.go::mapRepoErr` — единая точка трансляции sentinel→gRPC. Тексты —
+канонический Kachō-контракт (часть API, стабильны):
+- `ErrNotFound` → `NOT_FOUND` `"<Resource> <id> not found"` (Disk/Image/Snapshot/Instance/
+  Disk type/Zone/Region).
+- `ErrAlreadyExists` (partial UNIQUE `(project_id, name)`) → `ALREADY_EXISTS`.
+- `ErrFailedPrecondition` (FK `attached_disks` RESTRICT, state-машина) → `FAILED_PRECONDITION`.
+- `ErrInvalidArg` (size/block_size/cores/zone…) → `INVALID_ARGUMENT`.
+- `ErrInternal` → `INTERNAL` `"internal database error"` (без leak pgx/SQL).
 
-`DELETE FROM <table> WHERE id = $1`. Никаких tombstones (паритет с VPC 1.0).
-Instance.Delete: worker сначала обрабатывает attached disks (auto_delete=true →
-DELETE disk; auto_delete=false → строка attached_disks удалится CASCADE при
-DELETE instance), затем DELETE instance (FK cascade чистит
-`instance_network_interfaces` и `attached_disks`), затем освобождает
-one_to_one_nat addresses (вызов `vpcClient` — best-effort: не fail операцию если
-VPC недоступен → log warning).
+`stripSentinel` удаляет sentinel-префикс. Sentinel-ы живут в leaf-пакете `internal/ports`
+(чтобы `portmock` возвращал их без import-cycle).
 
-## 8. Instance state-машина (control-plane имитация)
+**Compute validation specifics** (sync, до Operation): name policy — **lowercase-only**
+`corevalidate.NameCompute` (regex `^([a-z]([-_a-z0-9]{0,61}[a-z0-9])?)?$`; ⚠️ НЕ `NameVPC`,
+там uppercase разрешён). Disk `size` range (разный max Create/Update — §4). Instance
+`resources_spec` per-platform (`cores`/`memory`/`core_fraction`∈{0,5,20,50,100}/`gpus`) —
+`internal/service/platforms.go` (таблица `standard-v1/v2/v3`, `highfreq-v3`, `gpu-*`).
+`metadata` ≤256 KiB. `secondary_disk_specs`/`boot_disk_spec` — ровно один из {`disk_id`,`disk_spec`}.
 
-YC `Instance.Status` enum: `STATUS_UNSPECIFIED, PROVISIONING, RUNNING, STOPPING,
-STOPPED, STARTING, RESTARTING, UPDATING, ERROR, CRASHED, DELETING`.
+## 8. Migrations (`internal/migrations/*.sql`, goose, embed.FS)
 
-В control-plane-only Kachō нет реального гипервизора → переходы детерминированы и
-происходят **внутри worker'а соответствующей операции** (worker «имитирует»
-короткую асинхронную работу: меняет status → конечное состояние синхронно в той
-же TX, без таймеров).
+Схема — `kacho_compute`. `0001_initial.sql` — squashed baseline: `operations`, `disk_types`,
+`regions`, `zones`, `disks`, `images`, `snapshots`, `instances`, `instance_network_interfaces`,
+`attached_disks`, `compute_outbox`, `compute_watch_cursors`; индексы; partial UNIQUE
+`(project_id,name) WHERE name<>''`; FK (§2); outbox trigger `compute_outbox_notify_trg`;
+id-колонки `TEXT`; seed `disk_types`/`regions`/`zones`. Следующая миграция — `0002_*`.
 
-| RPC          | preconditions (иначе `FailedPrecondition`)     | end status | response |
-|--------------|------------------------------------------------|------------|----------|
-| Create       | —                                              | RUNNING    | Instance |
-| Start        | status ∈ {STOPPED}                             | RUNNING    | Instance |
-| Stop         | status ∈ {RUNNING}                             | STOPPED    | Instance |
-| Restart      | status ∈ {RUNNING}                             | RUNNING    | Instance |
-| Update (resources_spec / platform_id) | status ∈ {STOPPED}    | STOPPED    | Instance |
-| Update (name/labels/...)              | any                    | unchanged  | Instance |
-| UpdateMetadata | any                                          | unchanged  | Instance |
-| AttachDisk   | status ∈ {RUNNING, STOPPED}; disk READY & same zone & not attached | unchanged | Instance |
-| DetachDisk   | status ∈ {RUNNING, STOPPED}; disk attached & not boot | unchanged | Instance |
-| AddOneToOneNat / RemoveOneToOneNat | status ∈ {RUNNING, STOPPED}; NIC index valid | unchanged | Instance |
-| UpdateNetworkInterface | any (SG/NAT) — probe YC                | unchanged  | Instance |
-| Move         | any (status сохраняется)                        | unchanged  | Instance |
-| GetSerialPortOutput | any → синтетический текст (не операция)    | —          | (sync GetSerialPortOutputResponse) |
-| Delete       | any (Instance с диском — отвязывает по auto_delete) | (deleted) | Empty |
+`migrations/` (корень репо) — staging для `make sync-migrations` (только `0001_operations.sql`
+от corelib; в `0001_initial.sql` схема `operations` уже включена). Source of truth —
+`internal/migrations/`. Goose dialect `postgres`, `cfg.MigrateDSN()` (без `pool_max_conns` —
+иначе `database/sql` шлёт unknown PG-param → FATAL); pgxpool — `cfg.DSN()`. НЕ редактировать
+применённую миграцию. OCC для read-modify-write — Postgres `xmin::text`.
 
-⚠️ verbatim YC текстов precondition-ошибок — **probe реального YC** при написании
-acceptance/newman (примеры: `"Instance is not running"`, `"Instance is already running"`,
-`"Cannot stop instance in state STOPPED"`). До probe — фиксируй текущую формулировку
-в `docs/architecture/07-known-divergences.md`. `status_message` поле — всегда пусто
-(в control-plane не используется).
+## 9. Внутренние (admin-only) ресурсы
 
-## 9. Disk lifecycle
+`DiskType` / `Region` / `Zone` — read-only в публичном API (Get/List). **Admin-управление**
+(seed/CRUD) — через `Internal*` на :9091: `InternalDiskTypeService`/`InternalRegionService`/
+`InternalZoneService.{Create,Update,Delete}`, проброшены через api-gateway internal mux
+(`/compute/v1/diskTypes`, `/compute/v1/regions`, `/compute/v1/zones`) — только cluster-internal
+listener, НЕ на external TLS (`@.claude/rules/security.md`). Любой новый admin-RPC, которого
+нет в публичном API — добавлять ТОЛЬКО в `Internal*` сервис и регистрировать через
+`computeInternalAddr`-блок в `kacho-api-gateway/internal/restmux/mux.go` (ответственность
+`api-gateway-registrar`). `Region.Delete` — FK RESTRICT при наличии зон; `Zone.Delete` проверяет
+своих dependents (instances/disks/disk_types); cross-сервисных dependents (vpc-подсети) НЕ
+проверяет — admin-ответственность.
 
-`Disk.Status` enum: `STATUS_UNSPECIFIED, CREATING, READY, ERROR, DELETING`.
-Control-plane: Create → insert READY (мгновенно). Update → остаётся READY.
-Delete → если есть строка в `attached_disks` (attached) → `FailedPrecondition`
-`"The disk <id> is being used"` (probe verbatim YC); иначе DELETE.
-Relocate — меняет `zone_id`; precondition: disk не attached
-(`FailedPrecondition "Disk is in use"`). `instance_ids` в proto Disk — вычисляется
-из `attached_disks`.
+## 10. Тесты (специфика; общие правила — `@.claude/rules/testing.md`)
 
-## 10. Cross-service clients (`internal/clients/`)
+- unit: `internal/service/*_test.go`, `internal/handler/*_test.go` — моки port-интерфейсов из
+  `internal/ports/portmock`; worker `operations.Run` дожидается детерминированно
+  (`portmock.AwaitOpDone`/`AwaitAllOpsDone`, не `time.Sleep`). Запуск `make test-short`.
+- integration: `internal/repo/*integration_test.go` (testcontainers PG16) — Repo CRUD, partial
+  UNIQUE `(project_id,name)`, FK `attached_disks` (attach/detach + delete-blocked + Instance.Delete
+  cascade), outbox emit + LISTEN/NOTIFY, NIC cascade delete, xmin OCC. Запуск `make test`.
+- e2e: `tests/newman/` — главная regression-инфра, black-box через api-gateway
+  (`localhost:18080`). Декларативные `cases/*.py` (источник истины) → `gen.py` → коллекции
+  по сервису (`collections/*.postman_collection.json`, не править руками). Запуск
+  `tests/newman/scripts/run.sh` (`--service disk` для одного). Cases: `disk.py`, `image.py`,
+  `snapshot.py`, `instance.py`, `disk-type.py`, `zone.py`, `operation.py`. Изоляция кейса —
+  свой `runId`, работает в pre-allocated `existingProjectId` (из env), имена суффиксуются
+  `{{runId}}`. case-id: `<DOMAIN>-<ACTION>-<DETAIL>` (`DISK-CR-CRUD-OK`,
+  `INST-START-NEG-NOT-STOPPED`). Cross-service Instance NIC-кейсы — `# requires kacho-vpc subnet`.
+  Агент `compute-newman-author`.
+- финал перед merge: `go test ./... -race` + `golangci-lint run` + `govulncheck` + newman зелёные.
 
-Реализуют port-интерфейсы из `internal/service/ports.go`:
-- `projectClient` → `kacho-iam.ProjectService.Get` (порт `ProjectClient`,
-  реализация — `internal/clients/iam_client.go`; KAC-106 переключил с
-  упразднённого `kacho-resource-manager.FolderService`). Используется в worker'е
-  каждого Create/Move для existence-check владельца-проекта (id хранится в
-  legacy-именованной колонке `folder_id`). error → `Unavailable "folder check: <err>"`;
-  `false` → `NotFound "Folder with id <X> not found"` (legacy error-text).
-  Retry on `Unavailable` — `kacho-corelib/retry`.
-- `vpcClient` → `kacho.cloud.vpc.v1.{SubnetService.Get, SecurityGroupService.Get,
-  AddressService.Get}` (для Instance NIC validation). error → `Unavailable`;
-  not-found → `NotFound "Subnet <X> not found"` и т.п. Retry on `Unavailable`.
-- `imageRepo` / `snapshotRepo` / `diskTypeRepo` / `zoneRepo` — **НЕ clients**,
-  это локальные repo (та же БД); используются для existence-check source-ресурсов.
-
-Конфиг адресов: `KACHO_COMPUTE_IAM_GRPC_ADDR`,
-`KACHO_COMPUTE_VPC_GRPC_ADDR` + `*_TLS` флаги (см. `internal/config/config.go`).
-В dev/test peer-сервисы могут быть недоступны — `KACHO_COMPUTE_SKIP_PEER_VALIDATION=true`
-переводит cross-service existence-check в no-op (для unit/newman без поднятого VPC).
-
-## 11. Timestamp precision
-
-Все `created_at` truncate до **seconds** в proto-ответе (verbatim YC):
-`CreatedAt: timestamppb.New(s.CreatedAt.Truncate(time.Second))` — единственное
-место конверсии: `internal/protoconv/protoconv.go` (как в VPC). БД хранит
-микросекунды, клиент видит секунды.
-
-## 12. Migrations
-
-**Боевые миграции** — `internal/migrations/*.sql`, embedded через `embed.FS`
-(`migrations.go`). Стартовый baseline:
-- `0001_initial.sql` — squashed baseline: таблицы `operations` (схема как у
-  corelib `0001_operations.sql`), `disk_types`, `zones`, `disks`, `images`,
-  `snapshots`, `instances`, `instance_network_interfaces`, `attached_disks`,
-  `compute_outbox`, `compute_watch_cursors`; индексы; partial UNIQUE
-  `(folder_id, name) WHERE name <> ''` для disks/images/snapshots/instances; FK
-  `attached_disks.disk_id` → disks RESTRICT, `.instance_id` → instances CASCADE;
-  FK `instance_network_interfaces.instance_id` → instances CASCADE; outbox trigger
-  `compute_outbox_notify_trg`; id-колонки `TEXT`. Seed `disk_types` и `zones`
-  делается **в этой же миграции** (как VPC seed'ит regions/zones).
-
-`migrations/` (корень репо) — staging для `make sync-migrations` (только
-`0001_operations.sql` от corelib; в `0001_initial.sql` схема `operations` уже включена).
-Source of truth — `internal/migrations/`. Goose dialect `postgres`, `cfg.MigrateDSN()`
-(без `pool_max_conns` — иначе `database/sql` шлёт unknown PG-param → FATAL, VPC FINDING-007);
-pgxpool — `cfg.DSN()` (с `pool_max_conns` если `KACHO_COMPUTE_DB_MAX_CONNS > 0`).
-
-**Запреты:** НЕ редактировать применённые миграции; НЕ модифицировать
-`0001_operations.sql` (staging-копия corelib); новая миграция = новый файл с
-инкрементным номером (следующий — `0002_*`).
-
-**Schema flat** — без K8s envelope (см. §2). Optimistic concurrency для
-read-modify-write (UpdateNetworkInterface-style) — Postgres `xmin::text` (как VPC).
-
-## 13. Local dev
+## 11. Local dev
 
 ```bash
 cd ../kacho-deploy && make dev-up                       # стенд (kind + helm + Postgres)
 cd ../kacho-deploy && make reload-svc SVC=compute       # перезапустить только compute
-cd ../kacho-deploy && make logs-svc SVC=compute
-cd ../kacho-deploy && make psql SVC=compute             # psql kacho_compute
-KACHO_COMPUTE_DB_PASSWORD=secret bin/kacho-compute migrate up   # миграции вне kind
-make test-short                                         # unit (-short)
-make test                                               # unit + integration (testcontainers)
-# Newman regression (нужен port-forward api-gateway → localhost:18080)
-python3 tests/newman/scripts/gen.py                     # перегенерить коллекции из cases/*.py
-tests/newman/scripts/run.sh                             # все ресурсы; --service disk для одного
+cd ../kacho-deploy && make logs-svc SVC=compute · make psql SVC=compute
+make test-short   # unit (-short)        |   make test   # unit + integration (testcontainers)
+python3 tests/newman/scripts/gen.py      # перегенерить коллекции из cases/*.py
+tests/newman/scripts/run.sh              # newman (нужен port-forward api-gateway → localhost:18080)
 ```
 
-## 14. Тесты
+## 12. Compute subagents (`.claude/agents/`) и skills (`.claude/skills/`)
 
-Три уровня, как в kacho-vpc (см. `../kacho-vpc/CLAUDE.md` §14 и
-`.claude/agents/TESTING.md` / `TESTING-PRODUCT.md`):
-
-### 14.1 Unit (`internal/service/*_test.go`, `internal/handler/*_test.go`)
-Моки port-интерфейсов — из `internal/ports/portmock`. Worker-горутины
-`operations.Run` дожидаются детерминированно через `portmock.AwaitOpDone` /
-`AwaitAllOpsDone` (poll до `Operation.Done`, дедлайн 2s — не `time.Sleep`).
-Запуск: `make test-short`. Service-тест, требующий Postgres → утечка adapter в use-case.
-
-### 14.2 Integration (`internal/repo/*integration_test.go`)
-Testcontainers Postgres 16; локально (`make test`) + в CI (job `integration`).
-Покрывает: Repo CRUD против реальной БД; partial UNIQUE `(folder_id, name)`;
-FK `attached_disks` (attach/detach + delete-blocked + Instance.Delete cascade);
-outbox emit транзакционность + LISTEN/NOTIFY; Instance NIC cascade delete; xmin OCC.
-
-### 14.3 E2E / Postman (`tests/newman/`)
-**Главная regression-инфраструктура** — black-box покрытие всех публичных RPC.
-HTTP через api-gateway (`localhost:18080`). Декларативный генератор: case-файлы
-Python (`cases/*.py`, ИСТОЧНИК ИСТИНЫ) → `gen.py` → Postman-коллекции по сервису
-(`collections/*.postman_collection.json` — НЕ править руками). Структура — копия
-`../kacho-vpc/tests/newman/` (scripts/{gen.py,run.sh,run-incremental.{sh,js}},
-environments/local.postman_environment.json, docs/{TAXONOMY,TEST-PLAN,CASES-INDEX,
-PRODUCT-REQUIREMENTS,REQUIREMENTS,RESULTS}.md, out/).
-
-Cases по ресурсам: `disk.py`, `image.py`, `snapshot.py`, `instance.py`,
-`disk-type.py`, `zone.py`, `operation.py`. Контракт изоляции кейса — как в VPC:
-каждый case в своём `runId`, работает внутри pre-allocated
-`existingFolderId`/`existingFolderCrossId` (из env), Org/Cloud/Folder НЕ создаёт;
-имена суффиксуются `{{runId}}`. Полный case-id: `<DOMAIN>-<ACTION>-<DETAIL>`,
-например `DISK-CR-CRUD-OK`, `INST-START-NEG-NOT-STOPPED`, `IMG-GLF-CRUD-OK`.
-Cross-service кейсы Instance (NIC → реальный subnet/SG из kacho-vpc) требуют
-поднятого kacho-vpc — помечать `# requires kacho-vpc subnet {{subnetId}}`.
-
-### 14.4 Где фиксировать найденные баги и задачи (ОБЯЗАТЕЛЬНО)
-**Любой баг / расхождение с verbatim YC / observability-gap / доп-задача →
-GitHub Issue в `PRO-Robotech/kacho-compute`** (если не compute-specific, а
-общий — в `PRO-Robotech/kacho-workspace`). `TODO.md` упразднён (stub со ссылкой
-на Issues). Метки: `bug` / `tech-debt` / `enhancement`; заблокировано
-ещё-не-реализованным сервисом → `blocked:kacho-kms` / `blocked:kacho-filesystem` /
-`blocked:kacho-snapshot-schedule` / `blocked:kacho-marketplace` + в теле issue
-«при каких условиях браться». Кросс-репо эпик → tracking-issue в `kacho-workspace`
-(метка `epic`). Коммит, закрывающий issue — trailer `Closes #N`.
-**Не баг** (by-design / documented divergence) → `docs/architecture/07-known-divergences.md`,
-не issue. **Новое продуктовое требование** → новый `REQ-*` в
-`tests/newman/docs/PRODUCT-REQUIREMENTS.md`.
-
-## 15. Top-10 gotchas (наследие kacho-vpc + compute-specific)
-
-1. **id sync-валидация** — well-formed-но-несуществующий id → `NotFound`;
-   malformed/wrong-prefix id: реальный YC → `InvalidArgument "invalid <res> id '<X>'"`,
-   у нас пока `NotFound` (расхождение — `docs/architecture/07-known-divergences.md`).
-2. **Name policy compute = lowercase-only** (proto `(pattern) = "|[a-z]([-_a-z0-9]{0,61}[a-z0-9])?"`)
-   — `corevalidate.NameCompute` (НЕ переиспользовать `NameVPC` — там uppercase).
-3. **Disk size: разный max в Create vs Update** (28 TiB vs 4 TiB — из proto `(value)`).
-4. **Disk.Delete пока attached** → `FailedPrecondition` (FK `attached_disks` RESTRICT на disk_id),
-   verbatim text `"The disk <id> is being used"` (probe).
-5. **Instance.Update {cores/memory/platform}** требует STOPPED → `FailedPrecondition`.
-6. **Hard-delete, не soft** (паритет VPC).
-7. **Operation prefix всегда `epd`** (`PrefixOperationCompute == PrefixInstance`)
-   независимо от ресурса; resource id может быть `fd8` (Image/Snapshot) или `epd` (Instance/Disk).
-8. **Timestamp truncate to seconds** в proto-ответе.
-9. **Cross-service refs не FK** — subnet/SG/address (VPC), folder (RM), source
-   image/snapshot/disk — validated gRPC-call'ом / existence-check в worker'е, не FK cascade.
-10. **`secondary_disk_specs` / `boot_disk_spec`: exactly one of {disk_id, disk_spec}**
-    — sync-валидация; нарушение → `InvalidArgument`.
-
-## 16. Внутренние (admin-only) ресурсы
-
-`DiskType` и `Zone` — read-only справочники в публичном API (verbatim YC:
-`DiskTypeService`/`ZoneService` есть, но только Get/List — без Create/Update/Delete).
-Их **admin-управление** (seed/добавление новых типов) — через `Internal*` сервисы
-на порту 9091: `InternalDiskTypeService.{Create,Update,Delete}` /
-`InternalZoneService.{Create,Update,Delete}`, проброшено через api-gateway
-internal mux на `/compute/v1/diskTypes`, `/compute/v1/zones` (только cluster-internal
-listener — НЕ на external TLS endpoint, см. workspace CLAUDE.md §запрет 6 и §16.x).
-Любой новый admin-RPC, которого нет в verbatim-YC — добавлять ТОЛЬКО в `Internal*`
-сервис, регистрировать через `computeInternalAddr` блок в
-`kacho-api-gateway/internal/restmux/mux.go`.
-
-## 17. Ссылки
-
-- Workspace правила: `../../CLAUDE.md`
-- Acceptance документ: `../../docs/specs/sub-phase-0.4-compute-acceptance.md` (создаётся `acceptance-author`)
-- Proto: `../kacho-proto/proto/kacho/cloud/compute/v1/` (vendored YC, переименован)
-- Эталон-сервис (паттерны): `../kacho-vpc/` — буквально смотри одноимённые файлы
-- Архитектура: `docs/architecture/` — 00-overview, 01-resources, 02-data-flows,
-  03-instance-lifecycle, 04-api-surface, 05-database, 06-conventions,
-  07-known-divergences, 08-ui, 09-go-skills-applied, README
-- Открытые задачи / баги: GitHub Issues — github.com/PRO-Robotech/kacho-compute/issues
-  (`TODO.md` упразднён)
-- Spec data model: `../../docs/specs/02-data-model-and-conventions.md`
-
-## 18. Subagents (`.claude/agents/`)
-
-Помимо общих 13 workspace-агентов (acceptance-author/reviewer, proto-sync,
-service-scaffolder, rpc-implementer, migration-writer, api-gateway-registrar,
-integration-tester, system-design-reviewer, db-architect-reviewer,
-go-style-reviewer, proto-api-reviewer, qa-test-engineer) — compute-специализированные:
-
-**Domain-experts:**
-- `compute-yc-parity-auditor` — аудит verbatim YC Compute parity (regex, error
-  texts, status codes, timestamp, state-машина Instance) — после rpc-implementer перед merge.
-- `compute-instance-lifecycle-specialist` — state-машина Instance (precondition-проверки,
-  переходы статусов, AttachDisk/DetachDisk/NAT инварианты) — при работе над Instance lifecycle.
+Domain-specific (общие 13 — из workspace, parent-walkup):
+- `compute-instance-lifecycle-specialist` — state-машина Instance (preconditions, переходы,
+  AttachDisk/DetachDisk/NAT инварианты).
 - `compute-disk-image-specialist` — Disk/Image/Snapshot инварианты (size constraints,
-  source-resolve image↔snapshot↔disk, family/GetLatestByFamily, block_size) — при работе над storage-ресурсами.
-- `compute-outbox-watch-engineer` — outbox + LISTEN/NOTIFY + InternalWatchService
-  (структурно копия VPC) — при изменении outbox/Watch logic.
-- `compute-newman-author` — newman regression suites (декларативные `cases/*.py` → `gen.py`)
-  — при добавлении нового RPC в e2e-coverage.
-
-**Testing coaches / load (skills в `.claude/skills/`):**
-- `testing-code-coach` (`.claude/agents/TESTING.md`), `testing-product-coach`
-  (`.claude/agents/TESTING-PRODUCT.md`) — эталонные практики тестирования кода/продукта.
-- `compute-load-testing` (skill) — нагрузочные сценарии Compute (k6 + ghz Jobs);
+  source-resolve image↔snapshot↔disk, family/GetLatestByFamily, block_size).
+- `compute-outbox-watch-engineer` — outbox + LISTEN/NOTIFY + InternalWatchService.
+- `compute-newman-author` — newman regression (`cases/*.py` → `gen.py`).
+- `compute-conventions-auditor` — аудит конвенций Kachō на внутреннюю согласованность
+  (error-format/regex/status-mapping/timestamp/update_mask/sync-vs-async, state-машина Instance),
+  НЕ сравнение с чужими облаками. Запускать после `rpc-implementer` перед merge.
+- `compute-load-testing` (skill `.claude/skills/compute-load-testing/`) — нагрузка (k6 + ghz);
   defers generic-методологию workspace `load-testing-coach`.
 
-Использовать после соответствующих этапов: yc-parity-auditor — после rpc-implementer
-перед merge; instance-lifecycle-specialist — при работе над Instance state-машиной;
-disk-image-specialist — при работе над Disk/Image/Snapshot; outbox-watch-engineer —
-при изменении outbox/Watch; newman-author — при добавлении RPC в e2e; testing-*-coach —
-при review/дизайне тестов.
+> Напоминание: `Internal.*` методы не должны попадать в api-gateway external TLS endpoint —
+> ответственность `api-gateway-registrar`.
 
-**Использовать готовые (не создавать заново):** `Explore`, `Plan`, `general-purpose`,
-`superpowers:code-reviewer`, `superpowers:brainstorming`, `superpowers:writing-plans`,
-`superpowers:test-driven-development`, `superpowers:systematic-debugging`,
-`superpowers:requesting-code-review`.
+## 13. Ссылки
 
-> Напоминание: `Internal.*` методы сервиса не должны попадать в api-gateway
-> external TLS endpoint. Это ответственность `api-gateway-registrar`.
-
-## 19. Permissions
-
-`.claude/settings.json` использует `bypassPermissions` для локальной dev-машины.
+- Workspace rules: `../../CLAUDE.md` + `../../.claude/rules/*`
+- Acceptance: `../../docs/specs/sub-phase-0.4-compute-acceptance.md` · Proto:
+  `../kacho-proto/proto/kacho/cloud/compute/v1/`
+- Глубокий reference: `docs/architecture/` (00-overview, 01-resources, 02-data-flows,
+  03-instance-lifecycle, 04-api-surface, 05-database, 06-conventions, 07-known-divergences, er-diagram)
+- Spec data model: `../../docs/specs/02-data-model-and-conventions.md`
+- Баги/tech-debt: GitHub Issues `PRO-Robotech/kacho-compute/issues` (`TODO.md` упразднён)

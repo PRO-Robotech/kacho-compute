@@ -72,6 +72,6 @@ api-gateway), фокус на чистом gRPC-throughput service+repo слоя
 - **pgxpool saturation**: `pgxpool.Stat().AcquireCount/EmptyAcquireCount/CanceledAcquireCount`.
 
 ## 4. Что НЕ твоя зона
-Функциональная корректность (→ `compute-yc-parity-auditor` / specialists); newman
+Функциональная корректность (→ `compute-conventions-auditor` / specialists); newman
 e2e (→ `compute-newman-author`); общая methodology нагрузки (→ skill `load-testing-coach`);
 профилирование Go-аллокаций (→ golang-benchmark/golang-performance skills).
