@@ -2,9 +2,11 @@ package repo
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kacho-corelib/filter"
@@ -12,6 +14,7 @@ import (
 	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
 
 	"github.com/PRO-Robotech/kacho-compute/internal/domain"
+	"github.com/PRO-Robotech/kacho-compute/internal/fgaintent"
 	"github.com/PRO-Robotech/kacho-compute/internal/service"
 )
 
@@ -143,6 +146,10 @@ func (r *DiskRepo) Insert(ctx context.Context, d *domain.Disk) (*domain.Disk, er
 	if err := emitCompute(ctx, tx, "Disk", result.ID, "CREATED", diskPayload(result)); err != nil {
 		return nil, service.ErrInternal
 	}
+	// SEC-D: FGA owner-tuple register-intent in the SAME writer-tx (no dual-write).
+	if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Disk", result.ID, result.ProjectID); err != nil {
+		return nil, service.ErrInternal
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, wrapPgErr(err, "Disk", d.Name)
 	}
@@ -211,17 +218,24 @@ func (r *DiskRepo) Delete(ctx context.Context, id string) error {
 		return service.ErrInternal
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	tag, err := tx.Exec(ctx, `DELETE FROM disks WHERE id = $1`, id)
+	// DELETE … RETURNING project_id so the FGA unregister-intent (below) can build
+	// the project-hierarchy tuple of the just-deleted resource within the same tx.
+	var projectID string
+	err = tx.QueryRow(ctx, `DELETE FROM disks WHERE id = $1 RETURNING project_id`, id).Scan(&projectID)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("%w: Disk %s not found", service.ErrNotFound, id)
+		}
 		if isFKViolation(err) {
 			return fmt.Errorf("%w: The disk %s is being used", service.ErrFailedPrecondition, id)
 		}
 		return wrapPgErr(err, "Disk", id)
 	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("%w: Disk %s not found", service.ErrNotFound, id)
-	}
 	if err := emitCompute(ctx, tx, "Disk", id, "DELETED", map[string]any{"id": id}); err != nil {
+		return service.ErrInternal
+	}
+	// SEC-D: symmetric FGA unregister-intent in the SAME writer-tx.
+	if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventUnregister, "Disk", id, projectID); err != nil {
 		return service.ErrInternal
 	}
 	if err := tx.Commit(ctx); err != nil {

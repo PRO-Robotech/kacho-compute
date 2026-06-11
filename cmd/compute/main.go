@@ -27,6 +27,7 @@ import (
 	"github.com/PRO-Robotech/kacho-corelib/grpcsrv"
 	"github.com/PRO-Robotech/kacho-corelib/observability"
 	"github.com/PRO-Robotech/kacho-corelib/operations"
+	"github.com/PRO-Robotech/kacho-corelib/outbox/drainer"
 
 	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
 	operationpb "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/operation"
@@ -35,7 +36,7 @@ import (
 	"github.com/PRO-Robotech/kacho-compute/internal/check"
 	"github.com/PRO-Robotech/kacho-compute/internal/clients"
 	"github.com/PRO-Robotech/kacho-compute/internal/config"
-	"github.com/PRO-Robotech/kacho-compute/internal/fgawrite"
+	"github.com/PRO-Robotech/kacho-compute/internal/fgaintent"
 	"github.com/PRO-Robotech/kacho-compute/internal/handler"
 	"github.com/PRO-Robotech/kacho-compute/internal/migrations"
 	"github.com/PRO-Robotech/kacho-compute/internal/repo"
@@ -109,22 +110,24 @@ func runServe(cfg config.Config) error {
 		}
 	}()
 
-	// KAC-188 follow-up: write-side FGA. fgaTupleWriter — nil unless
-	// authz.tuple-write is configured; nil makes fgawrite.Emit a no-op
-	// (dev / degraded). When wired, each compute resource Create publishes
-	// `compute_<resource>:<id>#project@project:<project_id>` so a per-resource
-	// FGA Check resolves through the `<rel> from project` cascade. Without this
-	// every Get/Update/Delete on a freshly created Instance/Disk/Image/Snapshot
-	// fails closed with `no path` (the live bug that motivated KAC-188 follow-up
-	// on compute_instance:epd5hd7gadv28tny6246).
-	fgaTupleWriter := buildFGATupleWriter(cfg, logger)
-
 	svcs := buildServices(pool, projectClient, vpcClient, opsRepo, cfg.SkipPeerValidation)
-	if fgaTupleWriter != nil {
-		svcs.instance.WithFGAWriter(fgaTupleWriter, logger)
-		svcs.disk.WithFGAWriter(fgaTupleWriter, logger)
-		svcs.image.WithFGAWriter(fgaTupleWriter, logger)
-		svcs.snapshot.WithFGAWriter(fgaTupleWriter, logger)
+
+	// SEC-D: register-drainer — applies FGA owner-tuple register/unregister intents
+	// (compute_fga_register_outbox, written transactionally by repo.Insert/Delete)
+	// via kacho-iam InternalIAMService.RegisterResource/UnregisterResource over the
+	// (optionally mTLS) compute→iam edge. Idempotent + retry-on-Unavailable; the
+	// owner-tuple is never lost (closes GitHub Issue N5 — best-effort dual-write).
+	// Default-on (OQ-SEC-D-5); without it created resources get no per-resource FGA
+	// tuple. The drainer dial-conn lives for the process lifetime (closed by ctx).
+	if cfg.FGARegisterDrainerEnabled {
+		if drainCloser, derr := startRegisterDrainer(ctx, cfg, pool, logger); derr != nil {
+			return fmt.Errorf("start register-drainer: %w", derr)
+		} else if drainCloser != nil {
+			defer drainCloser()
+		}
+	} else {
+		logger.Warn("FGA register-drainer DISABLED (KACHO_COMPUTE_FGA_REGISTER_DRAINER_ENABLED=false) — " +
+			"created resources will not get their per-resource FGA owner-tuple registered in IAM")
 	}
 
 	// KAC-178 §2 (W1.4 mirror of kacho-vpc): principal-extract ОБЯЗАН стоять
@@ -185,13 +188,28 @@ func runServe(cfg config.Config) error {
 	// (dev / breakglass), filter is nil → handler bypasses FGA filtering.
 	listFilter := buildListFilter(cfg, authzConn, logger)
 
+	// SEC-D: opt-in mTLS server-creds per listener (enable=false → insecure, dev
+	// backward-compat). Public :9090 + internal :9091 have independent TLSServer
+	// configs (PUBLIC_SERVER_MTLS / INTERNAL_SERVER_MTLS); enable=true with an
+	// unreadable cert / empty client-CA → fail-closed error (no silent insecure).
+	publicCreds, err := cfg.PublicServerCreds()
+	if err != nil {
+		return fmt.Errorf("public listener tls creds: %w", err)
+	}
+	internalCreds, err := cfg.InternalServerCreds()
+	if err != nil {
+		return fmt.Errorf("internal listener tls creds: %w", err)
+	}
+
 	// Публичный listener — requireAdmin=false; internal :9091 — requireAdmin=true
 	// (defense-in-depth поверх NetworkPolicy в helm). Зеркалит kacho-vpc.
 	grpcSrv := grpcsrv.NewServer(
+		publicCreds,
 		grpc.ChainUnaryInterceptor(publicUnary...),
 		grpc.ChainStreamInterceptor(publicStream...),
 	)
 	internalSrv := grpcsrv.NewServer(
+		internalCreds,
 		grpc.ChainUnaryInterceptor(handler.TenantUnaryInterceptor(true, productionMode)),
 		grpc.ChainStreamInterceptor(handler.TenantStreamInterceptor(true, productionMode)),
 	)
@@ -413,37 +431,68 @@ func buildListFilter(cfg config.Config, authzConn *grpc.ClientConn, logger *slog
 	return authzfilter.NewFGAFilter(cli, fcfg)
 }
 
-// buildFGATupleWriter — KAC-188 follow-up. Возвращает fgawrite.HierarchyTupleWriter,
-// готовый к подвешиванию в Create use-cases (Instance/Disk/Image/Snapshot).
-// Если master-switch отключён (KACHO_COMPUTE_AUTHZ_TUPLE_WRITE_ENABLED=false)
-// либо endpoint/store-id пустые — возвращает nil, что делает fgawrite.Emit
-// no-op'ом (dev/degraded). В production-режиме без выписки tuple'ов каждый
-// per-resource Check валится с `no path` — это live bug, который мы чиним.
-func buildFGATupleWriter(cfg config.Config, logger *slog.Logger) fgawrite.HierarchyTupleWriter {
-	if !cfg.AuthZTupleWriteEnabled {
-		logger.Warn("compute write-side FGA NOT wired — KACHO_COMPUTE_AUTHZ_TUPLE_WRITE_ENABLED=false; " +
-			"created resources will have no per-resource FGA hierarchy tuple (KAC-188 follow-up)")
-		return nil
+// startRegisterDrainer — SEC-D. Dials the kacho-iam internal endpoint over the
+// compute→iam edge (mTLS opt-in via cfg.IAMRegisterClientCreds — enable=false →
+// insecure dev) and starts a corelib outbox/drainer over
+// compute_fga_register_outbox. Each pending intent is replayed through
+// InternalIAMService.RegisterResource / UnregisterResource by the applier
+// (idempotent; Unavailable → retry with backoff; InvalidArgument → poison). The
+// drainer Run-loop owns claim-CAS + advisory-lock for exactly-once across replicas
+// (corelib W1.1). Returns a closer that shuts the dial-conn; nil error on success.
+//
+// The drainer dials the iam-internal :9091 listener — RegisterResource is an
+// Internal-only RPC (ban #6); the addr is derived from AuthZIAMGRPCAddr (the
+// existing iam-internal endpoint compute already uses for Check) and falls back to
+// IAMGRPCAddr when unset.
+func startRegisterDrainer(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (func(), error) {
+	addr := cfg.AuthZIAMGRPCAddr
+	if addr == "" {
+		addr = cfg.IAMGRPCAddr
 	}
-	if cfg.AuthZTupleWriteOpenFGAEndpoint == "" || cfg.AuthZTupleWriteStoreID == "" {
-		logger.Warn("compute write-side FGA NOT wired — endpoint or store-id empty " +
-			"(KACHO_COMPUTE_AUTHZ_TUPLE_WRITE_OPENFGA_ENDPOINT / _STORE_ID); created resources " +
-			"will have no per-resource FGA hierarchy tuple (KAC-188 follow-up)")
-		return nil
+
+	creds, err := cfg.IAMRegisterClientCreds()
+	if err != nil {
+		return nil, fmt.Errorf("compute→iam register mTLS creds: %w", err)
 	}
-	timeout := time.Duration(cfg.AuthZTupleWriteTimeoutMs) * time.Millisecond
-	logger.Info("compute write-side FGA wired (KAC-188 follow-up)",
-		"openfga_endpoint", cfg.AuthZTupleWriteOpenFGAEndpoint,
-		"store_id", cfg.AuthZTupleWriteStoreID,
-		"model_id", cfg.AuthZTupleWriteModelID,
-		"timeout", timeout,
+	// idle-prone edge (register-drainer is mostly waiting on NOTIFY) → keepalive
+	// idle pings keep the conn warm (KAC-244).
+	conn, err := grpc.NewClient(addr, creds, grpcclient.KeepaliveDialOption(true))
+	if err != nil {
+		return nil, fmt.Errorf("dial kacho-iam (register-drainer): %w", err)
+	}
+
+	applier := clients.NewIAMRegisterApplier(conn)
+	d, err := drainer.New[fgaintent.Payload](
+		pool,
+		drainer.Config{
+			Table:   "public.compute_fga_register_outbox",
+			Channel: "compute_fga_register_outbox",
+		},
+		func(b []byte) (fgaintent.Payload, error) {
+			p, derr := fgaintent.Decode(b)
+			if derr != nil {
+				// Malformed payload — permanent poison, never retried.
+				return fgaintent.Payload{}, errors.Join(drainer.ErrPermanent, derr)
+			}
+			return p, nil
+		},
+		applier.Apply,
+		logger.With("component", "fga-register-drainer"),
 	)
-	return &clients.OpenFGAWriteClient{
-		Endpoint: cfg.AuthZTupleWriteOpenFGAEndpoint,
-		StoreID:  cfg.AuthZTupleWriteStoreID,
-		ModelID:  cfg.AuthZTupleWriteModelID,
-		Timeout:  timeout,
+	if err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("build register-drainer: %w", err)
 	}
+
+	go func() {
+		if rerr := d.Run(ctx); rerr != nil {
+			logger.Error("register-drainer stopped", "err", rerr)
+		}
+	}()
+	logger.Info("FGA register-drainer started",
+		"iam_addr", addr, "mtls", cfg.IAMRegisterMTLS.Enable)
+
+	return func() { _ = conn.Close() }, nil
 }
 
 // registerInternalServices — kacho-only/admin RPC на internal listener (:9091,

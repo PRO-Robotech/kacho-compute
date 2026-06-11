@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
 
 	"github.com/PRO-Robotech/kacho-compute/internal/domain"
+	"github.com/PRO-Robotech/kacho-compute/internal/fgaintent"
 	"github.com/PRO-Robotech/kacho-compute/internal/service"
 )
 
@@ -167,11 +169,20 @@ func (r *InstanceRepo) Insert(ctx context.Context, in *domain.Instance, inlineDi
 		if err := emitCompute(ctx, tx, "Disk", d.ID, "CREATED", diskPayload(d)); err != nil {
 			return nil, service.ErrInternal
 		}
+		// SEC-D: inline boot/secondary disks are created resources → register their
+		// owner-tuple too, in the same writer-tx.
+		if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Disk", d.ID, d.ProjectID); err != nil {
+			return nil, service.ErrInternal
+		}
 	}
 	if err := r.fillChildrenTx(ctx, tx, created); err != nil {
 		return nil, err
 	}
 	if err := emitCompute(ctx, tx, "Instance", created.ID, "CREATED", instancePayload(created)); err != nil {
+		return nil, service.ErrInternal
+	}
+	// SEC-D: FGA owner-tuple register-intent for the Instance in the SAME writer-tx.
+	if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Instance", created.ID, created.ProjectID); err != nil {
 		return nil, service.ErrInternal
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -315,8 +326,17 @@ func (r *InstanceRepo) Delete(ctx context.Context, id string, autoDeleteDiskIDs 
 	if _, err := tx.Exec(ctx, `DELETE FROM attached_disks WHERE instance_id = $1`, id); err != nil {
 		return wrapPgErr(err, "Instance", id)
 	}
+	// DELETE … RETURNING project_id (auto-delete disks share the instance's
+	// project) so the FGA unregister-intents (below) can build the project-hierarchy
+	// tuples of the just-deleted resources within the same writer-tx.
 	for _, did := range autoDeleteDiskIDs {
-		if _, err := tx.Exec(ctx, `DELETE FROM disks WHERE id = $1`, did); err != nil {
+		var diskProject string
+		err := tx.QueryRow(ctx, `DELETE FROM disks WHERE id = $1 RETURNING project_id`, did).Scan(&diskProject)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				// already gone — nothing to unregister; carry on (idempotent delete).
+				continue
+			}
 			if isFKViolation(err) {
 				return fmt.Errorf("%w: The disk %s is being used", service.ErrFailedPrecondition, did)
 			}
@@ -325,15 +345,24 @@ func (r *InstanceRepo) Delete(ctx context.Context, id string, autoDeleteDiskIDs 
 		if err := emitCompute(ctx, tx, "Disk", did, "DELETED", map[string]any{"id": did}); err != nil {
 			return service.ErrInternal
 		}
+		// SEC-D: symmetric FGA unregister-intent for the auto-deleted disk.
+		if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventUnregister, "Disk", did, diskProject); err != nil {
+			return service.ErrInternal
+		}
 	}
-	tag, err := tx.Exec(ctx, `DELETE FROM instances WHERE id = $1`, id)
+	var projectID string
+	err = tx.QueryRow(ctx, `DELETE FROM instances WHERE id = $1 RETURNING project_id`, id).Scan(&projectID)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("%w: Instance %s not found", service.ErrNotFound, id)
+		}
 		return wrapPgErr(err, "Instance", id)
 	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("%w: Instance %s not found", service.ErrNotFound, id)
-	}
 	if err := emitCompute(ctx, tx, "Instance", id, "DELETED", map[string]any{"id": id}); err != nil {
+		return service.ErrInternal
+	}
+	// SEC-D: symmetric FGA unregister-intent for the instance in the SAME writer-tx.
+	if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventUnregister, "Instance", id, projectID); err != nil {
 		return service.ErrInternal
 	}
 	if err := tx.Commit(ctx); err != nil {

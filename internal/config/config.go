@@ -2,9 +2,18 @@ package config
 
 import (
 	"fmt"
+	"os"
+
+	"google.golang.org/grpc"
 
 	corecfg "github.com/PRO-Robotech/kacho-corelib/config"
+	"github.com/PRO-Robotech/kacho-corelib/grpcclient"
+	"github.com/PRO-Robotech/kacho-corelib/grpcsrv"
 )
+
+// envPrefix — корневой сегмент имён env для kacho-compute (KACHO_<DOMAIN>).
+// LoadPrefixed выводит env-имя каждого поля из иерархии: envPrefix + tag/field.
+const envPrefix = "KACHO_COMPUTE"
 
 // Config — конфигурация kacho-compute.
 type Config struct {
@@ -95,35 +104,58 @@ type Config struct {
 	// (fail-closed = secure). Set to true только в break-glass.
 	ListFilterFailOpen bool `envconfig:"KACHO_COMPUTE_LIST_FILTER_FAIL_OPEN" default:"false"`
 
-	// ===== KAC-188 follow-up: write-side FGA (hierarchy-tuple write) =====
+	// ===== SEC-D: register-drainer (FGA owner-tuple через kacho-iam) =====
 	//
-	// Каждый успешный resource Create (Instance/Disk/Image/Snapshot) публикует в
-	// shared OpenFGA store tuple `compute_<resource>:<id>#project@project:<project_id>`,
-	// чтобы per-resource Check (Get/Update/Delete) резолвился через cascade
-	// `<rel> from project`. Без этого tuple Check возвращает fail-closed DENY
-	// "no path" (the bug that motivated KAC-188 follow-up).
+	// FGARegisterDrainerEnabled — включает register-drainer (corelib outbox/drainer):
+	// дренит compute_fga_register_outbox, применяя intent через
+	// InternalIAMService.RegisterResource/UnregisterResource. SEC-D OQ-5: default-on
+	// в dev (без него созданные ресурсы не получат owner-tuple → per-resource Check
+	// DENY). Это in-process goroutine, не cross-cluster rollout-flag.
+	FGARegisterDrainerEnabled bool `envconfig:"KACHO_COMPUTE_FGA_REGISTER_DRAINER_ENABLED" default:"true"`
+
+	// ===== SEC-D: opt-in mTLS (per-edge, corelib SEC-B) =====
 	//
-	// Parity с kacho-vpc cfg.AuthZ.TupleWrite / kacho-nlb fgawrite.
+	// Каждое ребро — независимый grpcclient.TLSClient / grpcsrv.TLSServer value-struct.
+	// envconfig.Process(envPrefix, &cfg) выводит env-имена из тега родительского поля:
+	// `IAM_REGISTER_MTLS` → KACHO_COMPUTE_IAM_REGISTER_MTLS_{ENABLE,CERTFILE,KEYFILE,
+	// CAFILES,SERVERNAME}. Enable=false (default) → insecure (dev backward-compat,
+	// эпик §5). Per-edge enable → независимый rollback/rollout (§6.5).
 
-	// AuthZTupleWriteEnabled — master-switch. true → fgawrite.Emit публикует
-	// hierarchy tuple после каждого Create. false → no-op (dev/degraded).
-	AuthZTupleWriteEnabled bool `envconfig:"KACHO_COMPUTE_AUTHZ_TUPLE_WRITE_ENABLED" default:"false"`
+	// IAMRegisterMTLS — client-creds для ребра compute→iam (register-drainer →
+	// InternalIAMService.RegisterResource/UnregisterResource). FGA-proxy edge (SEC-A).
+	IAMRegisterMTLS grpcclient.TLSClient `envconfig:"IAM_REGISTER_MTLS"`
 
-	// AuthZTupleWriteOpenFGAEndpoint — host:port OpenFGA HTTP API (например
-	// `kacho-umbrella-openfga:8080`). Тот же store, в который kacho-iam пишет
-	// account/project tuples. Empty → tuple-write disabled even if Enabled=true.
-	AuthZTupleWriteOpenFGAEndpoint string `envconfig:"KACHO_COMPUTE_AUTHZ_TUPLE_WRITE_OPENFGA_ENDPOINT" default:""`
+	// VPCMTLS — client-creds для ребра compute→vpc (NIC-spec валидация + IPAM Address).
+	VPCMTLS grpcclient.TLSClient `envconfig:"VPC_MTLS"`
 
-	// AuthZTupleWriteStoreID — OpenFGA store-id. Заполняется openfga-bootstrap-job
-	// в Secret и пробрасывается как env через valueFrom.secretKeyRef. Empty →
-	// tuple-write disabled.
-	AuthZTupleWriteStoreID string `envconfig:"KACHO_COMPUTE_AUTHZ_TUPLE_WRITE_STORE_ID" default:""`
+	// PublicServerMTLS — server-creds для публичного listener (:9090, GrpcPort).
+	PublicServerMTLS grpcsrv.TLSServer `envconfig:"PUBLIC_SERVER_MTLS"`
 
-	// AuthZTupleWriteModelID — pinned authorization_model_id. Empty → store default.
-	AuthZTupleWriteModelID string `envconfig:"KACHO_COMPUTE_AUTHZ_TUPLE_WRITE_MODEL_ID" default:""`
+	// InternalServerMTLS — server-creds для cluster-internal listener (:9091,
+	// InternalGrpcPort).
+	InternalServerMTLS grpcsrv.TLSServer `envconfig:"INTERNAL_SERVER_MTLS"`
+}
 
-	// AuthZTupleWriteTimeoutMs — per-call deadline для OpenFGA write. Default 2000ms.
-	AuthZTupleWriteTimeoutMs int `envconfig:"KACHO_COMPUTE_AUTHZ_TUPLE_WRITE_TIMEOUT_MS" default:"2000"`
+// IAMRegisterClientCreds возвращает grpc.DialOption для ребра compute→iam
+// (register-drainer). Enable=false → insecure (dev backward-compat); enable=true
+// без валидного cert-trio → error (fail-closed, без silent insecure-fallback).
+func (c Config) IAMRegisterClientCreds() (grpc.DialOption, error) {
+	return grpcclient.TLSClientCreds(c.IAMRegisterMTLS)
+}
+
+// VPCClientCreds возвращает grpc.DialOption для ребра compute→vpc (NIC/IPAM).
+func (c Config) VPCClientCreds() (grpc.DialOption, error) {
+	return grpcclient.TLSClientCreds(c.VPCMTLS)
+}
+
+// PublicServerCreds возвращает grpc.ServerOption для публичного listener (:9090).
+func (c Config) PublicServerCreds() (grpc.ServerOption, error) {
+	return grpcsrv.TLSServerCreds(c.PublicServerMTLS)
+}
+
+// InternalServerCreds возвращает grpc.ServerOption для internal listener (:9091).
+func (c Config) InternalServerCreds() (grpc.ServerOption, error) {
+	return grpcsrv.TLSServerCreds(c.InternalServerMTLS)
 }
 
 // baseDSN — стандартный postgres DSN без pgxpool-специфичных параметров
@@ -156,8 +188,40 @@ func (c Config) MigrateDSN() string {
 }
 
 // Load загружает конфигурацию из переменных окружения.
+//
+// Использует LoadPrefixed(envPrefix): абсолютно-тегированные поля
+// (`envconfig:"KACHO_COMPUTE_..."`) резолвятся как есть, а вложенные
+// per-edge TLS value-структуры (grpcclient.TLSClient / grpcsrv.TLSServer) с
+// относительным тегом (`IAM_REGISTER_MTLS`) получают независимые
+// KACHO_COMPUTE_<EDGE>_<NAME> имена (SEC-D, FD-3 per-edge prefixing).
 func Load() (Config, error) {
 	var c Config
-	err := corecfg.Load(&c)
+	err := corecfg.LoadPrefixed(envPrefix, &c)
 	return c, err
+}
+
+// LoadInto — тест-хелпер: выставляет переданные env-переменные на время вызова
+// и загружает конфиг через тот же LoadPrefixed-путь, что и Load (без глобального
+// state-leak между тестами — все ключи восстанавливаются через t.Setenv-семантику
+// os.Setenv/Unsetenv с очисткой). Используется mTLS-конфиг-тестами (SEC-D).
+func LoadInto(c *Config, env map[string]string) error {
+	saved := make(map[string]*string, len(env))
+	for k, v := range env {
+		if prev, ok := os.LookupEnv(k); ok {
+			saved[k] = &prev
+		} else {
+			saved[k] = nil
+		}
+		_ = os.Setenv(k, v)
+	}
+	defer func() {
+		for k, prev := range saved {
+			if prev == nil {
+				_ = os.Unsetenv(k)
+			} else {
+				_ = os.Setenv(k, *prev)
+			}
+		}
+	}()
+	return corecfg.LoadPrefixed(envPrefix, c)
 }
