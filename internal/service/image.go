@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"regexp"
 	"time"
 
@@ -18,7 +17,6 @@ import (
 	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
 
 	"github.com/PRO-Robotech/kacho-compute/internal/domain"
-	"github.com/PRO-Robotech/kacho-compute/internal/fgawrite"
 	"github.com/PRO-Robotech/kacho-compute/internal/protoconv"
 )
 
@@ -77,26 +75,11 @@ type ImageService struct {
 	snapshotRepo  SnapshotRepo
 	projectClient ProjectClient
 	opsRepo       operations.Repo
-
-	// fgaWriter / logger — KAC-188 follow-up: after the Image row is committed,
-	// publish `compute_image:<id>#project@project:<project_id>` so a per-resource
-	// Check resolves. nil → no-op.
-	fgaWriter fgawrite.HierarchyTupleWriter
-	logger    *slog.Logger
 }
 
 // NewImageService создаёт ImageService.
 func NewImageService(repo ImageRepo, diskRepo DiskRepo, snapshotRepo SnapshotRepo, projectClient ProjectClient, opsRepo operations.Repo) *ImageService {
 	return &ImageService{repo: repo, diskRepo: diskRepo, snapshotRepo: snapshotRepo, projectClient: projectClient, opsRepo: opsRepo}
-}
-
-// WithFGAWriter wires the OpenFGA hierarchy-tuple writer (KAC-188 follow-up).
-// Without it a created Image has no `compute_image:<id>#project@project` tuple
-// and every per-resource Check is FGA `no path`.
-func (s *ImageService) WithFGAWriter(w fgawrite.HierarchyTupleWriter, logger *slog.Logger) *ImageService {
-	s.fgaWriter = w
-	s.logger = logger
-	return s
 }
 
 // Get возвращает Image по ID.
@@ -240,9 +223,9 @@ func (s *ImageService) doCreate(ctx context.Context, imageID string, req CreateI
 	if err != nil {
 		return nil, mapRepoErr(err)
 	}
-	// KAC-188 follow-up: publish the compute_image→project hierarchy tuple so a
-	// per-resource Check resolves. Best-effort + non-fatal (row committed).
-	fgawrite.Emit(ctx, s.fgaWriter, s.logger, "compute_image", created.ID, created.ProjectID)
+	// SEC-D: the compute_image→project owner-tuple is registered transactionally
+	// via the FGA register-intent written in repo.Insert's writer-tx and applied
+	// by the register-drainer through kacho-iam (no direct FGA, no dual-write).
 	return anypb.New(protoconv.Image(created))
 }
 
