@@ -20,6 +20,29 @@ vpcAddr: "vpc.kacho.svc.cluster.local:9090"
 vpcInternalAddr: "vpc.kacho.svc.cluster.local:9091"
 skipPeerValidation: "false"
 
+# ─── SEC-F mTLS — per-edge opt-in (cert-manager internal-CA certs) ─────
+# enable=false (default) → НИ cert-secret, НИ KACHO_COMPUTE_*_MTLS_* env →
+# текущее insecure dev (нулевая регрессия, SEC-F-05). umbrella прокидывает
+# .mtls.enable + per-edge флаги (КРИТ#3).
+#
+# При enable=true (corelib LoadPrefixed, SEC-D config/config.go):
+#   server (оба listener'а): KACHO_COMPUTE_PUBLIC_SERVER_MTLS_* /
+#                            KACHO_COMPUTE_INTERNAL_SERVER_MTLS_*
+#   compute→iam (drainer):   KACHO_COMPUTE_IAM_REGISTER_MTLS_*
+#   compute→vpc (NIC/IPAM):  KACHO_COMPUTE_VPC_MTLS_*
+# serverName на dial-стороне = реальный dial-host (∈ server-SAN пира, КРИТ#1).
+mtls:
+  enable: false
+  serverSecretName: kacho-compute-server-tls   # cert key = kacho-compute (КРИТ#1)
+  clientSecretName: kacho-compute-client-tls
+  mountPath: /etc/kacho-compute/tls            # <mp>/server|client/{tls.crt,tls.key,ca.crt}
+  edges:
+    iamRegister: false   # compute→iam InternalIAMService.Register (drainer)
+    vpc: false           # compute→vpc NIC-spec + IPAM Address
+  serverName:
+    iamRegister: kacho-iam-internal.kacho.svc.cluster.local
+    vpc: vpc.kacho.svc.cluster.local
+
 # compute is not on the Address.Create write-path; HPA + resources
 # present for uniform policy across services. maxReplicas=5 is plenty.
 resources:
