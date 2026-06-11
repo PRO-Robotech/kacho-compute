@@ -63,6 +63,54 @@ spec:
             # KAC-106 (E1): peer for project-existence switched to kacho-iam.
             - name: KACHO_COMPUTE_IAM_GRPC_ADDR
               value: "{{ .Values.iamAddr }}"
+            {{- if .Values.mtls.enable }}
+            {{- $srv := printf "%s/server" .Values.mtls.mountPath }}
+            {{- $cli := printf "%s/client" .Values.mtls.mountPath }}
+            # SEC-F mTLS server-creds (both listeners) — corelib grpcsrv.TLSServer
+            # via config.LoadPrefixed("KACHO_COMPUTE"). ca.crt = client-CA bundle.
+            - name: KACHO_COMPUTE_PUBLIC_SERVER_MTLS_ENABLE
+              value: "true"
+            - name: KACHO_COMPUTE_PUBLIC_SERVER_MTLS_CERTFILE
+              value: {{ printf "%s/tls.crt" $srv | quote }}
+            - name: KACHO_COMPUTE_PUBLIC_SERVER_MTLS_KEYFILE
+              value: {{ printf "%s/tls.key" $srv | quote }}
+            - name: KACHO_COMPUTE_PUBLIC_SERVER_MTLS_CLIENTCAFILES
+              value: {{ printf "%s/ca.crt" $srv | quote }}
+            - name: KACHO_COMPUTE_INTERNAL_SERVER_MTLS_ENABLE
+              value: "true"
+            - name: KACHO_COMPUTE_INTERNAL_SERVER_MTLS_CERTFILE
+              value: {{ printf "%s/tls.crt" $srv | quote }}
+            - name: KACHO_COMPUTE_INTERNAL_SERVER_MTLS_KEYFILE
+              value: {{ printf "%s/tls.key" $srv | quote }}
+            - name: KACHO_COMPUTE_INTERNAL_SERVER_MTLS_CLIENTCAFILES
+              value: {{ printf "%s/ca.crt" $srv | quote }}
+            {{- if .Values.mtls.edges.iamRegister }}
+            # compute→iam (register-drainer) client-creds — grpcclient.TLSClient.
+            - name: KACHO_COMPUTE_IAM_REGISTER_MTLS_ENABLE
+              value: "true"
+            - name: KACHO_COMPUTE_IAM_REGISTER_MTLS_CERTFILE
+              value: {{ printf "%s/tls.crt" $cli | quote }}
+            - name: KACHO_COMPUTE_IAM_REGISTER_MTLS_KEYFILE
+              value: {{ printf "%s/tls.key" $cli | quote }}
+            - name: KACHO_COMPUTE_IAM_REGISTER_MTLS_CAFILES
+              value: {{ printf "%s/ca.crt" $cli | quote }}
+            - name: KACHO_COMPUTE_IAM_REGISTER_MTLS_SERVERNAME
+              value: {{ .Values.mtls.serverName.iamRegister | quote }}
+            {{- end }}
+            {{- if .Values.mtls.edges.vpc }}
+            # compute→vpc (NIC-spec validation + IPAM Address) client-creds.
+            - name: KACHO_COMPUTE_VPC_MTLS_ENABLE
+              value: "true"
+            - name: KACHO_COMPUTE_VPC_MTLS_CERTFILE
+              value: {{ printf "%s/tls.crt" $cli | quote }}
+            - name: KACHO_COMPUTE_VPC_MTLS_KEYFILE
+              value: {{ printf "%s/tls.key" $cli | quote }}
+            - name: KACHO_COMPUTE_VPC_MTLS_CAFILES
+              value: {{ printf "%s/ca.crt" $cli | quote }}
+            - name: KACHO_COMPUTE_VPC_MTLS_SERVERNAME
+              value: {{ .Values.mtls.serverName.vpc | quote }}
+            {{- end }}
+            {{- end }}
             {{- range $k, $v := .Values.env }}
             - name: {{ $k }}
               value: {{ $v | quote }}
@@ -129,6 +177,17 @@ spec:
               value: "{{ .Values.authz.tupleWrite.modelId }}"
             {{- end }}
             {{- end }}
+          {{- if .Values.mtls.enable }}
+          volumeMounts:
+            # SEC-F mTLS — cert-manager internal-CA server + client secrets in
+            # separate dirs (req #5). cert-manager writes tls.crt/tls.key/ca.crt.
+            - name: mtls-server
+              mountPath: {{ printf "%s/server" .Values.mtls.mountPath | quote }}
+              readOnly: true
+            - name: mtls-client
+              mountPath: {{ printf "%s/client" .Values.mtls.mountPath | quote }}
+              readOnly: true
+          {{- end }}
           resources:
             requests:
               cpu: {{ .Values.resources.requests.cpu }}
@@ -190,9 +249,20 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 30
         {{- end }}
-      {{- if .Values.opa.enabled }}
+      {{- if or .Values.opa.enabled .Values.mtls.enable }}
       volumes:
+        {{- if .Values.opa.enabled }}
         - name: opa-config
           configMap:
             name: {{ .Values.name }}-opa-config
+        {{- end }}
+        {{- if .Values.mtls.enable }}
+        # SEC-F mTLS — cert-manager internal-CA secrets (server + client).
+        - name: mtls-server
+          secret:
+            secretName: {{ .Values.mtls.serverSecretName | quote }}
+        - name: mtls-client
+          secret:
+            secretName: {{ .Values.mtls.clientSecretName | quote }}
+        {{- end }}
       {{- end }}
