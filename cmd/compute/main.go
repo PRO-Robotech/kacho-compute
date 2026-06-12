@@ -156,11 +156,25 @@ func runServe(cfg config.Config) error {
 	if cfg.AuthZIAMGRPCAddr != "" {
 		// authz-conn → iam-internal:9091 — idle-prone (между всплесками authz Check
 		// активных стримов нет) → idle=true: пинги держат conn тёплым (KAC-244).
-		authzConn, err = dialPeer(cfg.AuthZIAMGRPCAddr, cfg.AuthZIAMTLS, true)
+		//
+		// SEC-I: per-RPC InternalIAMService.Check + FGA-filtered List (этот conn
+		// шарится с list-filter через buildListFilter) предъявляют client-cert mTLS
+		// через cfg.IAMAuthzMTLS (enable=false → insecure dev; enable=true без
+		// валидного cert-trio → startup error, fail-closed). Заменяет server-auth-only
+		// cfg.AuthZIAMTLS bool, который не предъявлял cert (падал бы под SEC-H).
+		authzCreds, cerr := grpcclient.TLSClientTransportCreds(cfg.IAMAuthzMTLS)
+		if cerr != nil {
+			return fmt.Errorf("compute→iam Check/list-filter mTLS creds: %w", cerr)
+		}
+		authzConn, err = dialPeerCreds(cfg.AuthZIAMGRPCAddr, authzCreds, true)
 		if err != nil {
 			return fmt.Errorf("dial kacho-iam (authz): %w", err)
 		}
 		defer authzConn.Close()
+		logger.Info("compute→iam read/authz mTLS state",
+			"project_get_mtls", cfg.IAMProjectMTLS.Enable,
+			"authz_check_listfilter_mtls", cfg.IAMAuthzMTLS.Enable,
+		)
 	}
 	authzIntr, err := check.NewInterceptor(check.Options{
 		ServiceName: "kacho-compute",
@@ -302,22 +316,62 @@ func dialPeers(cfg config.Config, logger *slog.Logger) (service.ProjectClient, s
 	// iam (public ProjectService.Get) + vpc conn'ы — активно используются на
 	// request-path каждой мутации → idle=false (трафик есть, idle-пинги не нужны;
 	// keepalive всё равно ставится для half-open-detection при паузах). KAC-244.
-	iamConn, err := dialPeer(cfg.IAMGRPCAddr, cfg.IAMTLS, false)
+	//
+	// SEC-I: compute→iam ProjectService.Get (:9090) предъявляет client-cert mTLS
+	// через cfg.IAMProjectMTLS (enable=false → insecure dev; enable=true без
+	// валидного cert-trio → startup error, fail-closed). Заменяет server-auth-only
+	// cfg.IAMTLS bool, который не предъявлял cert (падал бы под SEC-H).
+	iamCreds, err := grpcclient.TLSClientTransportCreds(cfg.IAMProjectMTLS)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("compute→iam ProjectService.Get mTLS creds: %w", err)
+	}
+	iamConn, err := dialPeerCreds(cfg.IAMGRPCAddr, iamCreds, false)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("dial iam: %w", err)
 	}
-	vpcConn, err := dialPeer(cfg.VPCGRPCAddr, cfg.VPCTLS, false)
+	// SEC-M: compute→vpc resource-creation edge (Subnet/SecurityGroup/Address.Get
+	// NIC-spec validation on :9090 + one-to-one-NAT IPAM on :9091) presents a
+	// client-cert via cfg.VPCMTLS (enable=false → insecure dev; enable=true without a
+	// valid cert-trio → startup error, fail-closed). Mirror of the already-shipped
+	// vpc→compute branch (mtlsCfg.ComputeMTLS.Enable) and the SEC-I iam edges; replaces
+	// the server-auth-only bools cfg.VPCTLS / cfg.VPCInternalTLS, which presented no
+	// client-cert (both dials would fail once kacho-vpc runs RequireAndVerifyClientCert).
+	// BOTH vpc-listeners share one Service-host `vpc` → one cfg.VPCMTLS / one
+	// ServerName covers both ports (M6 / B-04; contrast iam SEC-I per-listener split).
+	vpcConn, err := dialVPCPeer(cfg, cfg.VPCGRPCAddr, cfg.VPCTLS)
 	if err != nil {
 		_ = iamConn.Close()
 		return nil, nil, nil, fmt.Errorf("dial vpc: %w", err)
 	}
-	vpcInternalConn, err := dialPeer(cfg.VPCInternalGRPCAddr, cfg.VPCInternalTLS, false)
+	vpcInternalConn, err := dialVPCPeer(cfg, cfg.VPCInternalGRPCAddr, cfg.VPCInternalTLS)
 	if err != nil {
 		_ = vpcConn.Close()
 		_ = iamConn.Close()
 		return nil, nil, nil, fmt.Errorf("dial vpc internal: %w", err)
 	}
+	logger.Info("compute→vpc resource-creation mTLS state",
+		"nic_spec_ipam_mtls", cfg.VPCMTLS.Enable,
+	)
 	return clients.NewProjectClient(iamConn), clients.NewVPCClient(vpcConn, vpcInternalConn), []*grpc.ClientConn{iamConn, vpcConn, vpcInternalConn}, nil
+}
+
+// dialVPCPeer dials a kacho-vpc listener (public :9090 NIC-spec or internal :9091
+// IPAM) for the compute→vpc resource-creation edge. When cfg.VPCMTLS.Enable it
+// presents the kacho-compute-client-tls client-cert via the per-edge cfg.VPCMTLS
+// helper (SEC-M, fail-closed on a bad trio); otherwise it keeps the legacy
+// server-auth-only bool path (dev backward-compat, zero regression). Both listeners
+// share one cfg.VPCMTLS (one cert-trio, one ServerName=vpc.* dial-host — M6 / B-04).
+// vpc-conns are request-path-active (idle=false; keepalive still set for
+// half-open-detection on pauses, KAC-244).
+func dialVPCPeer(cfg config.Config, addr string, legacyTLS bool) (*grpc.ClientConn, error) {
+	if cfg.VPCMTLS.Enable {
+		creds, err := grpcclient.TLSClientTransportCreds(cfg.VPCMTLS)
+		if err != nil {
+			return nil, fmt.Errorf("compute→vpc NIC-spec/IPAM mTLS creds: %w", err)
+		}
+		return dialPeerCreds(addr, creds, false)
+	}
+	return dialPeer(addr, legacyTLS, false)
 }
 
 // peerKeepalive — keepalive-параметры для peer-conn (KAC-244). idle=true для
@@ -327,9 +381,21 @@ func peerKeepalive(idle bool) keepalive.ClientParameters {
 	return grpcclient.KeepaliveParams(idle)
 }
 
-// peerDialOpts — seam-функция (тестируемая): собирает []grpc.DialOption для
-// dialPeer (creds по useTLS + keepalive по idle). Вынесена отдельно, т.к.
-// grpc.NewClient не отдаёт опции назад — тест инспектирует именно этот набор.
+// peerDialOptsCreds — seam-функция (тестируемая): собирает []grpc.DialOption из
+// готовых transport-creds + keepalive по idle. Единая точка для обоих путей:
+// legacy bool-peer (peerDialOpts) и per-edge client-cert mTLS iam-рёбер (SEC-I),
+// которые резолвят creds через corelib grpcclient.TLSClientTransportCreds. grpc.NewClient
+// не отдаёт опции назад — тест инспектирует именно этот набор.
+func peerDialOptsCreds(creds credentials.TransportCredentials, idle bool) []grpc.DialOption {
+	return []grpc.DialOption{
+		grpc.WithTransportCredentials(creds),
+		grpcclient.KeepaliveDialOption(idle),
+	}
+}
+
+// peerDialOpts — legacy server-auth-only seam (bool useTLS) для НЕ-iam пиров (vpc
+// public/internal до их SEC-D/SEC-I-миграции). Делегирует в peerDialOptsCreds,
+// сохраняя bool-контракт существующего dialpeer_test.go.
 func peerDialOpts(useTLS, idle bool) []grpc.DialOption {
 	var creds credentials.TransportCredentials
 	if useTLS {
@@ -337,16 +403,22 @@ func peerDialOpts(useTLS, idle bool) []grpc.DialOption {
 	} else {
 		creds = insecure.NewCredentials()
 	}
-	return []grpc.DialOption{
-		grpc.WithTransportCredentials(creds),
-		grpcclient.KeepaliveDialOption(idle),
-	}
+	return peerDialOptsCreds(creds, idle)
 }
 
-// dialPeer открывает gRPC-conn к peer-сервису с keepalive (KAC-244). idle=true →
-// idle-prone conn (authz/internal): пинги без стрима держат его тёплым.
+// dialPeer открывает gRPC-conn к peer-сервису с keepalive (KAC-244, legacy bool
+// useTLS). idle=true → idle-prone conn (authz/internal): пинги без стрима держат
+// его тёплым.
 func dialPeer(addr string, useTLS, idle bool) (*grpc.ClientConn, error) {
 	return grpc.NewClient(addr, peerDialOpts(useTLS, idle)...)
+}
+
+// dialPeerCreds открывает gRPC-conn к peer-сервису, предъявляя готовые transport-
+// creds (SEC-I per-edge client-cert mTLS). Используется для compute→iam read/authz
+// рёбер: creds резолвятся из cfg.IAMProjectMTLS / cfg.IAMAuthzMTLS через corelib
+// grpcclient (enable=false → insecure, dev backward-compat).
+func dialPeerCreds(addr string, creds credentials.TransportCredentials, idle bool) (*grpc.ClientConn, error) {
+	return grpc.NewClient(addr, peerDialOptsCreds(creds, idle)...)
 }
 
 // buildServices создаёт все repo'ы поверх pool и собирает из них бизнес-сервисы.

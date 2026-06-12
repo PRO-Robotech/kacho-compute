@@ -29,18 +29,24 @@ skipPeerValidation: "false"
 #   server (оба listener'а): KACHO_COMPUTE_PUBLIC_SERVER_MTLS_* /
 #                            KACHO_COMPUTE_INTERNAL_SERVER_MTLS_*
 #   compute→iam (drainer):   KACHO_COMPUTE_IAM_REGISTER_MTLS_*
+#   compute→iam (Project):   KACHO_COMPUTE_IAM_PROJECT_MTLS_*  (SEC-I, :9090)
+#   compute→iam (authz):     KACHO_COMPUTE_IAM_AUTHZ_MTLS_*    (SEC-I, :9091 Check+list-filter)
 #   compute→vpc (NIC/IPAM):  KACHO_COMPUTE_VPC_MTLS_*
-# serverName на dial-стороне = реальный dial-host (∈ server-SAN пира, КРИТ#1).
+# serverName на dial-стороне = реальный dial-host (∈ server-SAN пира, КРИТ#1 / I6).
 mtls:
   enable: false
   serverSecretName: kacho-compute-server-tls   # cert key = kacho-compute (КРИТ#1)
   clientSecretName: kacho-compute-client-tls
   mountPath: /etc/kacho-compute/tls            # <mp>/server|client/{tls.crt,tls.key,ca.crt}
   edges:
-    iamRegister: false   # compute→iam InternalIAMService.Register (drainer)
+    iamRegister: false   # compute→iam InternalIAMService.Register (drainer, :9091)
+    iamProject: false    # compute→iam ProjectService.Get (existence/leaf-owner, :9090) — SEC-I
+    iamAuthz: false      # compute→iam Check + FGA-filtered List (:9091) — SEC-I
     vpc: false           # compute→vpc NIC-spec + IPAM Address
   serverName:
     iamRegister: kacho-iam-internal.kacho.svc.cluster.local
+    iamProject: kacho-iam.kacho.svc.cluster.local            # :9090 ProjectService.Get dial-host
+    iamAuthz: kacho-iam-internal.kacho.svc.cluster.local     # :9091 Check/list-filter dial-host
     vpc: vpc.kacho.svc.cluster.local
 
 # compute is not on the Address.Create write-path; HPA + resources

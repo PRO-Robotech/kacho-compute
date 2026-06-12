@@ -97,6 +97,34 @@ spec:
             - name: KACHO_COMPUTE_IAM_REGISTER_MTLS_SERVERNAME
               value: {{ .Values.mtls.serverName.iamRegister | quote }}
             {{- end }}
+            {{- if .Values.mtls.edges.iamProject }}
+            # SEC-I compute→iam ProjectService.Get (existence/leaf-owner, public
+            # :9090) client-creds — grpcclient.TLSClient. ServerName=kacho-iam (∈ SAN).
+            - name: KACHO_COMPUTE_IAM_PROJECT_MTLS_ENABLE
+              value: "true"
+            - name: KACHO_COMPUTE_IAM_PROJECT_MTLS_CERTFILE
+              value: {{ printf "%s/tls.crt" $cli | quote }}
+            - name: KACHO_COMPUTE_IAM_PROJECT_MTLS_KEYFILE
+              value: {{ printf "%s/tls.key" $cli | quote }}
+            - name: KACHO_COMPUTE_IAM_PROJECT_MTLS_CAFILES
+              value: {{ printf "%s/ca.crt" $cli | quote }}
+            - name: KACHO_COMPUTE_IAM_PROJECT_MTLS_SERVERNAME
+              value: {{ .Values.mtls.serverName.iamProject | quote }}
+            {{- end }}
+            {{- if .Values.mtls.edges.iamAuthz }}
+            # SEC-I compute→iam Check + FGA-filtered List (internal :9091)
+            # client-creds. ServerName=kacho-iam-internal (∈ SAN).
+            - name: KACHO_COMPUTE_IAM_AUTHZ_MTLS_ENABLE
+              value: "true"
+            - name: KACHO_COMPUTE_IAM_AUTHZ_MTLS_CERTFILE
+              value: {{ printf "%s/tls.crt" $cli | quote }}
+            - name: KACHO_COMPUTE_IAM_AUTHZ_MTLS_KEYFILE
+              value: {{ printf "%s/tls.key" $cli | quote }}
+            - name: KACHO_COMPUTE_IAM_AUTHZ_MTLS_CAFILES
+              value: {{ printf "%s/ca.crt" $cli | quote }}
+            - name: KACHO_COMPUTE_IAM_AUTHZ_MTLS_SERVERNAME
+              value: {{ .Values.mtls.serverName.iamAuthz | quote }}
+            {{- end }}
             {{- if .Values.mtls.edges.vpc }}
             # compute→vpc (NIC-spec validation + IPAM Address) client-creds.
             - name: KACHO_COMPUTE_VPC_MTLS_ENABLE

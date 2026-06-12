@@ -125,6 +125,26 @@ type Config struct {
 	// InternalIAMService.RegisterResource/UnregisterResource). FGA-proxy edge (SEC-A).
 	IAMRegisterMTLS grpcclient.TLSClient `envconfig:"IAM_REGISTER_MTLS"`
 
+	// ===== SEC-I: CLIENT mTLS на read/authz рёбрах compute→iam =====
+	//
+	// SEC-D закрыл register-drainer ребро. SEC-I — зеркало того же паттерна на
+	// ОСТАВШИХСЯ read/authz iam-conn'ах, которые до сих пор диалились server-auth-only
+	// bool'ами (IAMTLS / AuthZIAMTLS) БЕЗ client-cert. Под SEC-H (iam
+	// RequireAndVerifyClientCert на обоих listener'ах) такой dial падает на
+	// TLS-handshake — оба ребра ОБЯЗАНЫ предъявлять kacho-compute-client-tls cert
+	// (completeness-инвариант I2). Два отдельных поля, т.к. ServerName различается
+	// per-listener (I6): ProjectService.Get → :9090 (kacho-iam), Check/list-filter →
+	// :9091 (kacho-iam-internal); один общий TLSClient не несёт оба ServerName.
+
+	// IAMProjectMTLS — client-creds для ребра compute→iam ProjectService.Get
+	// (existence + leaf-owner, public :9090). ServerName = kacho-iam.* (SEC-I C-02).
+	IAMProjectMTLS grpcclient.TLSClient `envconfig:"IAM_PROJECT_MTLS"`
+
+	// IAMAuthzMTLS — client-creds для ребра compute→iam per-RPC
+	// InternalIAMService.Check + FGA-filtered List (один conn → AuthZIAMGRPCAddr,
+	// internal :9091). ServerName = kacho-iam-internal.* (SEC-I C-03/C-04).
+	IAMAuthzMTLS grpcclient.TLSClient `envconfig:"IAM_AUTHZ_MTLS"`
+
 	// VPCMTLS — client-creds для ребра compute→vpc (NIC-spec валидация + IPAM Address).
 	VPCMTLS grpcclient.TLSClient `envconfig:"VPC_MTLS"`
 
@@ -141,6 +161,20 @@ type Config struct {
 // без валидного cert-trio → error (fail-closed, без silent insecure-fallback).
 func (c Config) IAMRegisterClientCreds() (grpc.DialOption, error) {
 	return grpcclient.TLSClientCreds(c.IAMRegisterMTLS)
+}
+
+// IAMProjectClientCreds возвращает grpc.DialOption для ребра compute→iam
+// ProjectService.Get (existence/leaf-owner, :9090). Enable=false → insecure (dev);
+// enable=true без валидного cert-trio → error (fail-closed). SEC-I.
+func (c Config) IAMProjectClientCreds() (grpc.DialOption, error) {
+	return grpcclient.TLSClientCreds(c.IAMProjectMTLS)
+}
+
+// IAMAuthzClientCreds возвращает grpc.DialOption для ребра compute→iam
+// InternalIAMService.Check + FGA-filtered List (:9091). Enable=false → insecure
+// (dev); enable=true без валидного cert-trio → error (fail-closed). SEC-I.
+func (c Config) IAMAuthzClientCreds() (grpc.DialOption, error) {
+	return grpcclient.TLSClientCreds(c.IAMAuthzMTLS)
 }
 
 // VPCClientCreds возвращает grpc.DialOption для ребра compute→vpc (NIC/IPAM).
