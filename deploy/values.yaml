@@ -35,6 +35,19 @@ skipPeerValidation: "false"
 # serverName на dial-стороне = реальный dial-host (∈ server-SAN пира, КРИТ#1 / I6).
 mtls:
   enable: false
+  # ─── internal-CA leaf-cert issuance (this chart owns its Certificate, rule #1) ─
+  # client-cert URI-SAN saName MUST match the IAM module-SA seed (SEC-C migration
+  # 0009): kacho-compute → sva(md5("kacho-compute")) holds fga_writer@iam_fgaproxy.
+  issuer:
+    name: kacho-internal-ca
+    kind: ClusterIssuer   # ClusterIssuer (cluster-scoped), NOT namespaced Issuer
+  serverHosts: ["compute"]          # server-cert DNS-SAN dial-host (Service = compute)
+  spiffe:
+    trustDomain: kacho.cloud
+    namespace: kacho
+    saName: kacho-compute
+  leafDuration: 2160h
+  leafRenewBefore: 720h
   serverSecretName: kacho-compute-server-tls   # cert key = kacho-compute (КРИТ#1)
   clientSecretName: kacho-compute-client-tls
   mountPath: /etc/kacho-compute/tls            # <mp>/server|client/{tls.crt,tls.key,ca.crt}
