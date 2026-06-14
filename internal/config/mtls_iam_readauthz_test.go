@@ -98,8 +98,8 @@ func TestMTLS_SEC_I_C07_IAMAuthzFailClosedMissingServerName(t *testing.T) {
 	_, _, caFile := writeTestCert(t)
 	var cfg config.Config
 	require.NoError(t, config.LoadInto(&cfg, map[string]string{
-		"KACHO_COMPUTE_DB_PASSWORD":           "x",
-		"KACHO_COMPUTE_IAM_AUTHZ_MTLS_ENABLE": "true",
+		"KACHO_COMPUTE_DB_PASSWORD":            "x",
+		"KACHO_COMPUTE_IAM_AUTHZ_MTLS_ENABLE":  "true",
 		"KACHO_COMPUTE_IAM_AUTHZ_MTLS_CAFILES": caFile,
 		// no SERVERNAME → fail-closed.
 	}))
