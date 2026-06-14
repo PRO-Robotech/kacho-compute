@@ -72,7 +72,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Enable QEMU emulation
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
         with:
           # binfmt from a mirror — keeps the DockerHub pull budget free.
           image: mirror.gcr.io/tonistiigi/binfmt:latest
