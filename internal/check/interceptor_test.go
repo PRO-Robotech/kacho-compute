@@ -175,8 +175,13 @@ func TestInterceptor_Unary_UnmappedRPC_Denied(t *testing.T) {
 }
 
 func TestInterceptor_Unary_InternalRPC_Bypass(t *testing.T) {
+	// InternalWatchService/Watch is proto-annotated `<exempt>` and is NOT in the
+	// PermissionMap, so methodIsInternal-фолбэк пропускает его без Check. The
+	// relation-gated internal catalog mutations (Internal{DiskType,Zone,Region}
+	// /Create|Update|Delete) ARE mapped post-KAC-31 and would trigger a Check —
+	// see permission_map_internal_test.go.
 	intr, calls := newTestInterceptor(t, func(_ context.Context, _, _, _ string) (bool, error) {
-		t.Fatal("Check не должен вызываться для Internal* RPC")
+		t.Fatal("Check не должен вызываться для exempt Internal* RPC")
 		return false, nil
 	})
 	uIntr := intr.Unary()
@@ -185,7 +190,7 @@ func TestInterceptor_Unary_InternalRPC_Bypass(t *testing.T) {
 		called = true
 		return "ok", nil
 	}
-	info := &grpc.UnaryServerInfo{FullMethod: "/kacho.cloud.compute.v1.InternalZoneService/Create"}
+	info := &grpc.UnaryServerInfo{FullMethod: "/kacho.cloud.compute.v1.InternalWatchService/Watch"}
 	ctx := principalCtx("user", "usr_alice")
 
 	resp, err := uIntr(ctx, struct{}{}, info, handler)

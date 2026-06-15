@@ -152,6 +152,24 @@ func runServe(cfg config.Config) error {
 		handler.TenantStreamInterceptor(false, productionMode),
 	}
 
+	// KAC-31: the internal listener (:9091) now runs the SAME authN+authZ chain as
+	// public — principal-extract → tenant (requireAdmin=true) → authz Check. The
+	// catalog-admin internal RPCs (Internal{DiskType,Zone,Region}Service mutations)
+	// are relation-gated (`system_admin on cluster:cluster_kacho_root`, see
+	// internal/check/permission_map.go); without authzIntr here they would reach
+	// the handler unauthorised. UnaryPrincipalExtract MUST precede authzIntr so the
+	// Check sees the real caller. InternalWatchService/Watch is <exempt> (not in the
+	// map) and is skipped by methodIsInternal — dev-mode (no authz endpoint) keeps
+	// working because authzIntr is only appended below under the same nil-guard.
+	internalUnary := []grpc.UnaryServerInterceptor{
+		grpcsrv.UnaryPrincipalExtract(),
+		handler.TenantUnaryInterceptor(true, productionMode),
+	}
+	internalStream := []grpc.StreamServerInterceptor{
+		grpcsrv.StreamPrincipalExtract(),
+		handler.TenantStreamInterceptor(true, productionMode),
+	}
+
 	var authzConn *grpc.ClientConn
 	if cfg.AuthZIAMGRPCAddr != "" {
 		// authz-conn → iam-internal:9091 — idle-prone (между всплесками authz Check
@@ -184,11 +202,15 @@ func runServe(cfg config.Config) error {
 	})
 	switch {
 	case err == nil && authzIntr != nil:
+		// Same interceptor instance on both listeners (shared Map + Cache).
 		publicUnary = append(publicUnary, authzIntr.Unary())
 		publicStream = append(publicStream, authzIntr.Stream())
+		internalUnary = append(internalUnary, authzIntr.Unary())
+		internalStream = append(internalStream, authzIntr.Stream())
 		logger.Info("authz interceptor enabled",
 			"iam_endpoint", cfg.AuthZIAMGRPCAddr,
 			"breakglass", cfg.AuthZBreakglass,
+			"listeners", "public+internal",
 		)
 	case errors.Is(err, check.ErrIAMConnNotConfigured):
 		// Dev — продолжаем без authz-interceptor'а (scope-guard KAC-108).
@@ -224,8 +246,8 @@ func runServe(cfg config.Config) error {
 	)
 	internalSrv := grpcsrv.NewServer(
 		internalCreds,
-		grpc.ChainUnaryInterceptor(handler.TenantUnaryInterceptor(true, productionMode)),
-		grpc.ChainStreamInterceptor(handler.TenantStreamInterceptor(true, productionMode)),
+		grpc.ChainUnaryInterceptor(internalUnary...),
+		grpc.ChainStreamInterceptor(internalStream...),
 	)
 	registerPublicServices(grpcSrv, svcs, opsRepo, listFilter)
 	registerInternalServices(internalSrv, svcs, pool, cfg.MigrateDSN(), logger, cfg.WatchMaxStreams)
