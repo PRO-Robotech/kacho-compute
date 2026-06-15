@@ -30,6 +30,13 @@ const (
 const (
 	relationViewer = "viewer"
 	relationEditor = "editor"
+
+	// relationSystemAdmin — cluster-scoped admin relation for kacho-only catalog
+	// mutations (Internal{DiskType,Zone,Region}Service Create/Update/Delete).
+	// Mirrors proto annotation `required_relation=system_admin`, object_type=cluster
+	// in kacho-proto/.../internal_catalog_service.proto. Checked on the cluster
+	// singleton (`system_admin on cluster:cluster_kacho_root`).
+	relationSystemAdmin = "system_admin"
 )
 
 // staticClusterCatalog — extractor, всегда возвращающий (cluster, cluster_kacho_root).
@@ -343,6 +350,52 @@ func PermissionMap() authz.RPCMap {
 		},
 		"/kacho.cloud.compute.v1.RegionService/List": {
 			Relation: relationViewer,
+			Extract:  staticClusterCatalog(),
+		},
+
+		// =========================
+		// Internal{DiskType,Zone,Region}Service — kacho-only catalog admin CRUD
+		// (Create/Update/Delete) on the cluster-internal listener (:9091). KAC-31:
+		// the internal listener now runs the same per-RPC FGA Check as public, so
+		// these relation-gated RPCs MUST be mapped (else methodIsInternal-фолбэк
+		// would silently bypass them). Each requires `system_admin on
+		// cluster:cluster_kacho_root` — mirrors proto `required_relation=system_admin`,
+		// object_type=cluster. InternalWatchService/Watch is proto `<exempt>` and is
+		// intentionally NOT mapped (stays exempt via methodIsInternal).
+		"/kacho.cloud.compute.v1.InternalDiskTypeService/Create": {
+			Relation: relationSystemAdmin,
+			Extract:  staticClusterCatalog(),
+		},
+		"/kacho.cloud.compute.v1.InternalDiskTypeService/Update": {
+			Relation: relationSystemAdmin,
+			Extract:  staticClusterCatalog(),
+		},
+		"/kacho.cloud.compute.v1.InternalDiskTypeService/Delete": {
+			Relation: relationSystemAdmin,
+			Extract:  staticClusterCatalog(),
+		},
+		"/kacho.cloud.compute.v1.InternalZoneService/Create": {
+			Relation: relationSystemAdmin,
+			Extract:  staticClusterCatalog(),
+		},
+		"/kacho.cloud.compute.v1.InternalZoneService/Update": {
+			Relation: relationSystemAdmin,
+			Extract:  staticClusterCatalog(),
+		},
+		"/kacho.cloud.compute.v1.InternalZoneService/Delete": {
+			Relation: relationSystemAdmin,
+			Extract:  staticClusterCatalog(),
+		},
+		"/kacho.cloud.compute.v1.InternalRegionService/Create": {
+			Relation: relationSystemAdmin,
+			Extract:  staticClusterCatalog(),
+		},
+		"/kacho.cloud.compute.v1.InternalRegionService/Update": {
+			Relation: relationSystemAdmin,
+			Extract:  staticClusterCatalog(),
+		},
+		"/kacho.cloud.compute.v1.InternalRegionService/Delete": {
+			Relation: relationSystemAdmin,
 			Extract:  staticClusterCatalog(),
 		},
 
