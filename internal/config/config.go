@@ -58,6 +58,13 @@ type Config struct {
 	// VPCInternalTLS — TLS для cross-service gRPC к internal-порту vpc.
 	VPCInternalTLS bool `envconfig:"KACHO_COMPUTE_VPC_INTERNAL_TLS" default:"false"`
 
+	// GeoGRPCAddr — адрес kacho-geo (geo.v1.ZoneService.Get, public :9090) для
+	// валидации Instance.zone_id (эпик kacho-geo, Stage S4). Geography (Region/Zone)
+	// выделена в leaf-сервис kacho-geo; compute больше не валидирует zone_id по
+	// своей таблице `zones`, а зовёт geo. ⚠️ Read-only serving Region/Zone у
+	// compute сохраняется до Stage S7 — это ребро только для consumer-валидации.
+	GeoGRPCAddr string `envconfig:"KACHO_COMPUTE_GEO_GRPC_ADDR" default:"kacho-geo.kacho.svc.cluster.local:9090"`
+
 	// SkipPeerValidation — отключить cross-service existence-check (subnet/SG/address
 	// в VPC, folder в RM) → no-op. Для unit/newman/load-тестов без поднятых peer-сервисов.
 	SkipPeerValidation bool `envconfig:"KACHO_COMPUTE_SKIP_PEER_VALIDATION" default:"false"`
@@ -148,6 +155,12 @@ type Config struct {
 	// VPCMTLS — client-creds для ребра compute→vpc (NIC-spec валидация + IPAM Address).
 	VPCMTLS grpcclient.TLSClient `envconfig:"VPC_MTLS"`
 
+	// GeoMTLS — client-creds для ребра compute→geo (geo.v1.ZoneService.Get,
+	// zone_id-валидация Instance, Stage S4). Enable=false (default) → insecure
+	// (dev backward-compat); enable=true без валидного cert-trio → startup error
+	// (fail-closed, без silent insecure-fallback) — паритет с VPCMTLS/IAM*MTLS.
+	GeoMTLS grpcclient.TLSClient `envconfig:"GEO_MTLS"`
+
 	// PublicServerMTLS — server-creds для публичного listener (:9090, GrpcPort).
 	PublicServerMTLS grpcsrv.TLSServer `envconfig:"PUBLIC_SERVER_MTLS"`
 
@@ -180,6 +193,13 @@ func (c Config) IAMAuthzClientCreds() (grpc.DialOption, error) {
 // VPCClientCreds возвращает grpc.DialOption для ребра compute→vpc (NIC/IPAM).
 func (c Config) VPCClientCreds() (grpc.DialOption, error) {
 	return grpcclient.TLSClientCreds(c.VPCMTLS)
+}
+
+// GeoClientCreds возвращает grpc.DialOption для ребра compute→geo
+// (geo.v1.ZoneService.Get, zone_id-валидация Instance, S4). Enable=false →
+// insecure (dev); enable=true без валидного cert-trio → error (fail-closed).
+func (c Config) GeoClientCreds() (grpc.DialOption, error) {
+	return grpcclient.TLSClientCreds(c.GeoMTLS)
 }
 
 // PublicServerCreds возвращает grpc.ServerOption для публичного listener (:9090).

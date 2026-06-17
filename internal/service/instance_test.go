@@ -333,8 +333,11 @@ func TestInstance_AddNAT_ReservedAddress_SetsReferenceOnly(t *testing.T) {
 }
 
 // TestInstance_Create_ZoneFromSource — zone_id валидируется через ZoneRegistry
-// (compute owns Geography). Неизвестная зона → операция падает с InvalidArgument
-// "Zone ... not found".
+// port. Stage S4: в продакшене этот порт реализует clients.GeoClient (kacho-geo
+// geo.v1.ZoneService.Get), а не локальная таблица `zones`; здесь use-case
+// тестируется port-агностично через mock. Неизвестная зона → операция падает с
+// InvalidArgument "Zone ... not found" (geo NOT_FOUND → InvalidArgument).
+// End-to-end geo-валидация — internal/clients/geo_client_instance_test.go.
 func TestInstance_Create_ZoneFromSource(t *testing.T) {
 	diskRepo := portmock.NewDiskRepo()
 	instanceRepo := portmock.NewInstanceRepo().WithDiskRepo(diskRepo)

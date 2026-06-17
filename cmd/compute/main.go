@@ -100,7 +100,7 @@ func runServe(cfg config.Config) error {
 
 	opsRepo := operations.NewRepo(pool, "public")
 
-	projectClient, vpcClient, closers, err := dialPeers(cfg, logger)
+	projectClient, vpcClient, geoZones, closers, err := dialPeers(cfg, logger)
 	if err != nil {
 		return err
 	}
@@ -110,7 +110,7 @@ func runServe(cfg config.Config) error {
 		}
 	}()
 
-	svcs := buildServices(pool, projectClient, vpcClient, opsRepo, cfg.SkipPeerValidation)
+	svcs := buildServices(pool, projectClient, vpcClient, geoZones, opsRepo, cfg.SkipPeerValidation)
 
 	// SEC-D: register-drainer — applies FGA owner-tuple register/unregister intents
 	// (compute_fga_register_outbox, written transactionally by repo.Insert/Delete)
@@ -325,15 +325,21 @@ func validateAuthMode(cfg config.Config, logger *slog.Logger) (productionMode bo
 }
 
 // dialPeers открывает gRPC-клиенты к peer-сервисам (kacho-iam, vpc — два
-// conn'а: публичный :9090 и internal :9091 для InternalZoneService) либо
-// возвращает no-op-заглушки при KACHO_COMPUTE_SKIP_PEER_VALIDATION=true.
+// conn'а: публичный :9090 и internal :9091; kacho-geo — public :9090 для
+// zone_id-валидации Instance) либо возвращает no-op-заглушки при
+// KACHO_COMPUTE_SKIP_PEER_VALIDATION=true.
 //
 // KAC-106 (E1): project-existence-check переключён с kacho-resource-manager
 // на kacho-iam.ProjectService.Get. KAC-127: legacy RM-fallback удалён.
-func dialPeers(cfg config.Config, logger *slog.Logger) (service.ProjectClient, service.VPCClient, []*grpc.ClientConn, error) {
+//
+// Stage S4 (эпик kacho-geo): zone_id-валидация Instance переключена с
+// in-process ZoneRepoSource (локальная таблица `zones`) на geo.v1.ZoneService.Get
+// через clients.GeoClient. compute по-прежнему ОБСЛУЖИВАЕТ свой Region/Zone
+// (read-only + Internal* admin) до Stage S7 — это ребро лишь для consumer-валидации.
+func dialPeers(cfg config.Config, logger *slog.Logger) (service.ProjectClient, service.VPCClient, service.ZoneRegistry, []*grpc.ClientConn, error) {
 	if cfg.SkipPeerValidation {
 		logger.Warn("KACHO_COMPUTE_SKIP_PEER_VALIDATION=true — cross-service existence-check disabled (dev/test only)")
-		return clients.NoopProjectClient{}, clients.NoopVPCClient{}, nil, nil
+		return clients.NoopProjectClient{}, clients.NoopVPCClient{}, clients.NoopGeoClient{}, nil, nil
 	}
 	// iam (public ProjectService.Get) + vpc conn'ы — активно используются на
 	// request-path каждой мутации → idle=false (трафик есть, idle-пинги не нужны;
@@ -345,11 +351,11 @@ func dialPeers(cfg config.Config, logger *slog.Logger) (service.ProjectClient, s
 	// cfg.IAMTLS bool, который не предъявлял cert (падал бы под SEC-H).
 	iamCreds, err := grpcclient.TLSClientTransportCreds(cfg.IAMProjectMTLS)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("compute→iam ProjectService.Get mTLS creds: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("compute→iam ProjectService.Get mTLS creds: %w", err)
 	}
 	iamConn, err := dialPeerCreds(cfg.IAMGRPCAddr, iamCreds, false)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("dial iam: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("dial iam: %w", err)
 	}
 	// SEC-M: compute→vpc resource-creation edge (Subnet/SecurityGroup/Address.Get
 	// NIC-spec validation on :9090 + one-to-one-NAT IPAM on :9091) presents a
@@ -363,18 +369,39 @@ func dialPeers(cfg config.Config, logger *slog.Logger) (service.ProjectClient, s
 	vpcConn, err := dialVPCPeer(cfg, cfg.VPCGRPCAddr, cfg.VPCTLS)
 	if err != nil {
 		_ = iamConn.Close()
-		return nil, nil, nil, fmt.Errorf("dial vpc: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("dial vpc: %w", err)
 	}
 	vpcInternalConn, err := dialVPCPeer(cfg, cfg.VPCInternalGRPCAddr, cfg.VPCInternalTLS)
 	if err != nil {
 		_ = vpcConn.Close()
 		_ = iamConn.Close()
-		return nil, nil, nil, fmt.Errorf("dial vpc internal: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("dial vpc internal: %w", err)
 	}
-	logger.Info("compute→vpc resource-creation mTLS state",
+	// Stage S4: compute→geo zone_id-валидация Instance (geo.v1.ZoneService.Get,
+	// public :9090). Per-edge client-cert mTLS через cfg.GeoMTLS (enable=false →
+	// insecure dev; enable=true без валидного cert-trio → startup error,
+	// fail-closed) — паритет с compute→vpc/iam рёбрами.
+	geoCreds, err := grpcclient.TLSClientTransportCreds(cfg.GeoMTLS)
+	if err != nil {
+		_ = vpcInternalConn.Close()
+		_ = vpcConn.Close()
+		_ = iamConn.Close()
+		return nil, nil, nil, nil, fmt.Errorf("compute→geo ZoneService.Get mTLS creds: %w", err)
+	}
+	geoConn, err := dialPeerCreds(cfg.GeoGRPCAddr, geoCreds, false)
+	if err != nil {
+		_ = vpcInternalConn.Close()
+		_ = vpcConn.Close()
+		_ = iamConn.Close()
+		return nil, nil, nil, nil, fmt.Errorf("dial geo: %w", err)
+	}
+	logger.Info("compute→vpc/geo resource-validation mTLS state",
 		"nic_spec_ipam_mtls", cfg.VPCMTLS.Enable,
+		"geo_zone_validate_mtls", cfg.GeoMTLS.Enable,
 	)
-	return clients.NewProjectClient(iamConn), clients.NewVPCClient(vpcConn, vpcInternalConn), []*grpc.ClientConn{iamConn, vpcConn, vpcInternalConn}, nil
+	return clients.NewProjectClient(iamConn), clients.NewVPCClient(vpcConn, vpcInternalConn),
+		clients.NewGeoClient(geoConn),
+		[]*grpc.ClientConn{iamConn, vpcConn, vpcInternalConn, geoConn}, nil
 }
 
 // dialVPCPeer dials a kacho-vpc listener (public :9090 NIC-spec or internal :9091
@@ -444,32 +471,38 @@ func dialPeerCreds(addr string, creds credentials.TransportCredentials, idle boo
 }
 
 // buildServices создаёт все repo'ы поверх pool и собирает из них бизнес-сервисы.
-// kacho-compute — owner Geography (Region/Zone): зоны/регионы всегда читаются из
-// локальных таблиц `zones`/`regions`, никакого proxy в kacho-vpc (эпик KAC-15).
-// skipPeer (== cfg.SkipPeerValidation) теперь влияет только на VPC NIC-IPAM/SG
-// existence-check (folder/subnet/sg), но не на geography.
-func buildServices(pool *pgxpool.Pool, projectClient service.ProjectClient, vpcClient service.VPCClient, opsRepo operations.Repo, skipPeer bool) *services {
+//
+// Stage S4 (эпик kacho-geo): existence-check zone_id (Instance/Disk Create, Disk
+// Relocate) переключён с локальной таблицы `zones` (in-process ZoneRepoSource) на
+// kacho-geo через geoZones (service.ZoneRegistry, реализован clients.GeoClient).
+// compute больше не «владеет» зонами для ВАЛИДАЦИИ. Однако compute ПРОДОЛЖАЕТ
+// ОБСЛУЖИВАТЬ свой Region/Zone (read-only ZoneService/RegionService + Internal*
+// admin-CRUD из таблиц `zones`/`regions`) до Stage S7 (breaking removal,
+// координируется последним) — это expand-фаза: compute транзиентно И служит
+// geography, И валидирует zone_id через geo (корректно).
+// skipPeer (== cfg.SkipPeerValidation) влияет на VPC NIC-IPAM/SG existence-check
+// и на geo (NoopGeoClient — любая зона «существует»).
+func buildServices(pool *pgxpool.Pool, projectClient service.ProjectClient, vpcClient service.VPCClient, geoZones service.ZoneRegistry, opsRepo operations.Repo, skipPeer bool) *services {
 	diskRepo := repo.NewDiskRepo(pool)
 	imageRepo := repo.NewImageRepo(pool)
 	snapshotRepo := repo.NewSnapshotRepo(pool)
 	instanceRepo := repo.NewInstanceRepo(pool)
 	diskTypeRepo := repo.NewDiskTypeRepo(pool)
+	// zoneRepo/regionRepo — для read-only serving (ZoneService/RegionService) +
+	// Internal* admin-CRUD; НЕ для zone_id-валидации (та теперь через geoZones).
+	// Сохраняются до Stage S7 (geography serving снимается там).
 	zoneRepo := repo.NewZoneRepo(pool)
 	regionRepo := repo.NewRegionRepo(pool)
 
-	// Источник зон для existence-check zone_id (Disk/Instance Create, Disk Relocate)
-	// — локальная таблица `zones` (compute — owner Geography).
-	zoneRegistry := repo.NewZoneRepoSource(zoneRepo)
-
 	diskTypeSvc := service.NewDiskTypeService(diskTypeRepo)
 	return &services{
-		disk:     service.NewDiskService(diskRepo, imageRepo, snapshotRepo, diskTypeRepo, zoneRegistry, projectClient, opsRepo),
+		disk:     service.NewDiskService(diskRepo, imageRepo, snapshotRepo, diskTypeRepo, geoZones, projectClient, opsRepo),
 		image:    service.NewImageService(imageRepo, diskRepo, snapshotRepo, projectClient, opsRepo),
 		snapshot: service.NewSnapshotService(snapshotRepo, diskRepo, projectClient, opsRepo),
 		diskType: diskTypeSvc,
 		zone:     service.NewZoneService(zoneRepo),
 		region:   service.NewRegionService(regionRepo),
-		instance: service.NewInstanceService(instanceRepo, diskRepo, imageRepo, snapshotRepo, zoneRegistry, projectClient, vpcClient, opsRepo, skipPeer),
+		instance: service.NewInstanceService(instanceRepo, diskRepo, imageRepo, snapshotRepo, geoZones, projectClient, vpcClient, opsRepo, skipPeer),
 	}
 }
 
