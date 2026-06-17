@@ -18,6 +18,9 @@ vpcAddr: "vpc.kacho.svc.cluster.local:9090"
 # vpcInternalAddr — internal-порт kacho-vpc (:9091): InternalZoneService —
 # compute берёт справочник зон из VPC-модуля (см. docs/architecture/07-known-divergences.md §6.1).
 vpcInternalAddr: "vpc.kacho.svc.cluster.local:9091"
+# geoAddr — kacho-geo public :9090 (geo.v1.ZoneService.Get): consumer-валидация
+# Instance.zone_id (kacho-geo epic, Stage S4). config.go cfg.GeoGRPCAddr default-host.
+geoAddr: "kacho-geo.kacho.svc.cluster.local:9090"
 skipPeerValidation: "false"
 
 # ─── SEC-F mTLS — per-edge opt-in (cert-manager internal-CA certs) ─────
@@ -32,6 +35,7 @@ skipPeerValidation: "false"
 #   compute→iam (Project):   KACHO_COMPUTE_IAM_PROJECT_MTLS_*  (SEC-I, :9090)
 #   compute→iam (authz):     KACHO_COMPUTE_IAM_AUTHZ_MTLS_*    (SEC-I, :9091 Check+list-filter)
 #   compute→vpc (NIC/IPAM):  KACHO_COMPUTE_VPC_MTLS_*
+#   compute→geo (zone_id):   KACHO_COMPUTE_GEO_MTLS_*          (kacho-geo epic S4, :9090 ZoneService.Get)
 # serverName на dial-стороне = реальный dial-host (∈ server-SAN пира, КРИТ#1 / I6).
 mtls:
   enable: false
@@ -56,11 +60,13 @@ mtls:
     iamProject: false    # compute→iam ProjectService.Get (existence/leaf-owner, :9090) — SEC-I
     iamAuthz: false      # compute→iam Check + FGA-filtered List (:9091) — SEC-I
     vpc: false           # compute→vpc NIC-spec + IPAM Address
+    geo: false           # compute→geo ZoneService.Get (Instance.zone_id, :9090) — kacho-geo epic S4
   serverName:
     iamRegister: kacho-iam-internal.kacho.svc.cluster.local
     iamProject: kacho-iam.kacho.svc.cluster.local            # :9090 ProjectService.Get dial-host
     iamAuthz: kacho-iam-internal.kacho.svc.cluster.local     # :9091 Check/list-filter dial-host
     vpc: vpc.kacho.svc.cluster.local
+    geo: kacho-geo.kacho.svc.cluster.local                   # :9090 ZoneService.Get dial-host
 
 # compute is not on the Address.Create write-path; HPA + resources
 # present for uniform policy across services. maxReplicas=5 is plenty.

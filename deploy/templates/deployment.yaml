@@ -138,6 +138,22 @@ spec:
             - name: KACHO_COMPUTE_VPC_MTLS_SERVERNAME
               value: {{ .Values.mtls.serverName.vpc | quote }}
             {{- end }}
+            {{- if .Values.mtls.edges.geo }}
+            # kacho-geo epic (Stage S4) — compute→geo (geo.v1.ZoneService.Get,
+            # Instance.zone_id validation, public :9090) client-creds. Reuses the same
+            # kacho-compute-client-tls SPIFFE cert as the vpc/iam edges (one client cert
+            # per consumer, all edges). ServerName=kacho-geo (∈ geo server-cert SAN).
+            - name: KACHO_COMPUTE_GEO_MTLS_ENABLE
+              value: "true"
+            - name: KACHO_COMPUTE_GEO_MTLS_CERTFILE
+              value: {{ printf "%s/tls.crt" $cli | quote }}
+            - name: KACHO_COMPUTE_GEO_MTLS_KEYFILE
+              value: {{ printf "%s/tls.key" $cli | quote }}
+            - name: KACHO_COMPUTE_GEO_MTLS_CAFILES
+              value: {{ printf "%s/ca.crt" $cli | quote }}
+            - name: KACHO_COMPUTE_GEO_MTLS_SERVERNAME
+              value: {{ .Values.mtls.serverName.geo | quote }}
+            {{- end }}
             {{- end }}
             {{- range $k, $v := .Values.env }}
             - name: {{ $k }}
@@ -148,6 +164,10 @@ spec:
               value: "{{ .Values.vpcAddr }}"
             - name: KACHO_COMPUTE_VPC_INTERNAL_GRPC_ADDR
               value: "{{ .Values.vpcInternalAddr }}"
+            # kacho-geo epic (Stage S4): compute→geo dial host (geo.v1.ZoneService.Get,
+            # Instance.zone_id validation). config.go cfg.GeoGRPCAddr — public :9090.
+            - name: KACHO_COMPUTE_GEO_GRPC_ADDR
+              value: "{{ .Values.geoAddr }}"
             - name: KACHO_COMPUTE_SKIP_PEER_VALIDATION
               value: "{{ .Values.skipPeerValidation }}"
             # KAC-127 Phase 4 — FGA-filtered List + per-RPC authz endpoint.
