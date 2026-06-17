@@ -363,38 +363,12 @@ func (r *RegionRepo) CountZones(ctx context.Context, regionID string) (int, erro
 	return n, nil
 }
 
-// ---- ZoneRepoSource: адаптер ZoneRepo → service.ZoneSource ----
-
-// ZoneRepoSource адаптирует локальную таблицу `zones` к service.ZoneSource
-// (а значит и к service.ZoneRegistry). kacho-compute — owner Geography:
-// это единственный источник зон (для ZoneService.Get/List и для existence-check
-// zone_id в Disk/Instance Create). См. workspace CLAUDE.md §«Кросс-доменные ссылки».
-type ZoneRepoSource struct{ repo *ZoneRepo }
-
-// NewZoneRepoSource создаёт ZoneRepoSource поверх ZoneRepo.
-func NewZoneRepoSource(repo *ZoneRepo) *ZoneRepoSource { return &ZoneRepoSource{repo: repo} }
-
-// GetZone возвращает зону по id (service.ErrNotFound при отсутствии).
-func (s *ZoneRepoSource) GetZone(ctx context.Context, zoneID string) (service.ZoneInfo, error) {
-	z, err := s.repo.Get(ctx, zoneID)
-	if err != nil {
-		return service.ZoneInfo{}, err
-	}
-	return service.ZoneInfo{ID: z.ID, RegionID: z.RegionID}, nil
-}
-
-// ListZones возвращает зоны с cursor-пагинацией (как ZoneRepo.List).
-func (s *ZoneRepoSource) ListZones(ctx context.Context, pageSize int64, pageToken string) ([]service.ZoneInfo, string, error) {
-	zones, next, err := s.repo.List(ctx, service.Pagination{PageSize: pageSize, PageToken: pageToken})
-	if err != nil {
-		return nil, "", err
-	}
-	out := make([]service.ZoneInfo, 0, len(zones))
-	for _, z := range zones {
-		out = append(out, service.ZoneInfo{ID: z.ID, RegionID: z.RegionID})
-	}
-	return out, next, nil
-}
+// NOTE (Stage S4, эпик kacho-geo): in-process ZoneRepoSource (адаптер локальной
+// таблицы `zones` → service.ZoneRegistry для existence-check zone_id) удалён —
+// zone_id-валидация Instance/Disk теперь идёт в kacho-geo через
+// clients.GeoClient (cmd/compute wiring). Локальная таблица `zones` остаётся
+// источником read-only serving ZoneService.Get/List + Internal* admin-CRUD
+// (через ZoneRepo напрямую) до Stage S7, где geography serving снимается.
 
 func zoneStatusName(s domain.ZoneStatus) string {
 	switch s {
