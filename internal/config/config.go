@@ -31,8 +31,7 @@ type Config struct {
 	GrpcPort string `envconfig:"KACHO_COMPUTE_GRPC_PORT" default:"9090"`
 
 	// InternalGrpcPort — порт для cluster-internal RPC (InternalWatchService,
-	// InternalDiskTypeService, InternalZoneService). НЕ выставляется через
-	// api-gateway external endpoint.
+	// InternalDiskTypeService). НЕ выставляется через api-gateway external endpoint.
 	InternalGrpcPort string `envconfig:"KACHO_COMPUTE_INTERNAL_PORT" default:"9091"`
 
 	// WatchMaxStreams — максимум одновременных Watch streams (каждый держит
@@ -51,18 +50,17 @@ type Config struct {
 	// VPCTLS — TLS для cross-service gRPC к vpc.
 	VPCTLS bool `envconfig:"KACHO_COMPUTE_VPC_TLS" default:"false"`
 
-	// VPCInternalGRPCAddr — адрес internal-порта kacho-vpc (порт 9091:
-	// InternalZoneService — compute берёт справочник зон из VPC-модуля, локальная
-	// таблица `zones` используется только как fallback при SKIP_PEER_VALIDATION).
+	// VPCInternalGRPCAddr — адрес internal-порта kacho-vpc (порт 9091) для
+	// internal VPC-вызовов (IPAM/address teardown). zone_id-валидация идёт в
+	// kacho-geo (GeoGRPCAddr), не сюда.
 	VPCInternalGRPCAddr string `envconfig:"KACHO_COMPUTE_VPC_INTERNAL_GRPC_ADDR" default:"vpc.kacho.svc.cluster.local:9091"`
 	// VPCInternalTLS — TLS для cross-service gRPC к internal-порту vpc.
 	VPCInternalTLS bool `envconfig:"KACHO_COMPUTE_VPC_INTERNAL_TLS" default:"false"`
 
 	// GeoGRPCAddr — адрес kacho-geo (geo.v1.ZoneService.Get, public :9090) для
-	// валидации Instance.zone_id (эпик kacho-geo, Stage S4). Geography (Region/Zone)
-	// выделена в leaf-сервис kacho-geo; compute больше не валидирует zone_id по
-	// своей таблице `zones`, а зовёт geo. ⚠️ Read-only serving Region/Zone у
-	// compute сохраняется до Stage S7 — это ребро только для consumer-валидации.
+	// валидации Instance/Disk.zone_id (эпик kacho-geo, Stage S4). Geography
+	// (Region/Zone) — leaf-сервис kacho-geo; compute больше не валидирует zone_id по
+	// своей таблице `zones` и не обслуживает Region/Zone (serving снят в Stage S7).
 	GeoGRPCAddr string `envconfig:"KACHO_COMPUTE_GEO_GRPC_ADDR" default:"kacho-geo.kacho.svc.cluster.local:9090"`
 
 	// SkipPeerValidation — отключить cross-service existence-check (subnet/SG/address

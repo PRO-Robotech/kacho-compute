@@ -96,9 +96,9 @@ type InstanceService struct {
 	diskRepo     DiskRepo
 	imageRepo    ImageRepo
 	snapshotRepo SnapshotRepo
-	// zones — existence-check zone_id. Авторитетный источник — kacho-vpc
-	// InternalZoneService (compute зон не владеет); при SKIP_PEER_VALIDATION —
-	// fallback на локальную таблицу `zones`. Wiring — cmd/compute/main.go.
+	// zones — existence-check zone_id. Авторитетный источник — kacho-geo
+	// (geo.v1.ZoneService.Get; Geography принадлежит kacho-geo, Stage S7); при
+	// SKIP_PEER_VALIDATION — no-op. Wiring — cmd/compute/main.go.
 	zones         ZoneRegistry
 	projectClient ProjectClient
 	vpcClient     VPCClient

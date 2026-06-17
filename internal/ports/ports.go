@@ -124,28 +124,6 @@ type DiskTypeRepo interface {
 	Delete(ctx context.Context, id string) error
 }
 
-// ZoneRepo — port-интерфейс репозитория зон (read + admin CRUD).
-type ZoneRepo interface {
-	Get(ctx context.Context, id string) (*domain.Zone, error)
-	List(ctx context.Context, p Pagination) ([]*domain.Zone, string, error)
-	Insert(ctx context.Context, z *domain.Zone) (*domain.Zone, error)
-	Update(ctx context.Context, z *domain.Zone) (*domain.Zone, error)
-	Delete(ctx context.Context, id string) error
-}
-
-// RegionRepo — port-интерфейс репозитория регионов (read + admin CRUD).
-// kacho-compute — owner Geography (Region/Zone); см. workspace CLAUDE.md
-// §«Кросс-доменные ссылки на ресурсы».
-type RegionRepo interface {
-	Get(ctx context.Context, id string) (*domain.Region, error)
-	List(ctx context.Context, p Pagination) ([]*domain.Region, string, error)
-	Insert(ctx context.Context, r *domain.Region) (*domain.Region, error)
-	Update(ctx context.Context, r *domain.Region) (*domain.Region, error)
-	Delete(ctx context.Context, id string) error
-	// CountZones — сколько зон ссылаются на этот регион (для delete-RESTRICT).
-	CountZones(ctx context.Context, regionID string) (int, error)
-}
-
 // ProjectClient — port для проверки существования Project в kacho-iam
 // (ProjectService.Get). Аргумент projectID — id владельца-проекта (в схеме
 // kacho-compute хранится в legacy-именованной колонке `folder_id`).
@@ -160,17 +138,11 @@ type ZoneInfo struct {
 }
 
 // ZoneRegistry — port для existence-check zone_id в Disk.Create / Instance.Create
-// (и Disk.Relocate). Реализуется поверх локальной таблицы `zones` (kacho-compute
-// — owner Geography). GetZone возвращает ErrNotFound, если зона неизвестна.
+// (и Disk.Relocate). Реализуется поверх kacho-geo (geo.v1.ZoneService.Get) через
+// clients.GeoClient — Geography (Region/Zone) принадлежит kacho-geo. GetZone
+// возвращает ErrNotFound, если зона неизвестна.
 type ZoneRegistry interface {
 	GetZone(ctx context.Context, zoneID string) (ZoneInfo, error)
-}
-
-// ZoneSource — port для публичного ZoneService.Get/List. Реализуется поверх
-// локальной таблицы `zones`. GetZone → ErrNotFound при неизвестной зоне.
-type ZoneSource interface {
-	ZoneRegistry
-	ListZones(ctx context.Context, pageSize int64, pageToken string) (zones []ZoneInfo, nextPageToken string, err error)
 }
 
 // VPCAddress — выделенный IP-адрес VPC (результат CreateExternalAddress или

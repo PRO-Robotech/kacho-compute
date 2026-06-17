@@ -75,8 +75,6 @@ type services struct {
 	image    *service.ImageService
 	snapshot *service.SnapshotService
 	diskType *service.DiskTypeService
-	zone     *service.ZoneService
-	region   *service.RegionService
 	instance *service.InstanceService
 }
 
@@ -473,13 +471,10 @@ func dialPeerCreds(addr string, creds credentials.TransportCredentials, idle boo
 // buildServices создаёт все repo'ы поверх pool и собирает из них бизнес-сервисы.
 //
 // Stage S4 (эпик kacho-geo): existence-check zone_id (Instance/Disk Create, Disk
-// Relocate) переключён с локальной таблицы `zones` (in-process ZoneRepoSource) на
-// kacho-geo через geoZones (service.ZoneRegistry, реализован clients.GeoClient).
-// compute больше не «владеет» зонами для ВАЛИДАЦИИ. Однако compute ПРОДОЛЖАЕТ
-// ОБСЛУЖИВАТЬ свой Region/Zone (read-only ZoneService/RegionService + Internal*
-// admin-CRUD из таблиц `zones`/`regions`) до Stage S7 (breaking removal,
-// координируется последним) — это expand-фаза: compute транзиентно И служит
-// geography, И валидирует zone_id через geo (корректно).
+// Relocate) идёт в kacho-geo через geoZones (service.ZoneRegistry, реализован
+// clients.GeoClient). Stage S7 (breaking removal): compute больше НЕ обслуживает
+// Region/Zone — Geography (Region/Zone) принадлежит kacho-geo; локальные таблицы
+// `zones`/`regions` сняты миграцией 0011_drop_geography.
 // skipPeer (== cfg.SkipPeerValidation) влияет на VPC NIC-IPAM/SG existence-check
 // и на geo (NoopGeoClient — любая зона «существует»).
 func buildServices(pool *pgxpool.Pool, projectClient service.ProjectClient, vpcClient service.VPCClient, geoZones service.ZoneRegistry, opsRepo operations.Repo, skipPeer bool) *services {
@@ -488,11 +483,6 @@ func buildServices(pool *pgxpool.Pool, projectClient service.ProjectClient, vpcC
 	snapshotRepo := repo.NewSnapshotRepo(pool)
 	instanceRepo := repo.NewInstanceRepo(pool)
 	diskTypeRepo := repo.NewDiskTypeRepo(pool)
-	// zoneRepo/regionRepo — для read-only serving (ZoneService/RegionService) +
-	// Internal* admin-CRUD; НЕ для zone_id-валидации (та теперь через geoZones).
-	// Сохраняются до Stage S7 (geography serving снимается там).
-	zoneRepo := repo.NewZoneRepo(pool)
-	regionRepo := repo.NewRegionRepo(pool)
 
 	diskTypeSvc := service.NewDiskTypeService(diskTypeRepo)
 	return &services{
@@ -500,8 +490,6 @@ func buildServices(pool *pgxpool.Pool, projectClient service.ProjectClient, vpcC
 		image:    service.NewImageService(imageRepo, diskRepo, snapshotRepo, projectClient, opsRepo),
 		snapshot: service.NewSnapshotService(snapshotRepo, diskRepo, projectClient, opsRepo),
 		diskType: diskTypeSvc,
-		zone:     service.NewZoneService(zoneRepo),
-		region:   service.NewRegionService(regionRepo),
 		instance: service.NewInstanceService(instanceRepo, diskRepo, imageRepo, snapshotRepo, geoZones, projectClient, vpcClient, opsRepo, skipPeer),
 	}
 }
@@ -511,14 +499,13 @@ func buildServices(pool *pgxpool.Pool, projectClient service.ProjectClient, vpcC
 //
 // KAC-127 Phase 4: List handlers получают listFilter (FGA filter); может быть
 // nil — тогда FGA-фильтрация на List отключена (dev/breakglass). Catalog
-// (DiskType/Zone/Region) — public read, FGA bypass not needed (handler skips).
+// (DiskType) — public read, FGA bypass not needed (handler skips). Region/Zone
+// serving снят (Stage S7) — Geography принадлежит kacho-geo.
 func registerPublicServices(srv *grpc.Server, svcs *services, opsRepo operations.Repo, listFilter authzfilter.Filter) {
 	computev1.RegisterDiskServiceServer(srv, handler.NewDiskHandler(svcs.disk, listFilter))
 	computev1.RegisterImageServiceServer(srv, handler.NewImageHandler(svcs.image, listFilter))
 	computev1.RegisterSnapshotServiceServer(srv, handler.NewSnapshotHandler(svcs.snapshot, listFilter))
 	computev1.RegisterDiskTypeServiceServer(srv, handler.NewDiskTypeHandler(svcs.diskType))
-	computev1.RegisterZoneServiceServer(srv, handler.NewZoneHandler(svcs.zone))
-	computev1.RegisterRegionServiceServer(srv, handler.NewRegionHandler(svcs.region))
 	computev1.RegisterInstanceServiceServer(srv, handler.NewInstanceHandler(svcs.instance, listFilter))
 	operationpb.RegisterOperationServiceServer(srv, handler.NewOperationHandler(opsRepo))
 }
@@ -627,8 +614,6 @@ func startRegisterDrainer(ctx context.Context, cfg config.Config, pool *pgxpool.
 func registerInternalServices(srv *grpc.Server, svcs *services, pool *pgxpool.Pool, dsn string, logger *slog.Logger, watchMaxStreams int) {
 	computev1.RegisterInternalWatchServiceServer(srv, handler.NewInternalWatchHandler(pool, dsn, logger.With("component", "internal-watch"), watchMaxStreams))
 	computev1.RegisterInternalDiskTypeServiceServer(srv, handler.NewInternalDiskTypeHandler(svcs.diskType))
-	computev1.RegisterInternalZoneServiceServer(srv, handler.NewInternalZoneHandler(svcs.zone))
-	computev1.RegisterInternalRegionServiceServer(srv, handler.NewInternalRegionHandler(svcs.region))
 }
 
 func runMigrate(cfg config.Config, direction string) {

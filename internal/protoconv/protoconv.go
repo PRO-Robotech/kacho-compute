@@ -103,26 +103,6 @@ func DiskType(t *domain.DiskType) *computev1.DiskType {
 	}
 }
 
-// Zone конвертирует domain.Zone → computev1.Zone.
-func Zone(z *domain.Zone) *computev1.Zone {
-	return &computev1.Zone{
-		Id:        z.ID,
-		RegionId:  z.RegionID,
-		Name:      z.Name,
-		Status:    computev1.Zone_Status(z.Status),
-		CreatedAt: ts(z.CreatedAt),
-	}
-}
-
-// Region конвертирует domain.Region → computev1.Region.
-func Region(r *domain.Region) *computev1.Region {
-	return &computev1.Region{
-		Id:        r.ID,
-		Name:      r.Name,
-		CreatedAt: ts(r.CreatedAt),
-	}
-}
-
 // Instance конвертирует domain.Instance → computev1.Instance.
 func Instance(in *domain.Instance) *computev1.Instance {
 	out := &computev1.Instance{

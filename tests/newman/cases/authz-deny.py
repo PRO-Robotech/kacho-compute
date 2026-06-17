@@ -1,7 +1,7 @@
 """Case-set authz-deny для kacho-compute (KAC-122).
 
 Проверяет default-deny matrix для 6 субъектов на каждом публичном CRUD compute-ресурсов
-+ catalog-read для Zone/Region/DiskType.
++ catalog-read для DiskType (Region/Zone serving снят в Stage S7 — Geography в kacho-geo).
 Источник истины матрицы — `docs/superpowers/specs/2026-05-19-authz-default-deny-matrix-newman-design.md`.
 
 Pre-conditions: `tests/authz-fixtures/setup.sh`. Env-var'ы те же что vpc.
@@ -97,12 +97,11 @@ define_resource_cases("snapshot", "snapshots", create_body_extra={"diskId": "epd
 
 
 # ---------------------------------------------------------------------------
-# Catalog resources (Zone, Region, DiskType) — read-only публично; admin-mutate
+# Catalog resources (DiskType) — read-only публично; admin-mutate
+# Region/Zone serving removed (Stage S7) — Geography is owned by kacho-geo.
 # ---------------------------------------------------------------------------
 
 CATALOG_READ_RESOURCES = [
-    ("zone",     "/compute/v1/zones",     "/compute/v1/zones/ru-central1-a"),
-    ("region",   "/compute/v1/regions",   "/compute/v1/regions/ru-central1"),
     ("disktype", "/compute/v1/diskTypes", "/compute/v1/diskTypes/network-ssd"),
 ]
 

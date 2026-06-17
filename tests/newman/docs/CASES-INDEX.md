@@ -3,8 +3,8 @@
 Каталог тест-кейсов по ресурсам. Источник истины — `cases/*.py`; коллекции в `collections/`
 **генерируются** `scripts/gen.py`. Здесь — обзорный перечень + уникальные паттерны.
 
-Всего: **296 кейсов** в 7 коллекциях (disk 74, instance 82, image 60, snapshot 52, disk-type 10,
-zone 10, operation 8).
+Всего: **286 кейсов** (disk 74, instance 82, image 60, snapshot 52, disk-type 10,
+operation 8). Zone/Region serving removed in Stage S7 (Geography owned by kacho-geo).
 
 ## Уникальные паттерны (generic-блоки в gen.py)
 
@@ -85,10 +85,12 @@ LST-CRUD-OK (≥4 seeded, contains network-ssd/-hdd, zoneIds non-empty), GET-CRU
 GET-CRUD-HDD-OK, GET-NEG-NOTFOUND, GET-CONF-NF-TEXT, LST-BVA-PAGESIZE-{1,ZERO,OVER-1001}, LST-PAGE-TOKEN-GARBAGE,
 CR-NEG-NOT-ALLOWED (read-only).
 
-## Zone (10 кейсов) — `cases/zone.py`
+## Zone / Region — removed (Stage S7)
 
-LST-CRUD-OK (≥3 seeded, contains ru-central1-{a,b,d}, status UP, regionId), GET-CRUD-OK (ru-central1-a), GET-CRUD-ALT-OK,
-GET-NEG-NOTFOUND, GET-CONF-NF-TEXT, LST-BVA-PAGESIZE-{1,ZERO,OVER-1001}, LST-PAGE-ROUNDTRIP, CR-NEG-NOT-ALLOWED.
+Geography (Region/Zone) serving was removed from kacho-compute — it is owned by
+kacho-geo (epic kacho-workspace#82). `cases/zone.py` / `cases/region-zone.py` deleted.
+`Instance/Disk.zone_id` is still validated (via the geo client) — see the
+`zoneId`-bearing cases in `cases/instance.py` / `cases/disk.py`.
 
 ## Operation (8 кейсов) — `cases/operation.py`
 

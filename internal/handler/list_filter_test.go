@@ -14,7 +14,7 @@
 //   - subject from legacy headers
 //   - page-token preserved across filter
 //   - cache reuse on repeated calls (verified at filter level)
-//   - catalog (DiskType/Zone/Region) NOT filtered.
+//   - catalog (DiskType) NOT filtered.
 package handler
 
 import (
@@ -100,7 +100,7 @@ func setupDiskHandler(t *testing.T, filter authzfilter.Filter) (*DiskHandler, *p
 		portmock.NewImageRepo(),
 		portmock.NewSnapshotRepo(),
 		portmock.NewDiskTypeRepo("network-ssd"),
-		portmock.NewZoneRepo(),
+		portmock.NewZoneRegistry(),
 		&portmock.ProjectClient{OK: true},
 		ops,
 	)
@@ -259,8 +259,9 @@ func TestDiskHandler_List_LegacySubjectHeaders(t *testing.T) {
 	require.Equal(t, ids[1], resp.Disks[0].Id)
 }
 
-// SCENARIO 11: catalog handlers (DiskType / Zone / Region) NOT filtered.
+// SCENARIO 11: catalog handler (DiskType) NOT filtered.
 // Catalog handlers don't receive listFilter at all — they're public read.
+// Region/Zone serving removed (Stage S7) — Geography is owned by kacho-geo.
 func TestCatalogHandlers_NoFilter(t *testing.T) {
 	dtSvc := service.NewDiskTypeService(portmock.NewDiskTypeRepo("network-ssd", "network-hdd"))
 	dh := NewDiskTypeHandler(dtSvc)
@@ -275,7 +276,7 @@ func TestCatalogHandlers_NoFilter(t *testing.T) {
 func TestInstanceHandler_List_AllowedSubset(t *testing.T) {
 	cli := &mockAuthCli{allowedByKey: map[string][]string{}}
 	ops := portmock.NewOpsRepo()
-	zoneRegistry := portmock.NewZoneRepo()
+	zoneRegistry := portmock.NewZoneRegistry()
 	svc := service.NewInstanceService(
 		portmock.NewInstanceRepo(),
 		portmock.NewDiskRepo(),

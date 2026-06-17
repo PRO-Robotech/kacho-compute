@@ -21,7 +21,7 @@ func newDiskSvc(t *testing.T, folderOK bool) (*DiskService, *portmock.DiskRepo, 
 	imgRepo := portmock.NewImageRepo()
 	snapRepo := portmock.NewSnapshotRepo()
 	ops := portmock.NewOpsRepo()
-	svc := NewDiskService(diskRepo, imgRepo, snapRepo, portmock.NewDiskTypeRepo(), portmock.NewZoneRepo(),
+	svc := NewDiskService(diskRepo, imgRepo, snapRepo, portmock.NewDiskTypeRepo(), portmock.NewZoneRegistry(),
 		&portmock.ProjectClient{OK: folderOK}, ops)
 	return svc, diskRepo, imgRepo, snapRepo, ops
 }
@@ -174,9 +174,9 @@ func TestDisk_Operations_Always_HasComputePrefix(t *testing.T) {
 	require.Equal(t, "epd", op.ID[:3], "all compute operations must use the epd prefix")
 }
 
-// TestDisk_Create_ZoneFromVPCSource — zone_id валидируется через ZoneRegistry,
-// который в проде — kacho-vpc InternalZoneService (здесь — VPCClient-mock с
-// ограниченным набором зон). Известная VPC-зона → ok; неизвестная → InvalidArgument.
+// TestDisk_Create_ZoneFromRegistry — zone_id валидируется через ZoneRegistry,
+// который в проде — kacho-geo geo.v1.ZoneService.Get (здесь — mock с ограниченным
+// набором зон). Известная зона → ok; неизвестная → InvalidArgument.
 func TestDisk_Create_ZoneFromVPCSource(t *testing.T) {
 	diskRepo := portmock.NewDiskRepo()
 	ops := portmock.NewOpsRepo()

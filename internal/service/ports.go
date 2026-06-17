@@ -31,10 +31,6 @@ type (
 	InstanceRepo = ports.InstanceRepo
 	// DiskTypeRepo — port-интерфейс репозитория типов дисков.
 	DiskTypeRepo = ports.DiskTypeRepo
-	// ZoneRepo — port-интерфейс репозитория зон.
-	ZoneRepo = ports.ZoneRepo
-	// RegionRepo — port-интерфейс репозитория регионов.
-	RegionRepo = ports.RegionRepo
 
 	// ProjectClient — port для проверки существования Folder.
 	ProjectClient = ports.ProjectClient
@@ -48,6 +44,4 @@ type (
 	ZoneInfo = ports.ZoneInfo
 	// ZoneRegistry — port existence-check zone_id (Disk/Instance Create, Disk Relocate).
 	ZoneRegistry = ports.ZoneRegistry
-	// ZoneSource — port для публичного ZoneService.Get/List.
-	ZoneSource = ports.ZoneSource
 )
