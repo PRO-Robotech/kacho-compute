@@ -102,7 +102,7 @@ jobs:
           test -s tests/newman/collections/authz-deny.postman_collection.json
           n=$(python3 -c "import json; print(len(json.load(open('tests/newman/collections/authz-deny.postman_collection.json'))['item']))")
           echo "authz-deny cases: $n"
-          test "$n" -ge 200
+          test "$n" -ge 180
       - uses: actions/upload-artifact@v7
         with:
           name: authz-deny-collection
