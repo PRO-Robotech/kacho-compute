@@ -13,16 +13,15 @@ const (
 	objectTypeSnapshot = "compute_snapshot"
 	objectTypeInstance = "compute_instance"
 
-	// DiskType / Region / Zone — глобальные read-only справочники. Доступ —
+	// DiskType — глобальный read-only справочник. Доступ —
 	// "viewer on project:<project_id>" недоступен (request не несёт project_id).
-	// Решение: справочники видимы всем authenticated principal'ам на
+	// Решение: справочник видим всем authenticated principal'ам на
 	// cluster singleton (паттерн `viewer on cluster:cluster_kacho_root`).
 	// KAC-178 §3: switched from "system:catalog" → "cluster:cluster_kacho_root"
 	// — FGA model имеет `type cluster` с `viewer: [user, user:*] or ...`,
-	// type `system` не определён → старая семантика всегда deny. Mirror
-	// api-gateway permission catalog (compute.zones/regions Get/List scope
-	// на cluster). cluster_kacho_root — singleton (kacho-iam ClusterSingletonID),
-	// один на весь deploy.
+	// type `system` не определён → старая семантика всегда deny. cluster_kacho_root
+	// — singleton (kacho-iam ClusterSingletonID), один на весь deploy. Region/Zone
+	// serving снят (Stage S7) — Geography принадлежит kacho-geo.
 	objectTypeCluster      = "cluster"
 	clusterSingletonObject = "cluster_kacho_root"
 )
@@ -32,7 +31,7 @@ const (
 	relationEditor = "editor"
 
 	// relationSystemAdmin — cluster-scoped admin relation for kacho-only catalog
-	// mutations (Internal{DiskType,Zone,Region}Service Create/Update/Delete).
+	// mutations (InternalDiskTypeService Create/Update/Delete).
 	// Mirrors proto annotation `required_relation=system_admin`, object_type=cluster
 	// in kacho-proto/.../internal_catalog_service.proto. Checked on the cluster
 	// singleton (`system_admin on cluster:cluster_kacho_root`).
@@ -40,7 +39,7 @@ const (
 )
 
 // staticClusterCatalog — extractor, всегда возвращающий (cluster, cluster_kacho_root).
-// Используется для DiskType/Zone/Region read-only RPC. KAC-178 §3 — заменил
+// Используется для DiskType read-only RPC. KAC-178 §3 — заменил
 // staticClusterCatalog (`system:catalog`).
 func staticClusterCatalog() authz.ObjectExtractor {
 	return func(req any) (string, string, error) {
@@ -54,7 +53,7 @@ func staticClusterCatalog() authz.ObjectExtractor {
 //   - Create / List         — на parent scope `project:<project_id>`
 //   - Get/Update/Delete/<verb> — на самом ресурсе `<resource_type>:<resource_id>`
 //   - OperationService.Get  — viewer на `compute_operation:<id>`
-//   - DiskType/Zone/Region Get/List — viewer на `system:catalog`
+//   - DiskType Get/List — viewer на `system:catalog`
 //   - SetAccessBindings/ListAccessBindings (kacho-iam-on-resource ACL) —
 //     viewer/editor на самом ресурсе.
 //
@@ -326,7 +325,8 @@ func PermissionMap() authz.RPCMap {
 		},
 
 		// =========================
-		// DiskType / Zone / Region — read-only catalog (viewer on system:catalog)
+		// DiskType — read-only catalog (viewer on system:catalog). Region/Zone
+		// serving removed (Stage S7) — Geography is owned by kacho-geo.
 		// =========================
 		"/kacho.cloud.compute.v1.DiskTypeService/Get": {
 			Relation: relationViewer,
@@ -336,25 +336,9 @@ func PermissionMap() authz.RPCMap {
 			Relation: relationViewer,
 			Extract:  staticClusterCatalog(),
 		},
-		"/kacho.cloud.compute.v1.ZoneService/Get": {
-			Relation: relationViewer,
-			Extract:  staticClusterCatalog(),
-		},
-		"/kacho.cloud.compute.v1.ZoneService/List": {
-			Relation: relationViewer,
-			Extract:  staticClusterCatalog(),
-		},
-		"/kacho.cloud.compute.v1.RegionService/Get": {
-			Relation: relationViewer,
-			Extract:  staticClusterCatalog(),
-		},
-		"/kacho.cloud.compute.v1.RegionService/List": {
-			Relation: relationViewer,
-			Extract:  staticClusterCatalog(),
-		},
 
 		// =========================
-		// Internal{DiskType,Zone,Region}Service — kacho-only catalog admin CRUD
+		// InternalDiskTypeService — kacho-only catalog admin CRUD
 		// (Create/Update/Delete) on the cluster-internal listener (:9091). KAC-31:
 		// the internal listener now runs the same per-RPC FGA Check as public, so
 		// these relation-gated RPCs MUST be mapped (else methodIsInternal-фолбэк
@@ -371,30 +355,6 @@ func PermissionMap() authz.RPCMap {
 			Extract:  staticClusterCatalog(),
 		},
 		"/kacho.cloud.compute.v1.InternalDiskTypeService/Delete": {
-			Relation: relationSystemAdmin,
-			Extract:  staticClusterCatalog(),
-		},
-		"/kacho.cloud.compute.v1.InternalZoneService/Create": {
-			Relation: relationSystemAdmin,
-			Extract:  staticClusterCatalog(),
-		},
-		"/kacho.cloud.compute.v1.InternalZoneService/Update": {
-			Relation: relationSystemAdmin,
-			Extract:  staticClusterCatalog(),
-		},
-		"/kacho.cloud.compute.v1.InternalZoneService/Delete": {
-			Relation: relationSystemAdmin,
-			Extract:  staticClusterCatalog(),
-		},
-		"/kacho.cloud.compute.v1.InternalRegionService/Create": {
-			Relation: relationSystemAdmin,
-			Extract:  staticClusterCatalog(),
-		},
-		"/kacho.cloud.compute.v1.InternalRegionService/Update": {
-			Relation: relationSystemAdmin,
-			Extract:  staticClusterCatalog(),
-		},
-		"/kacho.cloud.compute.v1.InternalRegionService/Delete": {
 			Relation: relationSystemAdmin,
 			Extract:  staticClusterCatalog(),
 		},

@@ -41,10 +41,10 @@ func mapRepoErr(err error) error {
 }
 
 // mapZoneRefErr транслирует ошибку existence-check zone_id (через ZoneRegistry —
-// kacho-vpc InternalZoneService либо локальная таблица `zones`) в gRPC-status,
-// сохраняя текущий контракт compute: неизвестная зона → InvalidArgument
+// kacho-geo geo.v1.ZoneService.Get; Geography принадлежит kacho-geo, Stage S7) в
+// gRPC-status, сохраняя текущий контракт compute: неизвестная зона → InvalidArgument
 // "Zone <id> not found" (паритет с предыдущей логикой; CLAUDE.md §4.1, §6).
-// Транспортная ошибка к kacho-vpc (Unavailable) пробрасывается как
+// Транспортная ошибка к kacho-geo (Unavailable) пробрасывается как
 // Unavailable "zone check: <err>" (зеркалит folder/subnet-check).
 func mapZoneRefErr(err error, zoneID string) error {
 	if err == nil {

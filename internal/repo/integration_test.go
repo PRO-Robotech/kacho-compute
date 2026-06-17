@@ -209,6 +209,10 @@ func TestIntegration_CatalogRepo(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 
+	// Region/Zone serving (ZoneRepo/RegionRepo) removed (Stage S7) — Geography is
+	// owned by kacho-geo; the local zones/regions tables are dropped by migration
+	// 0011_drop_geography (see TestIntegration_DropGeographyMigration). DiskType
+	// stays compute-owned.
 	dtr := repo.NewDiskTypeRepo(pool)
 	list, _, err := dtr.List(ctx, service.Pagination{})
 	require.NoError(t, err)
@@ -216,18 +220,4 @@ func TestIntegration_CatalogRepo(t *testing.T) {
 	ssd, err := dtr.Get(ctx, "network-ssd")
 	require.NoError(t, err)
 	require.NotEmpty(t, ssd.ZoneIDs)
-
-	zr := repo.NewZoneRepo(pool)
-	zones, _, err := zr.List(ctx, service.Pagination{})
-	require.NoError(t, err)
-	require.Len(t, zones, 3)
-	z, err := zr.Get(ctx, "ru-central1-a")
-	require.NoError(t, err)
-	require.Equal(t, domain.ZoneStatusUp, z.Status)
-
-	// admin CRUD.
-	created, err := zr.Insert(ctx, &domain.Zone{ID: "ru-central1-x", RegionID: "ru-central1", Status: domain.ZoneStatusUp})
-	require.NoError(t, err)
-	require.Equal(t, "ru-central1-x", created.ID)
-	require.NoError(t, zr.Delete(ctx, "ru-central1-x"))
 }

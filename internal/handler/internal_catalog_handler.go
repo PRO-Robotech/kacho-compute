@@ -1,7 +1,7 @@
-// Package handler — internal_catalog_handler.go: admin-CRUD над справочниками
-// DiskType / Zone (kacho-only RPC, нет в verbatim YC). Регистрируется ТОЛЬКО на
-// internal listener (:9091), проброшен через api-gateway internal mux. На
-// external TLS endpoint не доступен — workspace CLAUDE.md §запрет 6.
+// Package handler — internal_catalog_handler.go: admin-CRUD над справочником
+// DiskType (kacho-only RPC). Регистрируется ТОЛЬКО на internal listener (:9091),
+// проброшен через api-gateway internal mux. На external TLS endpoint не доступен —
+// workspace CLAUDE.md §запрет 6.
 package handler
 
 import (
@@ -9,7 +9,6 @@ import (
 
 	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
 
-	"github.com/PRO-Robotech/kacho-compute/internal/domain"
 	"github.com/PRO-Robotech/kacho-compute/internal/protoconv"
 	svc "github.com/PRO-Robotech/kacho-compute/internal/service"
 )
@@ -49,78 +48,4 @@ func (h *InternalDiskTypeHandler) Delete(ctx context.Context, req *computev1.Del
 		return nil, internalMapErr("delete disk type", err)
 	}
 	return &computev1.DeleteDiskTypeResponse{}, nil
-}
-
-// InternalZoneHandler реализует computev1.InternalZoneServiceServer.
-type InternalZoneHandler struct {
-	computev1.UnimplementedInternalZoneServiceServer
-	svc *svc.ZoneService
-}
-
-// NewInternalZoneHandler создаёт InternalZoneHandler.
-func NewInternalZoneHandler(s *svc.ZoneService) *InternalZoneHandler {
-	return &InternalZoneHandler{svc: s}
-}
-
-// Create создаёт зону.
-func (h *InternalZoneHandler) Create(ctx context.Context, req *computev1.CreateZoneRequest) (*computev1.Zone, error) {
-	z, err := h.svc.Create(ctx, req.Id, req.RegionId, req.Name, domain.ZoneStatus(req.Status))
-	if err != nil {
-		return nil, internalMapErr("create zone", err)
-	}
-	return protoconv.Zone(z), nil
-}
-
-// Update обновляет зону.
-func (h *InternalZoneHandler) Update(ctx context.Context, req *computev1.UpdateZoneRequest) (*computev1.Zone, error) {
-	z, err := h.svc.Update(ctx, req.ZoneId, req.RegionId, req.Name, domain.ZoneStatus(req.Status))
-	if err != nil {
-		return nil, internalMapErr("update zone", err)
-	}
-	return protoconv.Zone(z), nil
-}
-
-// Delete удаляет зону.
-func (h *InternalZoneHandler) Delete(ctx context.Context, req *computev1.DeleteZoneRequest) (*computev1.DeleteZoneResponse, error) {
-	if err := h.svc.Delete(ctx, req.ZoneId); err != nil {
-		return nil, internalMapErr("delete zone", err)
-	}
-	return &computev1.DeleteZoneResponse{}, nil
-}
-
-// InternalRegionHandler реализует computev1.InternalRegionServiceServer.
-type InternalRegionHandler struct {
-	computev1.UnimplementedInternalRegionServiceServer
-	svc *svc.RegionService
-}
-
-// NewInternalRegionHandler создаёт InternalRegionHandler.
-func NewInternalRegionHandler(s *svc.RegionService) *InternalRegionHandler {
-	return &InternalRegionHandler{svc: s}
-}
-
-// Create создаёт регион.
-func (h *InternalRegionHandler) Create(ctx context.Context, req *computev1.CreateRegionRequest) (*computev1.Region, error) {
-	r, err := h.svc.Create(ctx, req.Id, req.Name)
-	if err != nil {
-		return nil, internalMapErr("create region", err)
-	}
-	return protoconv.Region(r), nil
-}
-
-// Update обновляет регион.
-func (h *InternalRegionHandler) Update(ctx context.Context, req *computev1.UpdateRegionRequest) (*computev1.Region, error) {
-	r, err := h.svc.Update(ctx, req.RegionId, req.Name)
-	if err != nil {
-		return nil, internalMapErr("update region", err)
-	}
-	return protoconv.Region(r), nil
-}
-
-// Delete удаляет регион.
-func (h *InternalRegionHandler) Delete(ctx context.Context, req *computev1.DeleteRegionRequest) (*computev1.DeleteRegionResponse, error) {
-	if err := h.svc.Delete(ctx, req.RegionId); err != nil {
-		return nil, internalMapErr("delete region", err)
-	}
-	return &computev1.DeleteRegionResponse{}, nil
 }

@@ -17,16 +17,12 @@ import (
 // listener'е :9091 — после KAC-31 он гоняет тот же authzIntr, что и public,
 // поэтому каждая catalog-мутация должна резолвиться в Check, а не пропускаться
 // methodIsInternal-фолбэком.
+// Internal{Zone,Region}Service serving removed (Stage S7) — Geography is owned by
+// kacho-geo; only InternalDiskTypeService remains compute-owned.
 var catalogAdminMutations = []string{
 	"/kacho.cloud.compute.v1.InternalDiskTypeService/Create",
 	"/kacho.cloud.compute.v1.InternalDiskTypeService/Update",
 	"/kacho.cloud.compute.v1.InternalDiskTypeService/Delete",
-	"/kacho.cloud.compute.v1.InternalZoneService/Create",
-	"/kacho.cloud.compute.v1.InternalZoneService/Update",
-	"/kacho.cloud.compute.v1.InternalZoneService/Delete",
-	"/kacho.cloud.compute.v1.InternalRegionService/Create",
-	"/kacho.cloud.compute.v1.InternalRegionService/Update",
-	"/kacho.cloud.compute.v1.InternalRegionService/Delete",
 }
 
 // TestPermissionMap_CatalogAdmin_SystemAdminOnCluster — каждая catalog-admin
@@ -60,7 +56,7 @@ func TestPermissionMap_CatalogAdmin_EnforcedByInterceptor(t *testing.T) {
 	uIntr := intr.Unary()
 	called := false
 	handler := func(ctx context.Context, req any) (any, error) { called = true; return "ok", nil }
-	info := &grpc.UnaryServerInfo{FullMethod: "/kacho.cloud.compute.v1.InternalZoneService/Create"}
+	info := &grpc.UnaryServerInfo{FullMethod: "/kacho.cloud.compute.v1.InternalDiskTypeService/Create"}
 	ctx := principalCtx("user", "usr_admin")
 
 	resp, err := uIntr(ctx, struct{}{}, info, handler)

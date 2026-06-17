@@ -627,198 +627,37 @@ func (r *DiskTypeRepo) Delete(_ context.Context, id string) error {
 	return nil
 }
 
-// ---- ZoneRepo ----
+// ---- ZoneRegistry ----
 
-// ZoneRepo — in-memory ZoneRepo.
-type ZoneRepo struct {
+// ZoneRegistry — in-memory ports.ZoneRegistry (zone_id existence-check для
+// Disk/Instance Create + Disk Relocate). В проде реализуется clients.GeoClient
+// (geo.v1.ZoneService.Get) — Geography принадлежит kacho-geo (Stage S7).
+type ZoneRegistry struct {
 	mu   sync.Mutex
-	data map[string]*domain.Zone
+	data map[string]string // zoneID → regionID
 }
 
-// NewZoneRepo создаёт ZoneRepo с seed-зонами (ru-central1-{a,b,d} по умолчанию).
-func NewZoneRepo(ids ...string) *ZoneRepo {
-	r := &ZoneRepo{data: make(map[string]*domain.Zone)}
+// NewZoneRegistry создаёт ZoneRegistry с seed-зонами (ru-central1-{a,b,d} по умолчанию).
+func NewZoneRegistry(ids ...string) *ZoneRegistry {
+	r := &ZoneRegistry{data: make(map[string]string)}
 	if len(ids) == 0 {
 		ids = []string{"ru-central1-a", "ru-central1-b", "ru-central1-d"}
 	}
 	for _, id := range ids {
-		r.data[id] = &domain.Zone{ID: id, RegionID: "ru-central1", Status: domain.ZoneStatusUp}
+		r.data[id] = "ru-central1"
 	}
 	return r
-}
-
-// Get возвращает зону по id.
-func (r *ZoneRepo) Get(_ context.Context, id string) (*domain.Zone, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	z, ok := r.data[id]
-	if !ok {
-		return nil, ports.ErrNotFound
-	}
-	return z, nil
-}
-
-// List возвращает все зоны.
-func (r *ZoneRepo) List(_ context.Context, _ ports.Pagination) ([]*domain.Zone, string, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	var out []*domain.Zone
-	for _, z := range r.data {
-		out = append(out, z)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out, "", nil
-}
-
-// Insert вставляет зону.
-func (r *ZoneRepo) Insert(_ context.Context, z *domain.Zone) (*domain.Zone, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, ok := r.data[z.ID]; ok {
-		return nil, ports.ErrAlreadyExists
-	}
-	r.data[z.ID] = z
-	return z, nil
-}
-
-// Update обновляет зону.
-func (r *ZoneRepo) Update(_ context.Context, z *domain.Zone) (*domain.Zone, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, ok := r.data[z.ID]; !ok {
-		return nil, ports.ErrNotFound
-	}
-	r.data[z.ID] = z
-	return z, nil
-}
-
-// Delete удаляет зону.
-func (r *ZoneRepo) Delete(_ context.Context, id string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, ok := r.data[id]; !ok {
-		return ports.ErrNotFound
-	}
-	delete(r.data, id)
-	return nil
 }
 
 // GetZone — реализация ports.ZoneRegistry: зона по id → ZoneInfo (ErrNotFound при отсутствии).
-func (r *ZoneRepo) GetZone(_ context.Context, zoneID string) (ports.ZoneInfo, error) {
+func (r *ZoneRegistry) GetZone(_ context.Context, zoneID string) (ports.ZoneInfo, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	z, ok := r.data[zoneID]
+	region, ok := r.data[zoneID]
 	if !ok {
 		return ports.ZoneInfo{}, ports.ErrNotFound
 	}
-	return ports.ZoneInfo{ID: z.ID, RegionID: z.RegionID}, nil
-}
-
-// ListZones — реализация ports.ZoneSource: все зоны как []ZoneInfo (без пагинации в mock'е).
-func (r *ZoneRepo) ListZones(_ context.Context, _ int64, _ string) ([]ports.ZoneInfo, string, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	out := make([]ports.ZoneInfo, 0, len(r.data))
-	for _, z := range r.data {
-		out = append(out, ports.ZoneInfo{ID: z.ID, RegionID: z.RegionID})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out, "", nil
-}
-
-// ---- RegionRepo ----
-
-// RegionRepo — in-memory RegionRepo. zoneCount — сколько зон ссылаются на регион
-// (для проверки delete-RESTRICT в RegionService.Delete).
-type RegionRepo struct {
-	mu        sync.Mutex
-	data      map[string]*domain.Region
-	zoneCount map[string]int
-}
-
-// NewRegionRepo создаёт RegionRepo с seed-регионом (ru-central1 по умолчанию).
-func NewRegionRepo(ids ...string) *RegionRepo {
-	r := &RegionRepo{data: make(map[string]*domain.Region), zoneCount: make(map[string]int)}
-	if len(ids) == 0 {
-		ids = []string{"ru-central1"}
-	}
-	for _, id := range ids {
-		r.data[id] = &domain.Region{ID: id, Name: id}
-	}
-	return r
-}
-
-// SetZoneCount задаёт число зон региона (тест-helper).
-func (r *RegionRepo) SetZoneCount(regionID string, n int) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.zoneCount[regionID] = n
-}
-
-// Get возвращает регион по id.
-func (r *RegionRepo) Get(_ context.Context, id string) (*domain.Region, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	rg, ok := r.data[id]
-	if !ok {
-		return nil, ports.ErrNotFound
-	}
-	return rg, nil
-}
-
-// List возвращает все регионы.
-func (r *RegionRepo) List(_ context.Context, _ ports.Pagination) ([]*domain.Region, string, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	var out []*domain.Region
-	for _, rg := range r.data {
-		out = append(out, rg)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out, "", nil
-}
-
-// Insert вставляет регион.
-func (r *RegionRepo) Insert(_ context.Context, rg *domain.Region) (*domain.Region, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, ok := r.data[rg.ID]; ok {
-		return nil, ports.ErrAlreadyExists
-	}
-	r.data[rg.ID] = rg
-	return rg, nil
-}
-
-// Update обновляет регион.
-func (r *RegionRepo) Update(_ context.Context, rg *domain.Region) (*domain.Region, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, ok := r.data[rg.ID]; !ok {
-		return nil, ports.ErrNotFound
-	}
-	r.data[rg.ID] = rg
-	return rg, nil
-}
-
-// Delete удаляет регион (ErrFailedPrecondition если есть зоны).
-func (r *RegionRepo) Delete(_ context.Context, id string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, ok := r.data[id]; !ok {
-		return ports.ErrNotFound
-	}
-	if r.zoneCount[id] > 0 {
-		return ports.ErrFailedPrecondition
-	}
-	delete(r.data, id)
-	return nil
-}
-
-// CountZones — число зон региона.
-func (r *RegionRepo) CountZones(_ context.Context, regionID string) (int, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.zoneCount[regionID], nil
+	return ports.ZoneInfo{ID: zoneID, RegionID: region}, nil
 }
 
 // ---- ProjectClient / VPCClient ----
@@ -875,17 +714,6 @@ func (c *VPCClient) GetZone(_ context.Context, zoneID string) (ports.ZoneInfo, e
 		return ports.ZoneInfo{}, ports.ErrNotFound
 	}
 	return ports.ZoneInfo{ID: zoneID, RegionID: region}, nil
-}
-
-// ListZones — реализация ports.ZoneSource: все зоны как []ZoneInfo (без пагинации в mock'е).
-func (c *VPCClient) ListZones(_ context.Context, _ int64, _ string) ([]ports.ZoneInfo, string, error) {
-	z := c.zonesOrDefault()
-	out := make([]ports.ZoneInfo, 0, len(z))
-	for id, region := range z {
-		out = append(out, ports.ZoneInfo{ID: id, RegionID: region})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out, "", nil
 }
 
 // CreateExternalAddress возвращает «выделенный» external IP + новый id.
@@ -1109,10 +937,8 @@ var (
 	_ ports.SnapshotRepo  = (*SnapshotRepo)(nil)
 	_ ports.InstanceRepo  = (*InstanceRepo)(nil)
 	_ ports.DiskTypeRepo  = (*DiskTypeRepo)(nil)
-	_ ports.ZoneRepo      = (*ZoneRepo)(nil)
-	_ ports.ZoneSource    = (*ZoneRepo)(nil)
+	_ ports.ZoneRegistry  = (*ZoneRegistry)(nil)
 	_ ports.ZoneRegistry  = (*VPCClient)(nil)
-	_ ports.RegionRepo    = (*RegionRepo)(nil)
 	_ ports.ProjectClient = (*ProjectClient)(nil)
 	_ ports.VPCClient     = (*VPCClient)(nil)
 	_ operations.Repo     = (*OpsRepo)(nil)

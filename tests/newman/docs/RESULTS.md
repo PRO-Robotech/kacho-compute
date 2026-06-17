@@ -17,9 +17,9 @@
 | image | 60 | 149 | — | — | generated, not run |
 | snapshot | 52 | 157 | — | — | generated, not run |
 | disk-type | 10 | 10 | — | — | generated, not run |
-| zone | 10 | 11 | — | — | generated, not run |
+| ~~zone~~ | — | — | — | — | removed (Stage S7 — Geography owned by kacho-geo) |
 | operation | 8 | 18 | — | — | generated, not run |
-| **Итого** | **296** | **975** | — | — | — |
+| **Итого** | **286** | **964** | — | — | — |
 
 \* assertions считаются при прогоне (`run.sh` → `out/<resource>.json`).
 

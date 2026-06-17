@@ -22,7 +22,7 @@ func newInstanceSvc(t *testing.T, folderOK bool) (*InstanceService, *portmock.In
 	snapRepo := portmock.NewSnapshotRepo()
 	instanceRepo := portmock.NewInstanceRepo().WithDiskRepo(diskRepo)
 	ops := portmock.NewOpsRepo()
-	svc := NewInstanceService(instanceRepo, diskRepo, imgRepo, snapRepo, portmock.NewZoneRepo(),
+	svc := NewInstanceService(instanceRepo, diskRepo, imgRepo, snapRepo, portmock.NewZoneRegistry(),
 		&portmock.ProjectClient{OK: folderOK}, &portmock.VPCClient{AddrFound: true}, ops, false)
 	return svc, instanceRepo, diskRepo, imgRepo, ops
 }
@@ -264,7 +264,7 @@ func newInstanceSvcVPC(t *testing.T, vpc *portmock.VPCClient) (*InstanceService,
 	diskRepo := portmock.NewDiskRepo()
 	instanceRepo := portmock.NewInstanceRepo().WithDiskRepo(diskRepo)
 	ops := portmock.NewOpsRepo()
-	svc := NewInstanceService(instanceRepo, diskRepo, portmock.NewImageRepo(), portmock.NewSnapshotRepo(), portmock.NewZoneRepo(),
+	svc := NewInstanceService(instanceRepo, diskRepo, portmock.NewImageRepo(), portmock.NewSnapshotRepo(), portmock.NewZoneRegistry(),
 		&portmock.ProjectClient{OK: true}, vpc, ops, false)
 	return svc, instanceRepo, diskRepo, ops
 }

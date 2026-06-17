@@ -23,7 +23,7 @@ func TestDiskHandler_CRUD(t *testing.T) {
 	diskRepo := portmock.NewDiskRepo()
 	ops := portmock.NewOpsRepo()
 	svc := service.NewDiskService(diskRepo, portmock.NewImageRepo(), portmock.NewSnapshotRepo(),
-		portmock.NewDiskTypeRepo(), portmock.NewZoneRepo(), &portmock.ProjectClient{OK: true}, ops)
+		portmock.NewDiskTypeRepo(), portmock.NewZoneRegistry(), &portmock.ProjectClient{OK: true}, ops)
 	h := NewDiskHandler(svc, nil)
 	ctx := context.Background()
 
@@ -74,12 +74,10 @@ func TestDiskHandler_CRUD(t *testing.T) {
 }
 
 func TestCatalogHandler_ReadOnly(t *testing.T) {
+	// Region/Zone serving removed (Stage S7) — Geography is owned by kacho-geo.
+	// DiskType remains a compute-owned read-only catalog.
 	dtSvc := service.NewDiskTypeService(portmock.NewDiskTypeRepo("network-ssd"))
-	zr := portmock.NewZoneRepo()
-	// kacho-compute — owner Geography: ZoneService читает из локальной таблицы.
-	zSvc := service.NewZoneService(zr)
 	dh := NewDiskTypeHandler(dtSvc)
-	zh := NewZoneHandler(zSvc)
 	ctx := context.Background()
 
 	dt, err := dh.Get(ctx, &computev1.GetDiskTypeRequest{DiskTypeId: "network-ssd"})
@@ -88,13 +86,6 @@ func TestCatalogHandler_ReadOnly(t *testing.T) {
 	dts, err := dh.List(ctx, &computev1.ListDiskTypesRequest{})
 	require.NoError(t, err)
 	require.Len(t, dts.DiskTypes, 1)
-
-	z, err := zh.Get(ctx, &computev1.GetZoneRequest{ZoneId: "ru-central1-a"})
-	require.NoError(t, err)
-	require.Equal(t, computev1.Zone_UP, z.Status)
-	zs, err := zh.List(ctx, &computev1.ListZonesRequest{})
-	require.NoError(t, err)
-	require.Len(t, zs.Zones, 3)
 }
 
 func TestInternalCatalogHandler_AdminCRUD(t *testing.T) {
