@@ -118,6 +118,13 @@ type Config struct {
 	// DENY). Это in-process goroutine, не cross-cluster rollout-flag.
 	FGARegisterDrainerEnabled bool `envconfig:"KACHO_COMPUTE_FGA_REGISTER_DRAINER_ENABLED" default:"true"`
 
+	// RequireIAM — sub-phase 1.4 S3 fail-closed boot-gate (D-8). When true,
+	// mutating Create is refused (UNAVAILABLE) and readiness is NotReady until the
+	// register-drainer is IAM-connected, so no resource is ever created without a
+	// deliverable owner-tuple intent. Default false (dev back-compat: old Warn
+	// behaviour, Create allowed). In production: true (single canonical mode, N5).
+	RequireIAM bool `envconfig:"KACHO_COMPUTE_REQUIRE_IAM" default:"false"`
+
 	// ===== SEC-D: opt-in mTLS (per-edge, corelib SEC-B) =====
 	//
 	// Каждое ребро — независимый grpcclient.TLSClient / grpcsrv.TLSServer value-struct.
