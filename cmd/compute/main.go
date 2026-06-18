@@ -27,7 +27,9 @@ import (
 	"github.com/PRO-Robotech/kacho-corelib/grpcsrv"
 	"github.com/PRO-Robotech/kacho-corelib/observability"
 	"github.com/PRO-Robotech/kacho-corelib/operations"
+	"github.com/PRO-Robotech/kacho-corelib/outbox/bootgate"
 	"github.com/PRO-Robotech/kacho-corelib/outbox/drainer"
+	"github.com/PRO-Robotech/kacho-corelib/outbox/metrics"
 
 	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
 	operationpb "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/operation"
@@ -36,6 +38,7 @@ import (
 	"github.com/PRO-Robotech/kacho-compute/internal/check"
 	"github.com/PRO-Robotech/kacho-compute/internal/clients"
 	"github.com/PRO-Robotech/kacho-compute/internal/config"
+	"github.com/PRO-Robotech/kacho-compute/internal/fgaboot"
 	"github.com/PRO-Robotech/kacho-compute/internal/fgaintent"
 	"github.com/PRO-Robotech/kacho-compute/internal/handler"
 	"github.com/PRO-Robotech/kacho-compute/internal/migrations"
@@ -110,6 +113,15 @@ func runServe(cfg config.Config) error {
 
 	svcs := buildServices(pool, projectClient, vpcClient, geoZones, opsRepo, cfg.SkipPeerValidation)
 
+	// SEC-D S3 fail-closed boot-gate (D-8): when KACHO_COMPUTE_REQUIRE_IAM=true,
+	// mutating Create is refused and readiness is NotReady until the register-drainer
+	// is IAM-connected. Starts NOT connected; SetConnected(true) fires once the
+	// drainer dial succeeds below.
+	bootGate := bootgate.New(bootgate.Config{RequireIAM: cfg.RequireIAM, Service: "kacho-compute"})
+	// D-7 metrics recorder for the outbox backstop. MemRecorder is the
+	// dependency-light default; a Prometheus-backed Recorder can be wired here.
+	outboxRec := metrics.NewMemRecorder()
+
 	// SEC-D: register-drainer — applies FGA owner-tuple register/unregister intents
 	// (compute_fga_register_outbox, written transactionally by repo.Insert/Delete)
 	// via kacho-iam InternalIAMService.RegisterResource/UnregisterResource over the
@@ -118,10 +130,16 @@ func runServe(cfg config.Config) error {
 	// Default-on (OQ-SEC-D-5); without it created resources get no per-resource FGA
 	// tuple. The drainer dial-conn lives for the process lifetime (closed by ctx).
 	if cfg.FGARegisterDrainerEnabled {
-		if drainCloser, derr := startRegisterDrainer(ctx, cfg, pool, logger); derr != nil {
+		if drainCloser, derr := startRegisterDrainer(ctx, cfg, pool, outboxRec, logger); derr != nil {
 			return fmt.Errorf("start register-drainer: %w", derr)
 		} else if drainCloser != nil {
 			defer drainCloser()
+			// Drainer dial established → IAM-register delivery path is up: open the
+			// boot-gate (D-8) + start the reconciler/metrics backstop (S3).
+			bootGate.SetConnected(true)
+			if berr := startBackstop(ctx, pool, outboxRec, logger); berr != nil {
+				return fmt.Errorf("start outbox backstop: %w", berr)
+			}
 		}
 	} else {
 		logger.Warn("FGA register-drainer DISABLED (KACHO_COMPUTE_FGA_REGISTER_DRAINER_ENABLED=false) — " +
@@ -141,7 +159,12 @@ func runServe(cfg config.Config) error {
 	// AuthZIAMGRPCAddr пуст → interceptor НЕ навешивается (graceful start без
 	// kacho-iam в dev). Breakglass=true → interceptor навешивается, но всё
 	// пропускает + emit'ит WARN-метрику (dev / emergency).
+	// SEC-D S3 boot-gate (D-8 / 1.4-31): guardCreateUnary FIRST on the public chain
+	// — a mutating tenant-resource Create is refused (UNAVAILABLE) when require-iam
+	// is armed and the register-drainer is not IAM-connected, so no resource is
+	// created without a deliverable owner-tuple intent. Read RPCs are untouched.
 	publicUnary := []grpc.UnaryServerInterceptor{
+		fgaboot.GuardCreateUnary(bootGate),
 		grpcsrv.UnaryPrincipalExtract(),
 		handler.TenantUnaryInterceptor(false, productionMode),
 	}
@@ -558,7 +581,7 @@ func buildListFilter(cfg config.Config, authzConn *grpc.ClientConn, logger *slog
 // Internal-only RPC (ban #6); the addr is derived from AuthZIAMGRPCAddr (the
 // existing iam-internal endpoint compute already uses for Check) and falls back to
 // IAMGRPCAddr when unset.
-func startRegisterDrainer(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (func(), error) {
+func startRegisterDrainer(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, rec metrics.Recorder, logger *slog.Logger) (func(), error) {
 	addr := cfg.AuthZIAMGRPCAddr
 	if addr == "" {
 		addr = cfg.IAMGRPCAddr
@@ -579,8 +602,8 @@ func startRegisterDrainer(ctx context.Context, cfg config.Config, pool *pgxpool.
 	d, err := drainer.New[fgaintent.Payload](
 		pool,
 		drainer.Config{
-			Table:   "public.compute_fga_register_outbox",
-			Channel: "compute_fga_register_outbox",
+			Table:   computeFGAOutboxTable,
+			Channel: computeFGAOutboxChannel,
 		},
 		func(b []byte) (fgaintent.Payload, error) {
 			p, derr := fgaintent.Decode(b)
@@ -592,6 +615,10 @@ func startRegisterDrainer(ctx context.Context, cfg config.Config, pool *pgxpool.
 		},
 		applier.Apply,
 		logger.With("component", "fga-register-drainer"),
+		// D-7: each poisoned row bumps outbox_poisoned_total{table=…}.
+		drainer.WithPoisonObserver[fgaintent.Payload](func() {
+			rec.IncPoisoned(computeFGAOutboxTable)
+		}),
 	)
 	if err != nil {
 		_ = conn.Close()
