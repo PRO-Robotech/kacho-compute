@@ -472,6 +472,10 @@ func (s *InstanceService) Update(ctx context.Context, req UpdateInstanceReq) (*o
 			updates = []string{"name", "description", "labels", "service_account_id", "placement_policy", "network_settings"}
 		}
 		touchesCompute := false
+		// labelsInMask (epic RSAB β, D-β6): triggers an FGA register-intent refresh
+		// so the IAM resource_mirror tracks dev→prod label dynamics. A full-object
+		// PATCH (empty mask) applies labels too, so `updates` already includes it.
+		labelsInMask := false
 		for _, f := range updates {
 			switch f {
 			case "name":
@@ -480,6 +484,7 @@ func (s *InstanceService) Update(ctx context.Context, req UpdateInstanceReq) (*o
 				in.Description = req.Description
 			case "labels":
 				in.Labels = req.Labels
+				labelsInMask = true
 			case "service_account_id":
 				in.ServiceAccountID = req.ServiceAccountID
 			case "placement_policy":
@@ -506,7 +511,7 @@ func (s *InstanceService) Update(ctx context.Context, req UpdateInstanceReq) (*o
 		if touchesCompute && in.Status != domain.InstanceStatusStopped {
 			return nil, status.Error(codes.FailedPrecondition, "Instance must be stopped")
 		}
-		updated, err := s.repo.Update(ctx, in)
+		updated, err := s.repo.Update(ctx, in, labelsInMask)
 		if err != nil {
 			return nil, mapRepoErr(err)
 		}

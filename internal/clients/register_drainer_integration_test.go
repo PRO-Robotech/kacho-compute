@@ -113,6 +113,16 @@ func insertIntent(ctx context.Context, t *testing.T, pool *pgxpool.Pool, eventTy
 	require.NoError(t, err)
 }
 
+func insertIntentPayload(ctx context.Context, t *testing.T, pool *pgxpool.Pool, eventType, kind, resourceID string, p fgaintent.Payload) {
+	t.Helper()
+	b, err := fgaintent.Encode(p)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx,
+		`INSERT INTO compute_fga_register_outbox (event_type, resource_kind, resource_id, payload) VALUES ($1,$2,$3,$4)`,
+		eventType, kind, resourceID, b)
+	require.NoError(t, err)
+}
+
 func newDrainer(t *testing.T, pool *pgxpool.Pool, applier *clients.IAMRegisterApplier) *drainer.Drainer[fgaintent.Payload] {
 	t.Helper()
 	d, err := drainer.New[fgaintent.Payload](
@@ -291,6 +301,40 @@ func TestRegisterDrainer_SEC_D_14_PermanentPoison(t *testing.T) {
 		require.NoError(t, pool.QueryRow(ctx, `SELECT attempt_count, sent_at FROM compute_fga_register_outbox WHERE resource_id = 'epd-poison'`).Scan(&attempts, &sentAt))
 		return sentAt == nil && attempts >= 5
 	}, 3*time.Second, 50*time.Millisecond)
+}
+
+// TestRegisterDrainer_Beta01_ForwardsLabelsAndParent — β-01: the applier maps the
+// intent payload's mirror fields (labels + parent-scope) onto the forwarded
+// IAM.RegisterResourceRequest, so kacho-iam can populate resource_mirror.
+func TestRegisterDrainer_Beta01_ForwardsLabelsAndParent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool := setupDrainerDB(t)
+	fake := &fakeIAMRegister{}
+	applier := clients.NewIAMRegisterApplierWithClient(fake)
+
+	insertIntentPayload(ctx, t, pool, fgaintent.EventRegister, "Instance", "epd-mirror", fgaintent.Payload{
+		Tuples:          []fgaintent.Tuple{{SubjectID: "project:prj-P", Relation: "project", Object: "compute_instance:epd-mirror"}},
+		Labels:          map[string]string{"env": "dev", "team": "core"},
+		ParentProjectID: "prj-P",
+		ParentAccountID: "acc-A",
+	})
+
+	d := newDrainer(t, pool, applier)
+	go func() { _ = d.Run(ctx) }()
+
+	require.Eventually(t, func() bool {
+		return fake.registeredCount() == 1
+	}, 3*time.Second, 50*time.Millisecond)
+
+	req := fake.registered[0]
+	assert.Equal(t, "compute_instance:epd-mirror", req.GetObject())
+	assert.Equal(t, map[string]string{"env": "dev", "team": "core"}, req.GetLabels())
+	assert.Equal(t, "prj-P", req.GetParentProjectId())
+	assert.Equal(t, "acc-A", req.GetParentAccountId())
 }
 
 func containsCI(s, sub string) bool {

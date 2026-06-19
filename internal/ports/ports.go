@@ -93,7 +93,11 @@ type InstanceRepo interface {
 	// созданную ВМ (с заполненными NICs/AttachedDisks).
 	Insert(ctx context.Context, in *domain.Instance, inlineDisks []*domain.Disk) (*domain.Instance, error)
 	// Update обновляет mutable поля + status (для lifecycle-операций).
-	Update(ctx context.Context, in *domain.Instance) (*domain.Instance, error)
+	// emitLabelsRegister (epic RSAB β, D-β6): true когда "labels" присутствует в
+	// update-mask (или full-object PATCH применяет labels) → repo эмитит свежий
+	// FGA register-intent с обновлёнными labels в той же writer-tx (IAM
+	// resource_mirror refresh, ban #10); false → register-intent НЕ эмитится.
+	Update(ctx context.Context, in *domain.Instance, emitLabelsRegister bool) (*domain.Instance, error)
 	// SetStatusCAS атомарно переводит instance из expected-status в next-status
 	// (CAS на DB-уровне: conditional UPDATE WHERE id=$1 AND status=$expected).
 	// Если row не существует → ErrNotFound; если status не совпадает с

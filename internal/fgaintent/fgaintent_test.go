@@ -59,6 +59,29 @@ func TestEncodeDecode_Roundtrip(t *testing.T) {
 	assert.Equal(t, in, out)
 }
 
+// Test_Beta01_PayloadCarriesLabelsAndParent — β-01: the register intent payload
+// carries the owner's labels + parent-scope (project/account) so the register-
+// drainer can forward them to IAM.RegisterResource (label+parent mirror sync).
+// The mirror fields survive the JSONB round-trip alongside the owner-tuple set.
+func Test_Beta01_PayloadCarriesLabelsAndParent(t *testing.T) {
+	in := fgaintent.Payload{
+		Tuples: []fgaintent.Tuple{
+			{SubjectID: "project:prj-P", Relation: "project", Object: "compute_instance:epd-1"},
+		},
+		Labels:          map[string]string{"env": "dev", "team": "core"},
+		ParentProjectID: "prj-P",
+		ParentAccountID: "acc-A",
+	}
+	b, err := fgaintent.Encode(in)
+	require.NoError(t, err)
+	out, err := fgaintent.Decode(b)
+	require.NoError(t, err)
+	assert.Equal(t, in, out)
+	assert.Equal(t, map[string]string{"env": "dev", "team": "core"}, out.Labels)
+	assert.Equal(t, "prj-P", out.ParentProjectID)
+	assert.Equal(t, "acc-A", out.ParentAccountID)
+}
+
 // TestDecode_Garbage — malformed JSON → error (drainer treats decode error as a
 // permanent poison via errors.Join(ErrPermanent, …) at the call-site).
 func TestDecode_Garbage(t *testing.T) {

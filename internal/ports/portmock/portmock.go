@@ -362,6 +362,10 @@ type InstanceRepo struct {
 	mu       sync.Mutex
 	data     map[string]*domain.Instance
 	diskHook *DiskRepo // если задан — inlineDisks вставляются туда
+	// LastUpdateEmitLabels — последнее значение emitLabelsRegister, переданное в
+	// Update (epic RSAB β, D-β6). nil — Update ещё не вызывался. Позволяет
+	// use-case-тесту проверить решение «labels ∈ mask → эмитить register-intent».
+	LastUpdateEmitLabels *bool
 }
 
 // NewInstanceRepo создаёт пустой InstanceRepo.
@@ -438,10 +442,13 @@ func (r *InstanceRepo) Insert(_ context.Context, in *domain.Instance, inlineDisk
 	return in, nil
 }
 
-// Update обновляет ВМ.
-func (r *InstanceRepo) Update(_ context.Context, in *domain.Instance) (*domain.Instance, error) {
+// Update обновляет ВМ. Записывает emitLabelsRegister в LastUpdateEmitLabels
+// (epic RSAB β, D-β6) для проверки use-case-тестом.
+func (r *InstanceRepo) Update(_ context.Context, in *domain.Instance, emitLabelsRegister bool) (*domain.Instance, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	flag := emitLabelsRegister
+	r.LastUpdateEmitLabels = &flag
 	if _, ok := r.data[in.ID]; !ok {
 		return nil, ports.ErrNotFound
 	}
