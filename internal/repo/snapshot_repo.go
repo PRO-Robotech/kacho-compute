@@ -135,7 +135,7 @@ func (r *SnapshotRepo) Insert(ctx context.Context, s *domain.Snapshot) (*domain.
 		return nil, service.ErrInternal
 	}
 	// SEC-D: FGA owner-tuple register-intent in the SAME writer-tx (no dual-write).
-	if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Snapshot", result.ID, result.ProjectID); err != nil {
+	if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Snapshot", result.ID, result.ProjectID, result.Labels); err != nil {
 		return nil, service.ErrInternal
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -190,7 +190,7 @@ func (r *SnapshotRepo) Delete(ctx context.Context, id string) error {
 		return service.ErrInternal
 	}
 	// SEC-D: symmetric FGA unregister-intent in the SAME writer-tx.
-	if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventUnregister, "Snapshot", id, projectID); err != nil {
+	if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventUnregister, "Snapshot", id, projectID, nil); err != nil {
 		return service.ErrInternal
 	}
 	if err := tx.Commit(ctx); err != nil {

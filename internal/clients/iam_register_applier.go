@@ -23,10 +23,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/PRO-Robotech/kacho-corelib/auth"
 	"github.com/PRO-Robotech/kacho-corelib/outbox/drainer"
@@ -71,13 +73,23 @@ func (a *IAMRegisterApplier) Apply(ctx context.Context, eventType string, p fgai
 	// Propagate principal MD so IAM-side mTLS-SA / audit sees the caller (parity
 	// with the other peer-calls; in dev this is anonymous/system).
 	ctx = auth.PropagateOutgoing(ctx)
+	srcVer := sourceVersionPB(p.SourceVersion)
 	switch eventType {
 	case fgaintent.EventRegister:
 		for _, tpl := range p.Tuples {
+			// RSAB β: forward the owner labels + parent-scope so kacho-iam can
+			// populate its output-only resource_mirror (label+parent sync). Fields
+			// are additive/optional — empty values mirror gracefully.
+			// β-hardening: forward source_version (monotonic per-object) so the
+			// mirror UPSERT is last-source-state-wins (stale reordered intent → no-op).
 			if _, err := a.cli.RegisterResource(ctx, &iamv1.RegisterResourceRequest{
-				SubjectId: tpl.SubjectID,
-				Relation:  tpl.Relation,
-				Object:    tpl.Object,
+				SubjectId:       tpl.SubjectID,
+				Relation:        tpl.Relation,
+				Object:          tpl.Object,
+				Labels:          p.Labels,
+				ParentProjectId: p.ParentProjectID,
+				ParentAccountId: p.ParentAccountID,
+				SourceVersion:   srcVer,
 			}); err != nil {
 				return classifyApplyErr(err)
 			}
@@ -85,10 +97,18 @@ func (a *IAMRegisterApplier) Apply(ctx context.Context, eventType string, p fgai
 		return nil
 	case fgaintent.EventUnregister:
 		for _, tpl := range p.Tuples {
+			// Symmetry: Unregister removes the mirror row by object; the mirror
+			// fields are carried for message-shape symmetry but IAM uses only object
+			// + source_version (tombstone-version: a stale tombstone won't wipe a
+			// fresher row — β-hardening).
 			if _, err := a.cli.UnregisterResource(ctx, &iamv1.UnregisterResourceRequest{
-				SubjectId: tpl.SubjectID,
-				Relation:  tpl.Relation,
-				Object:    tpl.Object,
+				SubjectId:       tpl.SubjectID,
+				Relation:        tpl.Relation,
+				Object:          tpl.Object,
+				Labels:          p.Labels,
+				ParentProjectId: p.ParentProjectID,
+				ParentAccountId: p.ParentAccountID,
+				SourceVersion:   srcVer,
 			}); err != nil {
 				return classifyApplyErr(err)
 			}
@@ -97,6 +117,16 @@ func (a *IAMRegisterApplier) Apply(ctx context.Context, eventType string, p fgai
 	default:
 		return errors.Join(drainer.ErrPermanent, fmt.Errorf("unknown fga intent event_type %q", eventType))
 	}
+}
+
+// sourceVersionPB converts the decoded payload source_version to a proto
+// Timestamp. A zero time (legacy payload / old outbox row) → nil, which IAM
+// treats as '-infinity' (applies unconditionally — back-compat).
+func sourceVersionPB(t time.Time) *timestamppb.Timestamp {
+	if t.IsZero() {
+		return nil
+	}
+	return timestamppb.New(t)
 }
 
 // classifyApplyErr maps a gRPC status to the drainer disposition. InvalidArgument

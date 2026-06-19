@@ -170,8 +170,8 @@ func (r *InstanceRepo) Insert(ctx context.Context, in *domain.Instance, inlineDi
 			return nil, service.ErrInternal
 		}
 		// SEC-D: inline boot/secondary disks are created resources → register their
-		// owner-tuple too, in the same writer-tx.
-		if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Disk", d.ID, d.ProjectID); err != nil {
+		// owner-tuple too, in the same writer-tx. RSAB β: carry the disk labels.
+		if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Disk", d.ID, d.ProjectID, d.Labels); err != nil {
 			return nil, service.ErrInternal
 		}
 	}
@@ -182,7 +182,8 @@ func (r *InstanceRepo) Insert(ctx context.Context, in *domain.Instance, inlineDi
 		return nil, service.ErrInternal
 	}
 	// SEC-D: FGA owner-tuple register-intent for the Instance in the SAME writer-tx.
-	if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Instance", created.ID, created.ProjectID); err != nil {
+	// RSAB β: carry the instance labels + parent-scope to feed IAM resource_mirror.
+	if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Instance", created.ID, created.ProjectID, created.Labels); err != nil {
 		return nil, service.ErrInternal
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -192,7 +193,15 @@ func (r *InstanceRepo) Insert(ctx context.Context, in *domain.Instance, inlineDi
 }
 
 // Update обновляет mutable поля ВМ + status + outbox UPDATED.
-func (r *InstanceRepo) Update(ctx context.Context, in *domain.Instance) (*domain.Instance, error) {
+//
+// emitLabelsRegister (epic RSAB β, D-β6): when true (the use-case saw "labels" in
+// the update-mask, or a full-object PATCH that applies labels) a fresh FGA
+// register-intent carrying the updated labels + parent-scope is emitted IN THE
+// SAME writer-tx as the UPDATE (atomic, ban #10) so the IAM resource_mirror stays
+// in sync (dev→prod label dynamics). When false (name/description/… without
+// labels) NO register-intent is emitted — labels-membership and the immutable
+// parent are unchanged, so a refresh would be pointless traffic (β-04b).
+func (r *InstanceRepo) Update(ctx context.Context, in *domain.Instance, emitLabelsRegister bool) (*domain.Instance, error) {
 	labelsJSON, err := marshalJSONB(in.Labels, "Instance.labels")
 	if err != nil {
 		return nil, err
@@ -219,6 +228,13 @@ func (r *InstanceRepo) Update(ctx context.Context, in *domain.Instance) (*domain
 	}
 	if err := emitCompute(ctx, tx, "Instance", updated.ID, "UPDATED", instancePayload(updated)); err != nil {
 		return nil, service.ErrInternal
+	}
+	// RSAB β (D-β6): refresh the IAM resource_mirror only when labels were in the
+	// update-mask. Emitted in the SAME writer-tx as the UPDATE (atomic, ban #10).
+	if emitLabelsRegister {
+		if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Instance", updated.ID, updated.ProjectID, updated.Labels); err != nil {
+			return nil, service.ErrInternal
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, wrapPgErr(err, "Instance", in.ID)
@@ -346,7 +362,8 @@ func (r *InstanceRepo) Delete(ctx context.Context, id string, autoDeleteDiskIDs 
 			return service.ErrInternal
 		}
 		// SEC-D: symmetric FGA unregister-intent for the auto-deleted disk.
-		if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventUnregister, "Disk", did, diskProject); err != nil {
+		// Unregister removes the mirror row by object → labels are irrelevant (nil).
+		if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventUnregister, "Disk", did, diskProject, nil); err != nil {
 			return service.ErrInternal
 		}
 	}
@@ -362,7 +379,8 @@ func (r *InstanceRepo) Delete(ctx context.Context, id string, autoDeleteDiskIDs 
 		return service.ErrInternal
 	}
 	// SEC-D: symmetric FGA unregister-intent for the instance in the SAME writer-tx.
-	if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventUnregister, "Instance", id, projectID); err != nil {
+	// Unregister removes the mirror row by object → labels are irrelevant (nil).
+	if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventUnregister, "Instance", id, projectID, nil); err != nil {
 		return service.ErrInternal
 	}
 	if err := tx.Commit(ctx); err != nil {

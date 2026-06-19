@@ -170,6 +170,49 @@ func TestInstance_Update_NameAnyStatus(t *testing.T) {
 	require.Equal(t, "renamed", in.Name)
 }
 
+// TestInstance_Beta04_UpdateLabels_EmitsRegister — β-04: Update with "labels" in
+// the update-mask makes the use-case ask the repo to emit a fresh FGA register
+// intent (label-mirror refresh).
+func TestInstance_Beta04_UpdateLabels_EmitsRegister(t *testing.T) {
+	svc, repo, _, _, ops := newInstanceSvc(t, true)
+	seedRunningInstance(repo, domain.InstanceStatusRunning)
+	op, err := svc.Update(context.Background(), UpdateInstanceReq{
+		InstanceID: "epdvm1", Labels: map[string]string{"env": "prod"}, UpdateMask: []string{"labels"},
+	})
+	require.NoError(t, err)
+	portmock.AwaitOpDone(t, ops, op.ID)
+	require.NotNil(t, repo.LastUpdateEmitLabels, "repo.Update must have been called")
+	require.True(t, *repo.LastUpdateEmitLabels, "labels in mask → emit register intent (β-04)")
+}
+
+// TestInstance_Beta04b_UpdateNonLabels_NoRegister — β-04b: Update without "labels"
+// in the mask must NOT trigger a register intent.
+func TestInstance_Beta04b_UpdateNonLabels_NoRegister(t *testing.T) {
+	svc, repo, _, _, ops := newInstanceSvc(t, true)
+	seedRunningInstance(repo, domain.InstanceStatusRunning)
+	op, err := svc.Update(context.Background(), UpdateInstanceReq{
+		InstanceID: "epdvm1", Name: "renamed", UpdateMask: []string{"name"},
+	})
+	require.NoError(t, err)
+	portmock.AwaitOpDone(t, ops, op.ID)
+	require.NotNil(t, repo.LastUpdateEmitLabels, "repo.Update must have been called")
+	require.False(t, *repo.LastUpdateEmitLabels, "no labels in mask → no register intent (β-04b)")
+}
+
+// TestInstance_Beta04_FullMaskUpdate_EmitsRegister — β-04: an empty update-mask
+// (full-object PATCH) applies labels, so the register intent must be emitted.
+func TestInstance_Beta04_FullMaskUpdate_EmitsRegister(t *testing.T) {
+	svc, repo, _, _, ops := newInstanceSvc(t, true)
+	seedRunningInstance(repo, domain.InstanceStatusRunning)
+	op, err := svc.Update(context.Background(), UpdateInstanceReq{
+		InstanceID: "epdvm1", Name: "renamed", Labels: map[string]string{"env": "prod"},
+	})
+	require.NoError(t, err)
+	portmock.AwaitOpDone(t, ops, op.ID)
+	require.NotNil(t, repo.LastUpdateEmitLabels)
+	require.True(t, *repo.LastUpdateEmitLabels, "full-mask PATCH applies labels → emit register intent")
+}
+
 func TestInstance_AttachDetachDisk(t *testing.T) {
 	svc, repo, diskRepo, _, ops := newInstanceSvc(t, true)
 	seedRunningInstance(repo, domain.InstanceStatusRunning)

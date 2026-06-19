@@ -18,6 +18,7 @@ package fgaintent
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 // Event types stored in compute_fga_register_outbox.event_type (matches the
@@ -44,8 +45,35 @@ type Tuple struct {
 // row (the whole tuple-set of one resource is one RegisterResource transaction in
 // IAM). Today compute resources carry exactly one project-hierarchy tuple, but
 // the set form keeps the contract stable if a creator/parent-link tuple is added.
+//
+// Epic Resource-scoped-AccessBinding β: the payload also carries the owner's
+// labels + parent-scope (project / account). The register-drainer forwards them
+// to IAM.RegisterResource so kacho-iam can populate its output-only
+// resource_mirror (label+parent mirror that feeds the γ selector / containment
+// gate, SAME-DB in IAM, without an iam→compute edge — data is pushed by the
+// consumer, IAM never pulls). These fields are additive and optional — older
+// payloads decode with empty values (back-compat).
 type Payload struct {
 	Tuples []Tuple `json:"tuples"`
+	// Labels — copy of the owner resource's labels (β mirror; for the γ selector).
+	Labels map[string]string `json:"labels,omitempty"`
+	// ParentProjectID — the owning project id (β parent-scope; for γ containment).
+	ParentProjectID string `json:"parent_project_id,omitempty"`
+	// ParentAccountID — the owning account id, when the producer can resolve it
+	// (β parent-scope). compute leaves it empty today (no project→account resolve
+	// on the resource hot-path); IAM handles an empty parent gracefully.
+	ParentAccountID string `json:"parent_account_id,omitempty"`
+	// SourceVersion — monotonic per-object marker (epic RSAB β-hardening). Stamped
+	// from the DB clock (now()) at the moment THIS intent row is INSERTed, inside
+	// the SAME writer-tx as the resource mutation. For sequential mutations of one
+	// object a later mutation's tx commits-after the earlier, so its now() is
+	// strictly greater → monotonic per-object. The register-drainer forwards it as
+	// RegisterResourceRequest.source_version so kacho-iam applies the mirror UPSERT
+	// last-SOURCE-state-wins (a reordered stale intent → no-op, not an overwrite).
+	// Compute has no per-row updated_at column, and the intent-emit now() is the
+	// exact instant the source-state is recorded — a correct, least-invasive marker.
+	// Zero (legacy payload / decode of an old row) → IAM treats as '-infinity'.
+	SourceVersion time.Time `json:"source_version,omitempty"`
 }
 
 // fgaTypeByKind maps a compute outbox resource_kind ("Instance"/"Disk"/"Image"/
