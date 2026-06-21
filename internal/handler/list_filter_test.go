@@ -42,10 +42,14 @@ type mockAuthCli struct {
 	allowedByKey map[string][]string
 	err          error
 	calls        int
+	lastAction   string // captured so D-45 read==enforce tests can assert the verb
+	lastResType  string
 }
 
 func (m *mockAuthCli) ListObjects(_ context.Context, in *iamv1.ListObjectsRequest, _ ...grpc.CallOption) (*iamv1.ListObjectsResponse, error) {
 	m.calls++
+	m.lastAction = in.Action
+	m.lastResType = in.ResourceType
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -134,7 +138,7 @@ func TestDiskHandler_List_AllowedSubset(t *testing.T) {
 	cli := &mockAuthCli{allowedByKey: map[string][]string{}}
 	h, ops := setupDiskHandler(t, newFilter(t, cli))
 	ids := createDisks(t, h, ops, "proj", "a", "b", "c")
-	cli.allowedByKey["user:usr_alice|compute_disk|compute.disks.read"] = []string{ids[0], ids[2]}
+	cli.allowedByKey["user:usr_alice|compute_disk|compute.disks.list"] = []string{ids[0], ids[2]}
 
 	resp, err := h.List(ctxWithSubject("user:usr_alice"), &computev1.ListDisksRequest{ProjectId: "proj"})
 	require.NoError(t, err)
@@ -221,7 +225,7 @@ func TestImageHandler_List_AllowedSubset(t *testing.T) {
 		require.NoError(t, done.Response.UnmarshalTo(&im))
 		ids = append(ids, im.Id)
 	}
-	cli.allowedByKey["user:usr_alice|compute_image|compute.images.read"] = []string{ids[0]}
+	cli.allowedByKey["user:usr_alice|compute_image|compute.images.list"] = []string{ids[0]}
 
 	resp, err := h.List(ctxWithSubject("user:usr_alice"), &computev1.ListImagesRequest{ProjectId: "proj"})
 	require.NoError(t, err)
@@ -234,7 +238,7 @@ func TestDiskHandler_List_CacheReuse(t *testing.T) {
 	cli := &mockAuthCli{allowedByKey: map[string][]string{}}
 	h, ops := setupDiskHandler(t, newFilter(t, cli))
 	ids := createDisks(t, h, ops, "proj", "a")
-	cli.allowedByKey["user:usr_alice|compute_disk|compute.disks.read"] = []string{ids[0]}
+	cli.allowedByKey["user:usr_alice|compute_disk|compute.disks.list"] = []string{ids[0]}
 
 	for i := 0; i < 5; i++ {
 		resp, err := h.List(ctxWithSubject("user:usr_alice"), &computev1.ListDisksRequest{ProjectId: "proj"})
@@ -249,7 +253,7 @@ func TestDiskHandler_List_LegacySubjectHeaders(t *testing.T) {
 	cli := &mockAuthCli{allowedByKey: map[string][]string{}}
 	h, ops := setupDiskHandler(t, newFilter(t, cli))
 	ids := createDisks(t, h, ops, "proj", "a", "b")
-	cli.allowedByKey["service_account:sa_kube|compute_disk|compute.disks.read"] = []string{ids[1]}
+	cli.allowedByKey["service_account:sa_kube|compute_disk|compute.disks.list"] = []string{ids[1]}
 
 	md := metadata.Pairs("x-kacho-subject-type", "service_account", "x-kacho-subject-id", "sa_kube")
 	ctx := metadata.NewIncomingContext(context.Background(), md)
@@ -294,4 +298,51 @@ func TestInstanceHandler_List_AllowedSubset(t *testing.T) {
 	resp, err := h.List(ctxWithSubject("user:usr_no_grants"), &computev1.ListInstancesRequest{ProjectId: "proj"})
 	require.NoError(t, err)
 	require.Len(t, resp.Instances, 0)
+}
+
+// verbOf returns the last dot-segment of a "<domain>.<resource>.<verb>" action.
+func verbOf(action string) string {
+	last := -1
+	for i := 0; i < len(action); i++ {
+		if action[i] == '.' {
+			last = i
+		}
+	}
+	if last < 0 {
+		return action
+	}
+	return action[last+1:]
+}
+
+// D-45 (read==enforce): the action each public List handler sends to iam
+// ListObjects MUST carry the "list" verb (which the iam server resolves to the
+// "viewer" relation — the SAME relation the per-RPC Check gate uses for Get).
+// RED while handlers send ".read" (iam → InvalidArgument → all Lists break);
+// GREEN once they send ".list".
+func TestListHandlers_SendViewerResolvingAction(t *testing.T) {
+	t.Run("disk", func(t *testing.T) {
+		cli := &mockAuthCli{allowedByKey: map[string][]string{}}
+		h, ops := setupDiskHandler(t, newFilter(t, cli))
+		createDisks(t, h, ops, "proj", "a")
+		_, err := h.List(ctxWithSubject("user:usr_alice"), &computev1.ListDisksRequest{ProjectId: "proj"})
+		require.NoError(t, err)
+		require.Equal(t, "compute_disk", cli.lastResType)
+		require.Equal(t, "list", verbOf(cli.lastAction),
+			"disk List must send a viewer-resolving verb (read==enforce, D-45); got action %q", cli.lastAction)
+	})
+	t.Run("instance", func(t *testing.T) {
+		cli := &mockAuthCli{allowedByKey: map[string][]string{}}
+		ops := portmock.NewOpsRepo()
+		svc := service.NewInstanceService(
+			portmock.NewInstanceRepo(), portmock.NewDiskRepo(), portmock.NewImageRepo(),
+			portmock.NewSnapshotRepo(), portmock.NewZoneRegistry(),
+			&portmock.ProjectClient{OK: true}, &portmock.VPCClient{}, ops, true,
+		)
+		h := NewInstanceHandler(svc, newFilter(t, cli))
+		_, err := h.List(ctxWithSubject("user:usr_alice"), &computev1.ListInstancesRequest{ProjectId: "proj"})
+		require.NoError(t, err)
+		require.Equal(t, "compute_instance", cli.lastResType)
+		require.Equal(t, "list", verbOf(cli.lastAction),
+			"instance List must send a viewer-resolving verb (read==enforce, D-45); got action %q", cli.lastAction)
+	})
 }

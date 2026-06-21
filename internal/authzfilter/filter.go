@@ -47,8 +47,9 @@ func (d Decision) IDs() []string { return d.AllowedIDs }
 type Filter interface {
 	// ListAllowedIDs возвращает Decision для (subject, resourceType, action).
 	// resourceType — FGA object type ("compute_instance", "compute_disk", ...).
-	// action — semantic permission ("compute.instances.read", ...) — server-side
-	// мапит на FGA relation. subject — FGA subject string ("user:usr_alice"
+	// action — semantic permission ("compute.instances.list", ...) — the iam
+	// server resolves the verb ("list" → "viewer", read==enforce) to an FGA
+	// relation. subject — FGA subject string ("user:usr_alice"
 	// или "service_account:sa_xxx").
 	ListAllowedIDs(ctx context.Context, subject, resourceType, action string) (Decision, error)
 }

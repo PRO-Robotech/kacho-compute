@@ -57,7 +57,7 @@ mkdir -p out
 if [[ -n "$SERVICE" ]]; then
   run_one "$SERVICE"
 else
-  for res in disk image snapshot instance disk-type operation; do
+  for res in disk image snapshot instance disk-type operation list-filter; do
     run_one "$res"
   done
 fi
