@@ -219,3 +219,89 @@ func TestIntegration_SnapshotRepo_ListByAllowedIDs(t *testing.T) {
 	require.Len(t, result, 1)
 	require.Equal(t, seeded[0], result[0].ID)
 }
+
+// TestIntegration_InstanceRepo_PaginationAfterFilter — D-46 (LST-6): pagination
+// must apply to the FILTERED set, not the raw rows. Seed 150 instances in a
+// project, grant access (allow-list) to 60 of them, then page with page_size=25.
+// The 3 pages must cover EXACTLY the 60 accessible instances (25+25+10) with no
+// holes and no inaccessible instance ever leaking onto a page. This is the
+// compute.instance arm of §11/D-46 (the prompt's named example).
+//
+// RED-safety: if pagination were applied BEFORE the id=ANY filter (raw LIMIT
+// then filter), pages would be "holey" — a 25-row raw page could contain <25
+// accessible ids — and the union across pages would miss accessible rows. This
+// test fails in that mode and passes only when WHERE id = ANY precedes
+// ORDER BY ... LIMIT (the current repo construction).
+func TestIntegration_InstanceRepo_PaginationAfterFilter(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	ctx := context.Background()
+	dsn := setupTestDB(t)
+	pool, err := coredb.NewPool(ctx, dsn)
+	require.NoError(t, err)
+	defer pool.Close()
+
+	r := repo.NewInstanceRepo(pool)
+	base := time.Now().UTC().Truncate(time.Microsecond)
+
+	const total = 150
+	const granted = 60
+	allIDs := make([]string, 0, total)
+	for i := 0; i < total; i++ {
+		id := ids.NewID(ids.PrefixInstance)
+		_, err := r.Insert(ctx, &domain.Instance{
+			ID: id, ProjectID: "proj-a",
+			CreatedAt: base.Add(time.Duration(i) * time.Millisecond),
+			Name:      fmt.Sprintf("vm-%03d", i),
+			ZoneID:    "ru-central1-a", PlatformID: "standard-v3",
+			Cores: 2, Memory: 2 << 30, CoreFraction: 100,
+			Status: domain.InstanceStatusRunning, FQDN: id + ".auto.internal",
+			NetworkSettingsType: "STANDARD",
+		}, nil)
+		require.NoError(t, err)
+		allIDs = append(allIDs, id)
+	}
+
+	// Grant access to a deterministic subset: every (total/granted)-th... simpler:
+	// take the first `granted` ids by creation order but interleaved so the
+	// accessible set is scattered across the full ordered range (exercises the
+	// "filter then paginate" path, not "first N rows happen to be accessible").
+	accessible := make([]string, 0, granted)
+	accessibleSet := map[string]bool{}
+	for i := 0; i < total && len(accessible) < granted; i += 2 { // every other → 75 candidates, take 60
+		if len(accessible) < granted {
+			accessible = append(accessible, allIDs[i])
+			accessibleSet[allIDs[i]] = true
+		}
+	}
+	require.Len(t, accessible, granted)
+
+	// Page through the FILTERED set with page_size=25.
+	const pageSize = 25
+	seen := map[string]bool{}
+	var pages int
+	token := ""
+	for {
+		res, next, err := r.List(ctx, service.InstanceFilter{
+			ProjectID:  "proj-a",
+			AllowedIDs: accessible,
+		}, service.Pagination{PageSize: pageSize, PageToken: token})
+		require.NoError(t, err)
+		pages++
+		require.LessOrEqual(t, len(res), pageSize, "page must not exceed page_size")
+		for _, in := range res {
+			require.True(t, accessibleSet[in.ID], "inaccessible instance leaked onto a page: %s", in.ID)
+			require.False(t, seen[in.ID], "duplicate across pages: %s", in.ID)
+			seen[in.ID] = true
+		}
+		if next == "" {
+			break
+		}
+		token = next
+		require.LessOrEqual(t, pages, 10, "pagination did not terminate")
+	}
+
+	require.Equal(t, granted, len(seen), "pages must cover exactly the accessible set (no holes)")
+	require.Equal(t, 3, pages, "60 accessible / page_size 25 → 25+25+10 = 3 pages")
+}

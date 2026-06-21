@@ -13,13 +13,27 @@ const (
 )
 
 // Compute-domain action strings — server-side resolves to FGA relation.
-// Format: `<domain>.<resource>.<verb>` per IAM permission catalog (Phase 1).
+// Format: `<domain>.<resource>.<verb>`.
+//
+// D-consumer (§11, D-40..D-45 / issue #111): the verb MUST be one the
+// kacho-iam AuthorizeService.ListObjects server maps to the FGA `viewer`
+// relation. Under the scope_grant rules-model (sub-phase B/C/#193),
+// `resolveActionToRelation` maps ONLY the canonical RPC verbs get/list →
+// "viewer"; the verb "read" is UNMAPPED → it returns "Illegal argument action"
+// (InvalidArgument), which the compute filter wraps as Unavailable for every
+// List — so list-filter.enabled=true would break ALL public Lists.
+//
+// "viewer" is also the SAME relation the per-RPC Check gate uses for Get/List
+// (internal/check/permission_map.go) — so List visibility == Check-allow
+// (read==enforce), and "viewer" cascades from an account-tier scope_grant
+// (g_viewer_compute_<type>) so a rules-role list-grant becomes visible
+// per-object via ListObjects(viewer).
 const (
-	ActionInstanceRead = "compute.instances.read"
-	ActionDiskRead     = "compute.disks.read"
-	ActionImageRead    = "compute.images.read"
-	ActionSnapshotRead = "compute.snapshots.read"
+	ActionInstanceRead = "compute.instances.list"
+	ActionDiskRead     = "compute.disks.list"
+	ActionImageRead    = "compute.images.list"
+	ActionSnapshotRead = "compute.snapshots.list"
 	// ActionOperationRead — used to filter ListOperations result by op-id
-	// when scope is per-resource.
-	ActionOperationRead = "compute.operations.read"
+	// when scope is per-resource. Verb "list" → viewer (read==enforce).
+	ActionOperationRead = "compute.operations.list"
 )
