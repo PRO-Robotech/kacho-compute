@@ -29,6 +29,9 @@ type DiskRepo struct {
 	mu       sync.Mutex
 	data     map[string]*domain.Disk
 	attached map[string]bool // disk_id → attached?
+	// LastUpdateEmitLabels — последнее значение emitLabelsRegister, переданное в
+	// Update (#113/T3.1) для проверки labels-gated mirror-эмита use-case-тестом.
+	LastUpdateEmitLabels *bool
 }
 
 // NewDiskRepo создаёт пустой DiskRepo.
@@ -114,10 +117,13 @@ func (r *DiskRepo) Insert(_ context.Context, d *domain.Disk) (*domain.Disk, erro
 	return d, nil
 }
 
-// Update обновляет диск.
-func (r *DiskRepo) Update(_ context.Context, d *domain.Disk) (*domain.Disk, error) {
+// Update обновляет диск. Записывает emitLabelsRegister в LastUpdateEmitLabels
+// (#113/T3.1) для проверки use-case-тестом.
+func (r *DiskRepo) Update(_ context.Context, d *domain.Disk, emitLabelsRegister bool) (*domain.Disk, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	flag := emitLabelsRegister
+	r.LastUpdateEmitLabels = &flag
 	if _, ok := r.data[d.ID]; !ok {
 		return nil, ports.ErrNotFound
 	}
@@ -164,6 +170,8 @@ func (r *DiskRepo) IsAttached(_ context.Context, id string) (bool, error) {
 type ImageRepo struct {
 	mu   sync.Mutex
 	data map[string]*domain.Image
+	// LastUpdateEmitLabels — последнее emitLabelsRegister из Update (#113/T3.1).
+	LastUpdateEmitLabels *bool
 }
 
 // NewImageRepo создаёт пустой ImageRepo.
@@ -244,10 +252,12 @@ func (r *ImageRepo) Insert(_ context.Context, i *domain.Image) (*domain.Image, e
 	return i, nil
 }
 
-// Update обновляет образ.
-func (r *ImageRepo) Update(_ context.Context, i *domain.Image) (*domain.Image, error) {
+// Update обновляет образ. Записывает emitLabelsRegister (#113/T3.1).
+func (r *ImageRepo) Update(_ context.Context, i *domain.Image, emitLabelsRegister bool) (*domain.Image, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	flag := emitLabelsRegister
+	r.LastUpdateEmitLabels = &flag
 	if _, ok := r.data[i.ID]; !ok {
 		return nil, ports.ErrNotFound
 	}
@@ -272,6 +282,8 @@ func (r *ImageRepo) Delete(_ context.Context, id string) error {
 type SnapshotRepo struct {
 	mu   sync.Mutex
 	data map[string]*domain.Snapshot
+	// LastUpdateEmitLabels — последнее emitLabelsRegister из Update (#113/T3.1).
+	LastUpdateEmitLabels *bool
 }
 
 // NewSnapshotRepo создаёт пустой SnapshotRepo.
@@ -333,10 +345,12 @@ func (r *SnapshotRepo) Insert(_ context.Context, s *domain.Snapshot) (*domain.Sn
 	return s, nil
 }
 
-// Update обновляет снапшот.
-func (r *SnapshotRepo) Update(_ context.Context, s *domain.Snapshot) (*domain.Snapshot, error) {
+// Update обновляет снапшот. Записывает emitLabelsRegister (#113/T3.1).
+func (r *SnapshotRepo) Update(_ context.Context, s *domain.Snapshot, emitLabelsRegister bool) (*domain.Snapshot, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	flag := emitLabelsRegister
+	r.LastUpdateEmitLabels = &flag
 	if _, ok := r.data[s.ID]; !ok {
 		return nil, ports.ErrNotFound
 	}

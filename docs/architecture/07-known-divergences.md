@@ -295,9 +295,37 @@ compute), которое γ будет читать для selector-матчин
 - **Scope β = compute-first (D-β8).** Расширение реализовано для всех compute-
   ресурсов (Instance/Disk/Image/Snapshot — register-intent несёт их `Labels`
   единообразно: дёшево, один механизм `emitFGARegisterIntent`). Update-on-labels-
-  триггер пока только у **Instance** (β таргетировал `compute.instance`; для
-  Disk/Image/Snapshot Update-триггер добавляется тем же приёмом при необходимости
-  в последующей волне). vpc-сторона — отдельная волна **β2**.
+  триггер изначально только у **Instance** (β таргетировал `compute.instance`); для
+  Disk/Image/Snapshot Update-триггер достроен в под-фазе **T3.1** (см. ниже).
+  vpc-сторона — отдельная волна **β2**.
+
+### 9.1 Update-on-labels emit достроен на Disk/Image/Snapshot (под-фаза T3.1, #113)
+
+Закрытие разрыва D-β8 (и бага #113): ARM_LABELS-грант на cross-service
+compute-ресурс **не ревокался** при снятии/смене метки, т.к. `Disk/Image/Snapshot.Update`
+не эмитили `RegisterResource`/mirror.upsert на label-change → IAM `resource_mirror`
+протухал и rsab держал стейл-членство. **Create-эмит этих трёх ресурсов уже нёс
+`result.Labels` корректно** (bare-create-бага, как у vpc.SG/nlb.listener, у compute
+**нет** — §0.1 acceptance T3.1). Фикс — только Update-путь:
+
+- `DiskRepo.Update` / `ImageRepo.Update` / `SnapshotRepo.Update` теперь принимают
+  `emitLabelsRegister bool` (parity с `InstanceRepo.Update`); use-case вычисляет его
+  из update-mask (`labelsInMask`: `labels` ∈ mask, либо empty-mask = full-PATCH ⇒ true).
+  Эмит `emitFGARegisterIntent(EventRegister, …, result.Labels)` — в **той же writer-tx**,
+  что и UPDATE (atomic, ban #10 / SEC-D; rollback Update ⇒ intent не записан).
+- **Gated (G-2):** non-label Update (name/description/size) **не** эмитит intent —
+  меньше reconcile-шума; external-наблюдаемое поведение идентично always-emit
+  (`source_version`-monotonic делает «лишний» upsert безвредным).
+- **Полное снятие меток → mirror.upsert с `labels={}`, НЕ `UnregisterResource` (G-3).**
+  Ресурс жив; mirror-строка должна остаться (с пустыми labels) — owner-tuple/containment
+  на той же строке не сносятся, протухают **только** label-селекторы. `UnregisterResource`
+  остаётся исключительно на `Delete` ресурса.
+- IAM-сторона изменений **не требует** (G-6): rsab reconciler уже eager-revoke-ит
+  fell-out members на `mirror.upsert` (`access_binding/reconcile/reconcile.go`).
+
+Покрытие: `internal/repo/{disk,image,snapshot}_repo_integration_test.go`
+(`Test{Disk,Image,Snapshot}Repo_T31Revoke03*_LabelRemoveEmitsMirrorUpsert` +
+`*_T31Idm03*_NonLabelUpdateNoEmit`), testcontainers.
 
 Регистрация intent остаётся **Internal-only :9091** (ban #6); расширение payload
 authz не меняет (решение по subject-cert, не по содержимому payload — D-β9).

@@ -157,7 +157,15 @@ func (r *DiskRepo) Insert(ctx context.Context, d *domain.Disk) (*domain.Disk, er
 }
 
 // Update обновляет mutable поля диска + outbox-event Disk UPDATED.
-func (r *DiskRepo) Update(ctx context.Context, d *domain.Disk) (*domain.Disk, error) {
+//
+// emitLabelsRegister (#113 / T3.1, parity с InstanceRepo.Update): когда true (use-case
+// увидел "labels" в update-mask, либо full-object PATCH применяет labels) — в той же
+// writer-tx, что и UPDATE, эмитится свежий FGA register-intent с текущими labels +
+// parent-scope (atomic, ban #10), чтобы IAM resource_mirror не протух и ARM_LABELS-грант
+// ревокался при снятии/смене метки. Полное снятие меток (labels={}) эмитит mirror.upsert
+// с пустыми labels (НЕ Unregister — ресурс жив, G-3). Когда false (name/description/size
+// без labels) — register-intent НЕ эмитится (G-2: меньше reconcile-шума).
+func (r *DiskRepo) Update(ctx context.Context, d *domain.Disk, emitLabelsRegister bool) (*domain.Disk, error) {
 	labelsJSON, err := marshalJSONB(d.Labels, "Disk.labels")
 	if err != nil {
 		return nil, err
@@ -179,6 +187,14 @@ func (r *DiskRepo) Update(ctx context.Context, d *domain.Disk) (*domain.Disk, er
 	}
 	if err := emitCompute(ctx, tx, "Disk", result.ID, "UPDATED", diskPayload(result)); err != nil {
 		return nil, service.ErrInternal
+	}
+	// #113 / T3.1: refresh the IAM resource_mirror only when labels were in the
+	// update-mask. mirror.upsert (EventRegister) with the CURRENT labels in the SAME
+	// writer-tx (atomic, ban #10); empty labels → upsert {}, NOT unregister (G-3).
+	if emitLabelsRegister {
+		if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Disk", result.ID, result.ProjectID, result.Labels); err != nil {
+			return nil, service.ErrInternal
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, wrapPgErr(err, "Disk", d.ID)

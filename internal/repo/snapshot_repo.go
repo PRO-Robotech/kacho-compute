@@ -145,7 +145,14 @@ func (r *SnapshotRepo) Insert(ctx context.Context, s *domain.Snapshot) (*domain.
 }
 
 // Update обновляет mutable поля снапшота + outbox-event Snapshot UPDATED.
-func (r *SnapshotRepo) Update(ctx context.Context, s *domain.Snapshot) (*domain.Snapshot, error) {
+//
+// emitLabelsRegister (#113 / T3.1, parity с InstanceRepo.Update): когда true (use-case
+// увидел "labels" в update-mask или full-PATCH) — в той же writer-tx эмитится свежий FGA
+// register-intent (mirror.upsert) с текущими labels (atomic, ban #10), чтобы IAM
+// resource_mirror не протух и ARM_LABELS-грант ревокался при снятии/смене метки. Полное
+// снятие меток → upsert {} (НЕ Unregister, G-3). false (name/description без labels) →
+// register-intent НЕ эмитится (G-2).
+func (r *SnapshotRepo) Update(ctx context.Context, s *domain.Snapshot, emitLabelsRegister bool) (*domain.Snapshot, error) {
 	labelsJSON, err := marshalJSONB(s.Labels, "Snapshot.labels")
 	if err != nil {
 		return nil, err
@@ -162,6 +169,13 @@ func (r *SnapshotRepo) Update(ctx context.Context, s *domain.Snapshot) (*domain.
 	}
 	if err := emitCompute(ctx, tx, "Snapshot", result.ID, "UPDATED", snapshotPayload(result)); err != nil {
 		return nil, service.ErrInternal
+	}
+	// #113 / T3.1: refresh the IAM resource_mirror only when labels were in the mask
+	// (mirror.upsert, EventRegister) in the SAME writer-tx; empty labels → upsert {} (G-3).
+	if emitLabelsRegister {
+		if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Snapshot", result.ID, result.ProjectID, result.Labels); err != nil {
+			return nil, service.ErrInternal
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, wrapPgErr(err, "Snapshot", s.ID)
