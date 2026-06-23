@@ -156,7 +156,14 @@ func (r *ImageRepo) Insert(ctx context.Context, i *domain.Image) (*domain.Image,
 }
 
 // Update обновляет mutable поля образа + outbox-event Image UPDATED.
-func (r *ImageRepo) Update(ctx context.Context, i *domain.Image) (*domain.Image, error) {
+//
+// emitLabelsRegister (#113 / T3.1, parity с InstanceRepo.Update): когда true (use-case
+// увидел "labels" в update-mask или full-PATCH) — в той же writer-tx эмитится свежий FGA
+// register-intent (mirror.upsert) с текущими labels (atomic, ban #10), чтобы IAM
+// resource_mirror не протух и ARM_LABELS-грант ревокался при снятии/смене метки. Полное
+// снятие меток → upsert {} (НЕ Unregister, G-3). false (name/description/min_disk_size без
+// labels) → register-intent НЕ эмитится (G-2).
+func (r *ImageRepo) Update(ctx context.Context, i *domain.Image, emitLabelsRegister bool) (*domain.Image, error) {
 	labelsJSON, err := marshalJSONB(i.Labels, "Image.labels")
 	if err != nil {
 		return nil, err
@@ -173,6 +180,13 @@ func (r *ImageRepo) Update(ctx context.Context, i *domain.Image) (*domain.Image,
 	}
 	if err := emitCompute(ctx, tx, "Image", result.ID, "UPDATED", imagePayload(result)); err != nil {
 		return nil, service.ErrInternal
+	}
+	// #113 / T3.1: refresh the IAM resource_mirror only when labels were in the mask
+	// (mirror.upsert, EventRegister) in the SAME writer-tx; empty labels → upsert {} (G-3).
+	if emitLabelsRegister {
+		if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Image", result.ID, result.ProjectID, result.Labels); err != nil {
+			return nil, service.ErrInternal
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, wrapPgErr(err, "Image", i.ID)

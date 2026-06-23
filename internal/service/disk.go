@@ -234,6 +234,11 @@ func (s *DiskService) doUpdate(ctx context.Context, req UpdateDiskReq) (*anypb.A
 	if len(updates) == 0 {
 		updates = []string{"name", "description", "labels", "size", "disk_placement_policy"}
 	}
+	// labelsInMask (#113 / T3.1, parity с InstanceService.Update): triggers an FGA
+	// register-intent refresh (mirror.upsert) so the IAM resource_mirror tracks label
+	// dynamics and ARM_LABELS grants revoke on label-remove/change. Empty mask =
+	// full-PATCH applies labels too, so `updates` already includes it.
+	labelsInMask := false
 	for _, f := range updates {
 		switch f {
 		case "name":
@@ -242,6 +247,7 @@ func (s *DiskService) doUpdate(ctx context.Context, req UpdateDiskReq) (*anypb.A
 			d.Description = req.Description
 		case "labels":
 			d.Labels = req.Labels
+			labelsInMask = true
 		case "size":
 			// silent-ignore size==0 при full-PATCH; explicit-mask size требует увеличения.
 			if len(req.UpdateMask) == 0 && req.Size == 0 {
@@ -258,7 +264,7 @@ func (s *DiskService) doUpdate(ctx context.Context, req UpdateDiskReq) (*anypb.A
 			d.DiskPlacementPolicy = req.DiskPlacementPolicy
 		}
 	}
-	updated, err := s.repo.Update(ctx, d)
+	updated, err := s.repo.Update(ctx, d, labelsInMask)
 	if err != nil {
 		return nil, mapRepoErr(err)
 	}

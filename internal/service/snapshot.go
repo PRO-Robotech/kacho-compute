@@ -163,6 +163,10 @@ func (s *SnapshotService) Update(ctx context.Context, req UpdateSnapshotReq) (*o
 		if len(updates) == 0 {
 			updates = []string{"name", "description", "labels"}
 		}
+		// labelsInMask (#113 / T3.1, parity с InstanceService.Update): triggers an FGA
+		// register-intent refresh (mirror.upsert) so ARM_LABELS grants revoke on
+		// label-remove/change. Empty mask = full-PATCH includes labels.
+		labelsInMask := false
 		for _, f := range updates {
 			switch f {
 			case "name":
@@ -171,9 +175,10 @@ func (s *SnapshotService) Update(ctx context.Context, req UpdateSnapshotReq) (*o
 				snap.Description = req.Description
 			case "labels":
 				snap.Labels = req.Labels
+				labelsInMask = true
 			}
 		}
-		updated, err := s.repo.Update(ctx, snap)
+		updated, err := s.repo.Update(ctx, snap, labelsInMask)
 		if err != nil {
 			return nil, mapRepoErr(err)
 		}

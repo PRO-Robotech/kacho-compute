@@ -254,6 +254,10 @@ func (s *ImageService) Update(ctx context.Context, req UpdateImageReq) (*operati
 		if len(updates) == 0 {
 			updates = []string{"name", "description", "labels", "min_disk_size"}
 		}
+		// labelsInMask (#113 / T3.1, parity с InstanceService.Update): triggers an FGA
+		// register-intent refresh (mirror.upsert) so ARM_LABELS grants revoke on
+		// label-remove/change. Empty mask = full-PATCH includes labels.
+		labelsInMask := false
 		for _, f := range updates {
 			switch f {
 			case "name":
@@ -262,6 +266,7 @@ func (s *ImageService) Update(ctx context.Context, req UpdateImageReq) (*operati
 				i.Description = req.Description
 			case "labels":
 				i.Labels = req.Labels
+				labelsInMask = true
 			case "min_disk_size":
 				if len(req.UpdateMask) == 0 && req.MinDiskSize == 0 {
 					continue
@@ -269,7 +274,7 @@ func (s *ImageService) Update(ctx context.Context, req UpdateImageReq) (*operati
 				i.MinDiskSize = req.MinDiskSize
 			}
 		}
-		updated, err := s.repo.Update(ctx, i)
+		updated, err := s.repo.Update(ctx, i, labelsInMask)
 		if err != nil {
 			return nil, mapRepoErr(err)
 		}

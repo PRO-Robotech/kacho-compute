@@ -57,7 +57,8 @@ type DiskRepo interface {
 	Get(ctx context.Context, id string) (*domain.Disk, error)
 	List(ctx context.Context, f DiskFilter, p Pagination) ([]*domain.Disk, string, error)
 	Insert(ctx context.Context, d *domain.Disk) (*domain.Disk, error)
-	Update(ctx context.Context, d *domain.Disk) (*domain.Disk, error)
+	// Update — emitLabelsRegister эмитит mirror.upsert при labels-в-маске (#113/T3.1, parity с Instance).
+	Update(ctx context.Context, d *domain.Disk, emitLabelsRegister bool) (*domain.Disk, error)
 	Delete(ctx context.Context, id string) error
 	// SetZoneID меняет zone_id (для Relocate).
 	SetZoneID(ctx context.Context, id, zoneID string) (*domain.Disk, error)
@@ -71,7 +72,8 @@ type ImageRepo interface {
 	GetLatestByFamily(ctx context.Context, folderID, family string) (*domain.Image, error)
 	List(ctx context.Context, f ImageFilter, p Pagination) ([]*domain.Image, string, error)
 	Insert(ctx context.Context, i *domain.Image) (*domain.Image, error)
-	Update(ctx context.Context, i *domain.Image) (*domain.Image, error)
+	// Update — emitLabelsRegister эмитит mirror.upsert при labels-в-маске (#113/T3.1, parity с Instance).
+	Update(ctx context.Context, i *domain.Image, emitLabelsRegister bool) (*domain.Image, error)
 	Delete(ctx context.Context, id string) error
 }
 
@@ -80,7 +82,8 @@ type SnapshotRepo interface {
 	Get(ctx context.Context, id string) (*domain.Snapshot, error)
 	List(ctx context.Context, f SnapshotFilter, p Pagination) ([]*domain.Snapshot, string, error)
 	Insert(ctx context.Context, s *domain.Snapshot) (*domain.Snapshot, error)
-	Update(ctx context.Context, s *domain.Snapshot) (*domain.Snapshot, error)
+	// Update — emitLabelsRegister эмитит mirror.upsert при labels-в-маске (#113/T3.1, parity с Instance).
+	Update(ctx context.Context, s *domain.Snapshot, emitLabelsRegister bool) (*domain.Snapshot, error)
 	Delete(ctx context.Context, id string) error
 }
 

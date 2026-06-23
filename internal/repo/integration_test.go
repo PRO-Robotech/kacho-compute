@@ -78,10 +78,10 @@ func TestIntegration_DiskRepo_CRUD(t *testing.T) {
 	_, err = r.Insert(ctx, &dup)
 	require.ErrorIs(t, err, service.ErrAlreadyExists)
 
-	// update.
+	// update (name/size only, no labels → emitLabelsRegister=false).
 	got.Name = "disk-b"
 	got.Size = 8 << 20
-	updated, err := r.Update(ctx, got)
+	updated, err := r.Update(ctx, got, false)
 	require.NoError(t, err)
 	assert.Equal(t, "disk-b", updated.Name)
 	assert.Equal(t, int64(8<<20), updated.Size)
