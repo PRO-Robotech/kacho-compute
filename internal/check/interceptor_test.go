@@ -69,7 +69,7 @@ func TestInterceptor_Unary_Allow_InstanceCreate(t *testing.T) {
 func TestInterceptor_Unary_Deny_InstanceStop(t *testing.T) {
 	intr, calls := newTestInterceptor(t, func(_ context.Context, subject, relation, object string) (bool, error) {
 		require.Equal(t, "user:usr_bob", subject)
-		require.Equal(t, "editor", relation)
+		require.Equal(t, "v_update", relation)
 		require.Equal(t, "compute_instance:epd_xxx", object)
 		return false, nil
 	})
