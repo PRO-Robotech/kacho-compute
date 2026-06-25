@@ -27,8 +27,29 @@ const (
 )
 
 const (
+	// relationViewer / relationEditor — tier-relations. Сохраняются для
+	// create-child (на parent project, F-7), top-level project-List (visibility
+	// per-object идёт через iam ListObjects `viewer ∪ v_list`, не через per-RPC
+	// Check) и DiskType read-only catalog (cluster — не verb-bearing). Для
+	// object-self CRUD энфорс — verb-bearing relations ниже.
 	relationViewer = "viewer"
 	relationEditor = "editor"
+
+	// verb-bearing relations (v_*) — enforcement резолвит object-self action на
+	// verb, а не на tier (anchor-эпик «Explicit RBAC model 2026», D-6/D-6a:
+	// доступ по verb развязан с tier). Материализуются per-object reconciler'ом
+	// kacho-iam; consumer гейтит ими object-self RPC. Source of truth relation-имён
+	// — kacho-iam/internal/authzmap; тут — backend view-only.
+	//
+	//	v_get    — чтение содержимого самого ресурса (Get / GetSerialPortOutput);
+	//	v_list   — видимость операций/дочерних на самом ресурсе (ListOperations,
+	//	           ListSnapshotSchedules) — НЕ top-level project-List;
+	//	v_update — мутация самого ресурса (Update + lifecycle/attach/detach verb'ы);
+	//	v_delete — удаление самого ресурса.
+	relationVGet    = "v_get"
+	relationVList   = "v_list"
+	relationVUpdate = "v_update"
+	relationVDelete = "v_delete"
 
 	// relationSystemAdmin — cluster-scoped admin relation for kacho-only catalog
 	// mutations (InternalDiskTypeService Create/Update/Delete).
@@ -49,24 +70,28 @@ func staticClusterCatalog() authz.ObjectExtractor {
 
 // PermissionMap — карта RPC → required relation+extract.
 //
-// Семантика (см. kacho-vpc/internal/apps/kacho/check/permission_map.go):
-//   - Create / List         — на parent scope `project:<project_id>`
-//   - Get/Update/Delete/<verb> — на самом ресурсе `<resource_type>:<resource_id>`
-//   - OperationService.Get  — viewer на `compute_operation:<id>`
-//   - DiskType Get/List — viewer на `system:catalog`
-//   - SetAccessBindings/ListAccessBindings (kacho-iam-on-resource ACL) —
-//     viewer/editor на самом ресурсе.
+// Семантика per-RPC (enforcement по verb, развязан с tier — D-6/D-6a):
+//   - Create                          — parent scope `project:<project_id>`, tier `editor` (F-7)
+//   - top-level List                  — parent scope `project:<project_id>`, tier `viewer`;
+//     visibility per-object — через iam ListObjects `viewer ∪ v_list`
+//   - Get / GetSerialPortOutput       — на самом ресурсе, `v_get`
+//   - ListOperations/Snapshot… (on res) — на самом ресурсе, `v_list`
+//   - Update + lifecycle/attach verb'ы — на самом ресурсе, `v_update`
+//   - Delete                          — на самом ресурсе, `v_delete`
+//   - DiskType Get/List               — `viewer` на cluster singleton (не verb-bearing)
+//   - OperationService.Get            — Public (op-id opaque, поллится creator'ом)
 //
-// scope-guard (KAC-108): для Update/Delete/<verb> мы НЕ резолвим project_id
-// из БД заранее — проверка на самом ресурсе достаточно через FGA cascade
-// (`editor on compute_instance` ← `editor on project`).
+// scope-guard (KAC-108): для object-self RPC мы НЕ резолвим project_id из БД
+// заранее — проверяем v_*-relation на самом ресурсе. reconciler kacho-iam
+// материализует per-object `v_get/v_list/v_update/v_delete` для grant'а
+// соответствующего verb'а; cluster-admin резолвится через iam short-circuit.
 func PermissionMap() authz.RPCMap {
 	return authz.RPCMap{
 		// =========================
 		// DiskService
 		// =========================
 		"/kacho.cloud.compute.v1.DiskService/Get": {
-			Relation: relationViewer,
+			Relation: relationVGet,
 			Extract: authz.StaticExtractor(objectTypeDisk, func(req any) (string, error) {
 				return req.(*computev1.GetDiskRequest).GetDiskId(), nil
 			}),
@@ -84,31 +109,31 @@ func PermissionMap() authz.RPCMap {
 			}),
 		},
 		"/kacho.cloud.compute.v1.DiskService/Update": {
-			Relation: relationEditor,
+			Relation: relationVUpdate,
 			Extract: authz.StaticExtractor(objectTypeDisk, func(req any) (string, error) {
 				return req.(*computev1.UpdateDiskRequest).GetDiskId(), nil
 			}),
 		},
 		"/kacho.cloud.compute.v1.DiskService/Delete": {
-			Relation: relationEditor,
+			Relation: relationVDelete,
 			Extract: authz.StaticExtractor(objectTypeDisk, func(req any) (string, error) {
 				return req.(*computev1.DeleteDiskRequest).GetDiskId(), nil
 			}),
 		},
 		"/kacho.cloud.compute.v1.DiskService/Relocate": {
-			Relation: relationEditor,
+			Relation: relationVUpdate,
 			Extract: authz.StaticExtractor(objectTypeDisk, func(req any) (string, error) {
 				return req.(*computev1.RelocateDiskRequest).GetDiskId(), nil
 			}),
 		},
 		"/kacho.cloud.compute.v1.DiskService/ListOperations": {
-			Relation: relationViewer,
+			Relation: relationVList,
 			Extract: authz.StaticExtractor(objectTypeDisk, func(req any) (string, error) {
 				return req.(*computev1.ListDiskOperationsRequest).GetDiskId(), nil
 			}),
 		},
 		"/kacho.cloud.compute.v1.DiskService/ListSnapshotSchedules": {
-			Relation: relationViewer,
+			Relation: relationVList,
 			Extract: authz.StaticExtractor(objectTypeDisk, func(req any) (string, error) {
 				return req.(*computev1.ListDiskSnapshotSchedulesRequest).GetDiskId(), nil
 			}),
@@ -118,7 +143,7 @@ func PermissionMap() authz.RPCMap {
 		// ImageService
 		// =========================
 		"/kacho.cloud.compute.v1.ImageService/Get": {
-			Relation: relationViewer,
+			Relation: relationVGet,
 			Extract: authz.StaticExtractor(objectTypeImage, func(req any) (string, error) {
 				return req.(*computev1.GetImageRequest).GetImageId(), nil
 			}),
@@ -142,19 +167,19 @@ func PermissionMap() authz.RPCMap {
 			}),
 		},
 		"/kacho.cloud.compute.v1.ImageService/Update": {
-			Relation: relationEditor,
+			Relation: relationVUpdate,
 			Extract: authz.StaticExtractor(objectTypeImage, func(req any) (string, error) {
 				return req.(*computev1.UpdateImageRequest).GetImageId(), nil
 			}),
 		},
 		"/kacho.cloud.compute.v1.ImageService/Delete": {
-			Relation: relationEditor,
+			Relation: relationVDelete,
 			Extract: authz.StaticExtractor(objectTypeImage, func(req any) (string, error) {
 				return req.(*computev1.DeleteImageRequest).GetImageId(), nil
 			}),
 		},
 		"/kacho.cloud.compute.v1.ImageService/ListOperations": {
-			Relation: relationViewer,
+			Relation: relationVList,
 			Extract: authz.StaticExtractor(objectTypeImage, func(req any) (string, error) {
 				return req.(*computev1.ListImageOperationsRequest).GetImageId(), nil
 			}),
@@ -164,7 +189,7 @@ func PermissionMap() authz.RPCMap {
 		// SnapshotService
 		// =========================
 		"/kacho.cloud.compute.v1.SnapshotService/Get": {
-			Relation: relationViewer,
+			Relation: relationVGet,
 			Extract: authz.StaticExtractor(objectTypeSnapshot, func(req any) (string, error) {
 				return req.(*computev1.GetSnapshotRequest).GetSnapshotId(), nil
 			}),
@@ -182,19 +207,19 @@ func PermissionMap() authz.RPCMap {
 			}),
 		},
 		"/kacho.cloud.compute.v1.SnapshotService/Update": {
-			Relation: relationEditor,
+			Relation: relationVUpdate,
 			Extract: authz.StaticExtractor(objectTypeSnapshot, func(req any) (string, error) {
 				return req.(*computev1.UpdateSnapshotRequest).GetSnapshotId(), nil
 			}),
 		},
 		"/kacho.cloud.compute.v1.SnapshotService/Delete": {
-			Relation: relationEditor,
+			Relation: relationVDelete,
 			Extract: authz.StaticExtractor(objectTypeSnapshot, func(req any) (string, error) {
 				return req.(*computev1.DeleteSnapshotRequest).GetSnapshotId(), nil
 			}),
 		},
 		"/kacho.cloud.compute.v1.SnapshotService/ListOperations": {
-			Relation: relationViewer,
+			Relation: relationVList,
 			Extract: authz.StaticExtractor(objectTypeSnapshot, func(req any) (string, error) {
 				return req.(*computev1.ListSnapshotOperationsRequest).GetSnapshotId(), nil
 			}),
@@ -204,7 +229,7 @@ func PermissionMap() authz.RPCMap {
 		// InstanceService — lifecycle-heavy ресурс
 		// =========================
 		"/kacho.cloud.compute.v1.InstanceService/Get": {
-			Relation: relationViewer,
+			Relation: relationVGet,
 			Extract: authz.StaticExtractor(objectTypeInstance, func(req any) (string, error) {
 				return req.(*computev1.GetInstanceRequest).GetInstanceId(), nil
 			}),
@@ -222,103 +247,103 @@ func PermissionMap() authz.RPCMap {
 			}),
 		},
 		"/kacho.cloud.compute.v1.InstanceService/Update": {
-			Relation: relationEditor,
+			Relation: relationVUpdate,
 			Extract: authz.StaticExtractor(objectTypeInstance, func(req any) (string, error) {
 				return req.(*computev1.UpdateInstanceRequest).GetInstanceId(), nil
 			}),
 		},
 		"/kacho.cloud.compute.v1.InstanceService/UpdateMetadata": {
-			Relation: relationEditor,
+			Relation: relationVUpdate,
 			Extract: authz.StaticExtractor(objectTypeInstance, func(req any) (string, error) {
 				return req.(*computev1.UpdateInstanceMetadataRequest).GetInstanceId(), nil
 			}),
 		},
 		"/kacho.cloud.compute.v1.InstanceService/Delete": {
-			Relation: relationEditor,
+			Relation: relationVDelete,
 			Extract: authz.StaticExtractor(objectTypeInstance, func(req any) (string, error) {
 				return req.(*computev1.DeleteInstanceRequest).GetInstanceId(), nil
 			}),
 		},
 		"/kacho.cloud.compute.v1.InstanceService/GetSerialPortOutput": {
-			Relation: relationViewer,
+			Relation: relationVGet,
 			Extract: authz.StaticExtractor(objectTypeInstance, func(req any) (string, error) {
 				return req.(*computev1.GetInstanceSerialPortOutputRequest).GetInstanceId(), nil
 			}),
 		},
 		"/kacho.cloud.compute.v1.InstanceService/Start": {
-			Relation: relationEditor,
+			Relation: relationVUpdate,
 			Extract: authz.StaticExtractor(objectTypeInstance, func(req any) (string, error) {
 				return req.(*computev1.StartInstanceRequest).GetInstanceId(), nil
 			}),
 		},
 		"/kacho.cloud.compute.v1.InstanceService/Stop": {
-			Relation: relationEditor,
+			Relation: relationVUpdate,
 			Extract: authz.StaticExtractor(objectTypeInstance, func(req any) (string, error) {
 				return req.(*computev1.StopInstanceRequest).GetInstanceId(), nil
 			}),
 		},
 		"/kacho.cloud.compute.v1.InstanceService/Restart": {
-			Relation: relationEditor,
+			Relation: relationVUpdate,
 			Extract: authz.StaticExtractor(objectTypeInstance, func(req any) (string, error) {
 				return req.(*computev1.RestartInstanceRequest).GetInstanceId(), nil
 			}),
 		},
 		"/kacho.cloud.compute.v1.InstanceService/AttachDisk": {
-			Relation: relationEditor,
+			Relation: relationVUpdate,
 			Extract: authz.StaticExtractor(objectTypeInstance, func(req any) (string, error) {
 				return req.(*computev1.AttachInstanceDiskRequest).GetInstanceId(), nil
 			}),
 		},
 		"/kacho.cloud.compute.v1.InstanceService/DetachDisk": {
-			Relation: relationEditor,
+			Relation: relationVUpdate,
 			Extract: authz.StaticExtractor(objectTypeInstance, func(req any) (string, error) {
 				return req.(*computev1.DetachInstanceDiskRequest).GetInstanceId(), nil
 			}),
 		},
 		"/kacho.cloud.compute.v1.InstanceService/AttachFilesystem": {
-			Relation: relationEditor,
+			Relation: relationVUpdate,
 			Extract: authz.StaticExtractor(objectTypeInstance, func(req any) (string, error) {
 				return req.(*computev1.AttachInstanceFilesystemRequest).GetInstanceId(), nil
 			}),
 		},
 		"/kacho.cloud.compute.v1.InstanceService/DetachFilesystem": {
-			Relation: relationEditor,
+			Relation: relationVUpdate,
 			Extract: authz.StaticExtractor(objectTypeInstance, func(req any) (string, error) {
 				return req.(*computev1.DetachInstanceFilesystemRequest).GetInstanceId(), nil
 			}),
 		},
 		"/kacho.cloud.compute.v1.InstanceService/AddOneToOneNat": {
-			Relation: relationEditor,
+			Relation: relationVUpdate,
 			Extract: authz.StaticExtractor(objectTypeInstance, func(req any) (string, error) {
 				return req.(*computev1.AddInstanceOneToOneNatRequest).GetInstanceId(), nil
 			}),
 		},
 		"/kacho.cloud.compute.v1.InstanceService/RemoveOneToOneNat": {
-			Relation: relationEditor,
+			Relation: relationVUpdate,
 			Extract: authz.StaticExtractor(objectTypeInstance, func(req any) (string, error) {
 				return req.(*computev1.RemoveInstanceOneToOneNatRequest).GetInstanceId(), nil
 			}),
 		},
 		"/kacho.cloud.compute.v1.InstanceService/UpdateNetworkInterface": {
-			Relation: relationEditor,
+			Relation: relationVUpdate,
 			Extract: authz.StaticExtractor(objectTypeInstance, func(req any) (string, error) {
 				return req.(*computev1.UpdateInstanceNetworkInterfaceRequest).GetInstanceId(), nil
 			}),
 		},
 		"/kacho.cloud.compute.v1.InstanceService/ListOperations": {
-			Relation: relationViewer,
+			Relation: relationVList,
 			Extract: authz.StaticExtractor(objectTypeInstance, func(req any) (string, error) {
 				return req.(*computev1.ListInstanceOperationsRequest).GetInstanceId(), nil
 			}),
 		},
 		"/kacho.cloud.compute.v1.InstanceService/Relocate": {
-			Relation: relationEditor,
+			Relation: relationVUpdate,
 			Extract: authz.StaticExtractor(objectTypeInstance, func(req any) (string, error) {
 				return req.(*computev1.RelocateInstanceRequest).GetInstanceId(), nil
 			}),
 		},
 		"/kacho.cloud.compute.v1.InstanceService/SimulateMaintenanceEvent": {
-			Relation: relationEditor,
+			Relation: relationVUpdate,
 			Extract: authz.StaticExtractor(objectTypeInstance, func(req any) (string, error) {
 				return req.(*computev1.SimulateInstanceMaintenanceEventRequest).GetInstanceId(), nil
 			}),
