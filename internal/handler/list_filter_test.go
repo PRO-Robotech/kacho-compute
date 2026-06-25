@@ -1,34 +1,35 @@
-// list_filter_test.go — KAC-127 Phase 4: handler-level integration tests for
-// FGA-filtered List handlers (Disk / Image / Snapshot / Instance).
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
+// list_filter_test.go — handler-level tests for FGA-filtered List handlers
+// (Disk / Image / Snapshot / Instance).
 //
 // Uses portmock repos + in-memory authzfilter.Filter (no real iam needed).
-// Covers all scenarios from sub-phase-3.4 acceptance:
-//   - allowed-subset
-//   - empty grant → empty response (NOT 403)
-//   - bypass when filter == nil (dev)
-//   - admin caller (x-kacho-admin: true) → bypass
-//   - subject + FGA returns allow-list → filtered repo result
-//   - iam-down + fail-closed → Unavailable
-//   - iam-down + fail-open → all results (bypass)
-//   - subject from canonical x-kacho-subject header
-//   - subject from legacy headers
-//   - page-token preserved across filter
-//   - cache reuse on repeated calls (verified at filter level)
-//   - catalog (DiskType) NOT filtered.
+// Identity source is the request Principal (operations.WithPrincipal), the SAME
+// source per-RPC Check uses — NOT the dead x-kacho-subject* headers. Covers the
+// label-scope over-show leak fix (sub-phase-compute-list-leak-fix-acceptance):
+//   - CLL-01 label-scoped subject → EXACTLY the allowed subset (not all)
+//   - CLL-02 subject=="" (system / no principal) → fail-closed empty (NOT bypass)
+//   - CLL-03 cluster-admin / owner → all (iam ListObjects returns all ids)
+//   - CLL-04 adversarial not-granted subject → empty (no existence leak)
+//   - CLL-05 same semantics across Disk / Image / Snapshot / Instance
+//   - CLL-06 catalog (DiskType) NOT filtered
+//   - CLL-07 iam-down + fail-closed → Unavailable
 package handler
 
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
+	"github.com/PRO-Robotech/kacho-corelib/operations"
 	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
 	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
 
@@ -42,7 +43,7 @@ type mockAuthCli struct {
 	allowedByKey map[string][]string
 	err          error
 	calls        int
-	lastAction   string // captured so D-45 read==enforce tests can assert the verb
+	lastAction   string // captured so read==enforce tests can assert the verb
 	lastResType  string
 }
 
@@ -68,14 +69,15 @@ func newFilter(t *testing.T, cli authzfilter.AuthorizeClient) authzfilter.Filter
 	return authzfilter.NewFGAFilter(cli, cfg)
 }
 
+// ctxWithSubject — кладёт в ctx Principal, эквивалентный FGA-subject "type:id".
+// Это ЕДИНЫЙ источник identity (как api-gateway principal-extract); прежний
+// x-kacho-subject header больше не источник. subject вида "user:usr_alice".
 func ctxWithSubject(subject string) context.Context {
-	md := metadata.Pairs("x-kacho-subject", subject)
-	return metadata.NewIncomingContext(context.Background(), md)
-}
-
-func ctxAdmin() context.Context {
-	md := metadata.Pairs("x-kacho-subject", "user:usr_root", "x-kacho-admin", "true")
-	return metadata.NewIncomingContext(context.Background(), md)
+	t, id, ok := strings.Cut(subject, ":")
+	if !ok {
+		return context.Background()
+	}
+	return operations.WithPrincipal(context.Background(), operations.Principal{Type: t, ID: id})
 }
 
 // createDisks — seed N disks via the disk service; returns their ids.
@@ -111,7 +113,8 @@ func setupDiskHandler(t *testing.T, filter authzfilter.Filter) (*DiskHandler, *p
 	return NewDiskHandler(svc, filter), ops
 }
 
-// SCENARIO 1: filter == nil → handler bypasses (returns all).
+// SCENARIO 1: filter == nil → handler bypasses (FGA disabled config-gate / dev).
+// This is the deliberate config-off bypass, NOT the missing-identity bypass.
 func TestDiskHandler_List_FilterNil_Bypass(t *testing.T) {
 	h, ops := setupDiskHandler(t, nil)
 	createDisks(t, h, ops, "proj", "d1", "d2", "d3")
@@ -121,20 +124,24 @@ func TestDiskHandler_List_FilterNil_Bypass(t *testing.T) {
 	require.Len(t, resp.Disks, 3, "filter=nil must return all disks")
 }
 
-// SCENARIO 2: admin caller → bypass even with filter set.
-func TestDiskHandler_List_AdminBypass(t *testing.T) {
-	cli := &mockAuthCli{}
+// CLL-03: cluster-admin / owner → all. The IAM ListObjects returns ALL ids for
+// an owner/cluster-admin subject (owner→viewer FGA derivation), so the handler
+// passes through the full set. No compute-side header-bypass exists anymore.
+func TestDiskHandler_List_CLL03_OwnerSeesAll(t *testing.T) {
+	cli := &mockAuthCli{allowedByKey: map[string][]string{}}
 	h, ops := setupDiskHandler(t, newFilter(t, cli))
-	createDisks(t, h, ops, "proj", "a", "b", "c")
+	ids := createDisks(t, h, ops, "proj", "a", "b", "c")
+	// owner/cluster-admin: iam returns every id.
+	cli.allowedByKey["user:usr_owner|compute_disk|compute.disks.list"] = ids
 
-	resp, err := h.List(ctxAdmin(), &computev1.ListDisksRequest{ProjectId: "proj"})
+	resp, err := h.List(ctxWithSubject("user:usr_owner"), &computev1.ListDisksRequest{ProjectId: "proj"})
 	require.NoError(t, err)
-	require.Len(t, resp.Disks, 3, "admin must see all")
-	require.Equal(t, 0, cli.calls, "admin must NOT trigger iam.ListObjects")
+	require.Len(t, resp.Disks, 3, "owner/cluster-admin must see all")
 }
 
-// SCENARIO 3: allowed subset — FGA returns 2 of 3 ids.
-func TestDiskHandler_List_AllowedSubset(t *testing.T) {
+// CLL-01: label-scoped subject → EXACTLY the allowed subset (the over-show leak
+// fix anchor). FGA returns 2 of 3 ids; the response MUST NOT include the third.
+func TestDiskHandler_List_CLL01_AllowedSubset(t *testing.T) {
 	cli := &mockAuthCli{allowedByKey: map[string][]string{}}
 	h, ops := setupDiskHandler(t, newFilter(t, cli))
 	ids := createDisks(t, h, ops, "proj", "a", "b", "c")
@@ -148,22 +155,23 @@ func TestDiskHandler_List_AllowedSubset(t *testing.T) {
 		gotIDs[d.Id] = true
 	}
 	require.True(t, gotIDs[ids[0]] && gotIDs[ids[2]])
-	require.False(t, gotIDs[ids[1]])
+	require.False(t, gotIDs[ids[1]], "leak: non-granted disk must NOT appear")
 }
 
-// SCENARIO 4: empty grant → empty response (NOT 403).
-func TestDiskHandler_List_EmptyGrant(t *testing.T) {
+// CLL-04: empty grant (not-granted subject) → empty response (NOT 403, NOT all).
+// Adversarial: the existence of other-tenant disks must not be revealed.
+func TestDiskHandler_List_CLL04_EmptyGrant(t *testing.T) {
 	cli := &mockAuthCli{} // no entries → returns empty []
 	h, ops := setupDiskHandler(t, newFilter(t, cli))
 	createDisks(t, h, ops, "proj", "a", "b")
 
 	resp, err := h.List(ctxWithSubject("user:usr_nobody"), &computev1.ListDisksRequest{ProjectId: "proj"})
 	require.NoError(t, err, "empty grant must not error")
-	require.Len(t, resp.Disks, 0)
+	require.Len(t, resp.Disks, 0, "leak: not-granted subject must see nothing")
 }
 
-// SCENARIO 5: iam-down + fail-closed → Unavailable.
-func TestDiskHandler_List_IAMDown_FailClosed(t *testing.T) {
+// CLL-07: iam-down + fail-closed → Unavailable (non-regression).
+func TestDiskHandler_List_CLL07_IAMDown_FailClosed(t *testing.T) {
 	cli := &mockAuthCli{err: status.Error(codes.Unavailable, "down")}
 	h, ops := setupDiskHandler(t, newFilter(t, cli))
 	createDisks(t, h, ops, "proj", "a")
@@ -173,7 +181,7 @@ func TestDiskHandler_List_IAMDown_FailClosed(t *testing.T) {
 	require.Equal(t, codes.Unavailable, status.Code(err))
 }
 
-// SCENARIO 6: iam-down + fail-open → all results.
+// iam-down + fail-open → all results (degraded-mode bypass, opt-in config).
 func TestDiskHandler_List_IAMDown_FailOpen(t *testing.T) {
 	cli := &mockAuthCli{err: errors.New("network err")}
 	cfg := authzfilter.DefaultConfig()
@@ -188,21 +196,37 @@ func TestDiskHandler_List_IAMDown_FailOpen(t *testing.T) {
 	require.Len(t, resp.Disks, 2)
 }
 
-// SCENARIO 7: anonymous caller (no subject) → bypass in dev (no error).
-func TestDiskHandler_List_AnonymousBypass(t *testing.T) {
+// CLL-02 (the leak root): subject=="" (no principal / system) → fail-closed.
+// Previously this short-circuited to bypass-all and leaked every disk. The fix
+// must return an EMPTY list (existence of disks must stay unknowable) and must
+// NOT short-circuit to bypass. The filter is consulted with subject="" which is
+// fail-closed at the FGA layer, OR the handler returns empty directly — either
+// way the response is empty.
+func TestDiskHandler_List_CLL02_NoPrincipal_FailClosed(t *testing.T) {
+	cli := &mockAuthCli{}
+	h, ops := setupDiskHandler(t, newFilter(t, cli))
+	createDisks(t, h, ops, "proj", "a", "b", "c")
+
+	// No principal in ctx at all → SystemPrincipal → subject="".
+	resp, err := h.List(context.Background(), &computev1.ListDisksRequest{ProjectId: "proj"})
+	require.NoError(t, err, "no-principal must not be a 5xx; it is fail-closed empty")
+	require.Len(t, resp.Disks, 0, "LEAK: no-principal must NOT bypass to all disks")
+}
+
+// CLL-02 variant: explicit SystemPrincipal → fail-closed empty (not bypass-all).
+func TestDiskHandler_List_CLL02_SystemPrincipal_FailClosed(t *testing.T) {
 	cli := &mockAuthCli{}
 	h, ops := setupDiskHandler(t, newFilter(t, cli))
 	createDisks(t, h, ops, "proj", "a", "b")
 
-	// No metadata at all.
-	resp, err := h.List(context.Background(), &computev1.ListDisksRequest{ProjectId: "proj"})
+	ctx := operations.WithPrincipal(context.Background(), operations.SystemPrincipal())
+	resp, err := h.List(ctx, &computev1.ListDisksRequest{ProjectId: "proj"})
 	require.NoError(t, err)
-	require.Len(t, resp.Disks, 2)
-	require.Equal(t, 0, cli.calls, "anonymous: must NOT call iam")
+	require.Len(t, resp.Disks, 0, "LEAK: system principal must NOT bypass to all disks")
 }
 
-// SCENARIO 8: image handler same behaviour (parametrized).
-func TestImageHandler_List_AllowedSubset(t *testing.T) {
+// CLL-05 (image): label-scoped subject → exactly the allowed subset.
+func TestImageHandler_List_CLL05_AllowedSubset(t *testing.T) {
 	cli := &mockAuthCli{allowedByKey: map[string][]string{}}
 	ops := portmock.NewOpsRepo()
 	imgRepo := portmock.NewImageRepo()
@@ -210,7 +234,6 @@ func TestImageHandler_List_AllowedSubset(t *testing.T) {
 		&portmock.ProjectClient{OK: true}, ops)
 	h := NewImageHandler(svc, newFilter(t, cli))
 
-	// Create 2 images (oneof Source = uri).
 	ctx := context.Background()
 	var ids []string
 	for _, n := range []string{"img-a", "img-b"} {
@@ -233,7 +256,30 @@ func TestImageHandler_List_AllowedSubset(t *testing.T) {
 	require.Equal(t, ids[0], resp.Images[0].Id)
 }
 
-// SCENARIO 9: cache hit — second call within TTL uses cached decision.
+// CLL-05 (image): no-principal → fail-closed empty (leak guard).
+func TestImageHandler_List_CLL02_NoPrincipal_FailClosed(t *testing.T) {
+	cli := &mockAuthCli{}
+	ops := portmock.NewOpsRepo()
+	svc := service.NewImageService(portmock.NewImageRepo(), portmock.NewDiskRepo(), portmock.NewSnapshotRepo(),
+		&portmock.ProjectClient{OK: true}, ops)
+	h := NewImageHandler(svc, newFilter(t, cli))
+
+	ctx := context.Background()
+	for _, n := range []string{"img-a", "img-b"} {
+		op, err := h.Create(ctx, &computev1.CreateImageRequest{
+			ProjectId: "proj", Name: n,
+			Source: &computev1.CreateImageRequest_Uri{Uri: "https://example.com/img"},
+		})
+		require.NoError(t, err)
+		portmock.AwaitAllOpsDone(t, ops)
+		_ = op
+	}
+	resp, err := h.List(context.Background(), &computev1.ListImagesRequest{ProjectId: "proj"})
+	require.NoError(t, err)
+	require.Len(t, resp.Images, 0, "LEAK: no-principal must NOT bypass to all images")
+}
+
+// SCENARIO: cache hit — second call within TTL uses cached decision.
 func TestDiskHandler_List_CacheReuse(t *testing.T) {
 	cli := &mockAuthCli{allowedByKey: map[string][]string{}}
 	h, ops := setupDiskHandler(t, newFilter(t, cli))
@@ -248,36 +294,39 @@ func TestDiskHandler_List_CacheReuse(t *testing.T) {
 	require.Equal(t, 1, cli.calls, "5 List calls but only 1 iam.ListObjects (cache)")
 }
 
-// SCENARIO 10: subject from legacy two-header form works.
-func TestDiskHandler_List_LegacySubjectHeaders(t *testing.T) {
+// CLL-05 (snapshot): label-scoped subject → exactly the allowed subset + no-principal fail-closed.
+func TestSnapshotHandler_List_CLL05(t *testing.T) {
 	cli := &mockAuthCli{allowedByKey: map[string][]string{}}
-	h, ops := setupDiskHandler(t, newFilter(t, cli))
-	ids := createDisks(t, h, ops, "proj", "a", "b")
-	cli.allowedByKey["service_account:sa_kube|compute_disk|compute.disks.list"] = []string{ids[1]}
+	ops := portmock.NewOpsRepo()
+	diskRepo := portmock.NewDiskRepo()
+	snapSvc := service.NewSnapshotService(portmock.NewSnapshotRepo(), diskRepo,
+		&portmock.ProjectClient{OK: true}, ops)
+	h := NewSnapshotHandler(snapSvc, newFilter(t, cli))
 
-	md := metadata.Pairs("x-kacho-subject-type", "service_account", "x-kacho-subject-id", "sa_kube")
-	ctx := metadata.NewIncomingContext(context.Background(), md)
-	resp, err := h.List(ctx, &computev1.ListDisksRequest{ProjectId: "proj"})
+	// no-principal → empty (leak guard).
+	resp, err := h.List(context.Background(), &computev1.ListSnapshotsRequest{ProjectId: "proj"})
 	require.NoError(t, err)
-	require.Len(t, resp.Disks, 1)
-	require.Equal(t, ids[1], resp.Disks[0].Id)
+	require.Len(t, resp.Snapshots, 0, "LEAK: no-principal must NOT bypass to all snapshots")
+
+	// not-granted subject → empty.
+	resp, err = h.List(ctxWithSubject("user:usr_nobody"), &computev1.ListSnapshotsRequest{ProjectId: "proj"})
+	require.NoError(t, err)
+	require.Len(t, resp.Snapshots, 0)
 }
 
-// SCENARIO 11: catalog handler (DiskType) NOT filtered.
-// Catalog handlers don't receive listFilter at all — they're public read.
-// Region/Zone serving removed (Stage S7) — Geography is owned by kacho-geo.
+// CLL-06: catalog handler (DiskType) NOT filtered — public read, unaffected.
 func TestCatalogHandlers_NoFilter(t *testing.T) {
 	dtSvc := service.NewDiskTypeService(portmock.NewDiskTypeRepo("network-ssd", "network-hdd"))
 	dh := NewDiskTypeHandler(dtSvc)
 
-	// Even with anonymous ctx — catalog visible.
+	// Even with no principal — catalog visible.
 	resp, err := dh.List(context.Background(), &computev1.ListDiskTypesRequest{})
 	require.NoError(t, err)
 	require.Len(t, resp.DiskTypes, 2)
 }
 
-// SCENARIO 12: instance handler — filter wiring works for List.
-func TestInstanceHandler_List_AllowedSubset(t *testing.T) {
+// CLL-05 (instance): empty grant → empty; no-principal → empty (leak guard).
+func TestInstanceHandler_List_CLL05(t *testing.T) {
 	cli := &mockAuthCli{allowedByKey: map[string][]string{}}
 	ops := portmock.NewOpsRepo()
 	zoneRegistry := portmock.NewZoneRegistry()
@@ -298,6 +347,11 @@ func TestInstanceHandler_List_AllowedSubset(t *testing.T) {
 	resp, err := h.List(ctxWithSubject("user:usr_no_grants"), &computev1.ListInstancesRequest{ProjectId: "proj"})
 	require.NoError(t, err)
 	require.Len(t, resp.Instances, 0)
+
+	// No principal → empty (leak guard, NOT bypass-all).
+	resp, err = h.List(context.Background(), &computev1.ListInstancesRequest{ProjectId: "proj"})
+	require.NoError(t, err)
+	require.Len(t, resp.Instances, 0, "LEAK: no-principal must NOT bypass to all instances")
 }
 
 // verbOf returns the last dot-segment of a "<domain>.<resource>.<verb>" action.
@@ -314,11 +368,9 @@ func verbOf(action string) string {
 	return action[last+1:]
 }
 
-// D-45 (read==enforce): the action each public List handler sends to iam
-// ListObjects MUST carry the "list" verb (which the iam server resolves to the
-// "viewer" relation — the SAME relation the per-RPC Check gate uses for Get).
-// RED while handlers send ".read" (iam → InvalidArgument → all Lists break);
-// GREEN once they send ".list".
+// read==enforce: the action each public List handler sends to iam ListObjects
+// MUST carry the "list" verb (which the iam server resolves to the "viewer"
+// relation — the SAME relation the per-RPC Check gate uses for Get).
 func TestListHandlers_SendViewerResolvingAction(t *testing.T) {
 	t.Run("disk", func(t *testing.T) {
 		cli := &mockAuthCli{allowedByKey: map[string][]string{}}
@@ -328,7 +380,7 @@ func TestListHandlers_SendViewerResolvingAction(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "compute_disk", cli.lastResType)
 		require.Equal(t, "list", verbOf(cli.lastAction),
-			"disk List must send a viewer-resolving verb (read==enforce, D-45); got action %q", cli.lastAction)
+			"disk List must send a viewer-resolving verb (read==enforce); got action %q", cli.lastAction)
 	})
 	t.Run("instance", func(t *testing.T) {
 		cli := &mockAuthCli{allowedByKey: map[string][]string{}}
@@ -343,6 +395,6 @@ func TestListHandlers_SendViewerResolvingAction(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "compute_instance", cli.lastResType)
 		require.Equal(t, "list", verbOf(cli.lastAction),
-			"instance List must send a viewer-resolving verb (read==enforce, D-45); got action %q", cli.lastAction)
+			"instance List must send a viewer-resolving verb (read==enforce); got action %q", cli.lastAction)
 	})
 }
