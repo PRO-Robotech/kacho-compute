@@ -91,6 +91,49 @@ CASES.append(Case(
 
 
 # ---------------------------------------------------------------------------
+# Over-show leak guard — subject-source: list-filter обязан брать subject из
+# request Principal (x-kacho-principal-*), а НЕ из несуществующих x-kacho-subject*
+# заголовков. До фикса subject="" → bypass-all → List возвращал ВСЕ объекты
+# проекта мимо list-authz (existence+metadata leak).
+#
+# Проверка: jwtNoBindings — аутентифицированный субъект БЕЗ грантов в project-A1.
+# Его List project-A1 обязан быть пустым (fail-closed), а instance, созданный
+# PA1, не должен в нём появиться. RED при subject-source bug (bypass-all утекал
+# instance), GREEN после фикса (principal-based subject → пустой allow-list).
+# ---------------------------------------------------------------------------
+CASES.append(Case(
+    id="LF-INST-LST-OVERSHOW-LEAK-GUARD",
+    title="[leak] jwtNoBindings List project-A1 → instance PA1 не виден (subject из principal, fail-closed)",
+    classes=["AUTHZ", "NEG", "LST"], priority="P0",
+    steps=[
+        Step(name="create-a1-pa1", method="POST", path=INSTANCES,
+             body=_instance_body("leak", "projectA1Id"), auth="jwtProjectAdminA1",
+             test_script=[*assert_status(200),
+                          *save_from_response("j.id", "opId"),
+                          *save_from_response("j.metadata && j.metadata.instanceId", "lfLeakInstanceId")]),
+        poll_operation_until_done(), assert_op_success(),
+        # Authenticated-but-not-granted subject lists project-A1. The handler
+        # derives subject from the principal and consults the filter (empty
+        # allow-list) → MUST NOT leak the PA1 instance. A non-empty result here
+        # is the over-show leak.
+        Step(name="list-a1-as-nobindings", method="GET",
+             path=f"{INSTANCES}?projectId={{{{projectA1Id}}}}&pageSize=1000",
+             auth="jwtNoBindings",
+             test_script=[
+                 "pm.test('[leak] response is not a server error (fail-closed, not 5xx)', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
+                 "const insts = (pm.response.json().instances) || [];",
+                 "pm.test('[leak] PA1 instance NOT leaked to a not-granted subject', () => pm.expect(insts.map(x=>x.id)).to.not.include(pm.environment.get('lfLeakInstanceId')));",
+             ]),
+        # cleanup as owner.
+        Step(name="del-a1-leak", method="DELETE", path=f"{INSTANCES}/{{{{lfLeakInstanceId}}}}",
+             auth="jwtProjectAdminA1",
+             test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
+        poll_operation_until_done(),
+    ],
+))
+
+
+# ---------------------------------------------------------------------------
 # D-44 — cross-account no-leak: AAB не видит instance проекта A1 в своём scope.
 # (AAB List своего project-B1 → не содержит A1-объект; A1-проект для AAB — DENY,
 #  поэтому per-object изоляция проверяется тем, что A1-instance не утекает в B1.)

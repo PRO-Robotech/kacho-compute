@@ -1,4 +1,7 @@
-// list_filter.go — KAC-127 Phase 4: FGA-filtered List helpers.
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
+// list_filter.go — FGA-filtered List helpers.
 //
 // Each public List handler (Disk / Image / Snapshot / Instance) calls
 // resolveListFilter() to compute the allow-list of resource ids the calling
@@ -6,16 +9,19 @@
 // AllowedIDs field of the appropriate filter struct.
 //
 // resolveListFilter encapsulates the per-RPC contract:
-//   - admin / cluster-admin → bypass (no FGA call)
-//   - anonymous caller in dev mode → bypass (backward compat)
-//   - anonymous in production mode → handler's TenantUnaryInterceptor already
-//     rejected with PermissionDenied; we never reach here
-//   - normal caller → iam.ListObjects → allowedIDs
+//   - filter == nil (FGA disabled config-gate / dev) → bypass (no FGA call)
+//   - subject == "" (system principal / no identity) → FAIL-CLOSED (empty list).
+//     This is NOT a bypass: a missing identity must never widen visibility to the
+//     whole project. Cluster-admin / owner получают весь список через IAM
+//     ListObjects (owner→viewer FGA-каскад), не через handler-side bypass.
+//   - normal caller → iam.ListObjects → allowedIDs / empty
 //   - iam unreachable and fail-closed → Unavailable (returned to caller)
 //   - iam unreachable and fail-open → bypass + audit warn (filter handles)
 //
-// All FGA filter wiring is configurable via env (see internal/config/config.go
-// KACHO_COMPUTE_LIST_FILTER_*). Zero hardcoded constants.
+// Caller-identity (subject) берётся из request Principal — ЕДИНЫЙ источник и для
+// per-RPC Check, и для list-filter. Прежний источник из `x-kacho-subject*`
+// gRPC-метадаты упразднён: api-gateway такие заголовки не шлёт, что давало
+// subject="" → bypass → утечку всего списка мимо list-authz (over-show leak).
 package handler
 
 import (
@@ -30,29 +36,25 @@ type listFilterDecision struct {
 	allowedIDs []string
 }
 
-// resolveListFilter — извлекает subject из ctx, вызывает FGA filter,
+// resolveListFilter — извлекает subject из request Principal, вызывает FGA filter,
 // возвращает (bypass, allowedIDs, error).
 //
 // Decision rules:
-//   - admin=true (x-kacho-admin: true) → bypass, no FGA call.
-//   - subject == "" (anonymous in dev) → bypass; production mode handled
-//     upstream by TenantUnaryInterceptor.
-//   - filter nil → bypass (FGA disabled in dev).
-//   - filter.Enabled=false → bypass (config gate).
+//   - filter nil → bypass (FGA disabled in dev / breakglass).
+//   - subject == "" (system principal / no identity) → fail-closed: empty
+//     allow-list (handler возвращает []), НЕ bypass-all.
 //   - normal flow → call filter; respect bypass / empty / allowedIDs.
 func resolveListFilter(ctx context.Context, f authzfilter.Filter, resourceType, action string) (listFilterDecision, error) {
 	if f == nil {
 		return listFilterDecision{bypass: true}, nil
 	}
-	subject, admin := authzfilter.SubjectFromCtx(ctx)
-	if admin {
-		return listFilterDecision{bypass: true}, nil
-	}
+	subject := authzfilter.SubjectFromPrincipal(ctx)
 	if subject == "" {
-		// Anonymous (no identity headers). The TenantUnaryInterceptor in
-		// production mode already rejects these. In dev/break-glass we
-		// bypass to preserve backward-compat for unauth'd callers.
-		return listFilterDecision{bypass: true}, nil
+		// No caller-identity (system principal / anonymous): fail-closed. A
+		// missing subject must never bypass the filter — that is exactly the
+		// over-show leak. Return an empty allow-list so the handler responds
+		// with an empty page (existence of other resources stays unknowable).
+		return listFilterDecision{allowedIDs: []string{}}, nil
 	}
 	d, err := f.ListAllowedIDs(ctx, subject, resourceType, action)
 	if err != nil {

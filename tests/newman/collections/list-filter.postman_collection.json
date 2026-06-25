@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "2490ac4b-03fb-4705-909d-57ee91ba929c",
+    "_postman_id": "3496df4a-4b79-4cd5-b84b-8b7e8ab809bc",
     "name": "kacho-compute / newman / list-filter",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -384,6 +384,311 @@
                   "  pm.expect(j.code, JSON.stringify(j)).to.eql(5);",
                   "});",
                   "pm.test('[D-44] no-leak: NOT_FOUND, not PERMISSION_DENIED', () => pm.expect(pm.response.json().code).to.not.eql(7));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "LF-INST-LST-OVERSHOW-LEAK-GUARD — [leak] jwtNoBindings List project-A1 → instance PA1 не виден (subject из principal, fail-closed)",
+      "description": "class:AUTHZ | class:NEG | class:LST | priority:P0",
+      "item": [
+        {
+          "name": "create-a1-pa1",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/instances",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "instances"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"projectId\": \"{{projectA1Id}}\", \"name\": \"lf-inst-leak-{{runId}}\", \"zoneId\": \"ru-central1-a\", \"platformId\": \"standard-v3\", \"resourcesSpec\": {\"memory\": \"1073741824\", \"cores\": 2}, \"bootDiskSpec\": {\"diskSpec\": {\"size\": \"8589934592\", \"typeId\": \"network-ssd\"}}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// KAC-122 authz-deny: bearer from env 'jwtProjectAdminA1'",
+                  "const __t = pm.environment.get('jwtProjectAdminA1') || pm.variables.get('jwtProjectAdminA1') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.instanceId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('lfLeakInstanceId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "poll-op",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 8) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "assert-op-success",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation succeeded (response, no error)', () => pm.expect(Boolean(j.response) && !j.error, JSON.stringify(j)).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "list-a1-as-nobindings",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/instances?projectId={{projectA1Id}}&pageSize=1000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "instances?projectId={{projectA1Id}}&pageSize=1000"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// KAC-122 authz-deny: bearer from env 'jwtNoBindings'",
+                  "const __t = pm.environment.get('jwtNoBindings') || pm.variables.get('jwtNoBindings') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('[leak] response is not a server error (fail-closed, not 5xx)', () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
+                  "const insts = (pm.response.json().instances) || [];",
+                  "pm.test('[leak] PA1 instance NOT leaked to a not-granted subject', () => pm.expect(insts.map(x=>x.id)).to.not.include(pm.environment.get('lfLeakInstanceId')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "del-a1-leak",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compute/v1/instances/{{lfLeakInstanceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compute",
+                "v1",
+                "instances",
+                "{{lfLeakInstanceId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// KAC-122 authz-deny: bearer from env 'jwtProjectAdminA1'",
+                  "const __t = pm.environment.get('jwtProjectAdminA1') || pm.variables.get('jwtProjectAdminA1') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.request.headers.remove('Authorization');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "poll-op",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 8) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
                 ]
               }
             }

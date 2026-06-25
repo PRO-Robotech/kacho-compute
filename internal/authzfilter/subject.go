@@ -1,70 +1,30 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package authzfilter
 
 import (
 	"context"
-	"strings"
 
-	"google.golang.org/grpc/metadata"
+	"github.com/PRO-Robotech/kacho-corelib/operations"
 )
 
-// metadata keys (lowercase per gRPC convention) — written by api-gateway
-// Phase 3 authz middleware after token validation. Compute reads them on
-// each List* RPC to scope FGA ListObjects calls.
-const (
-	mdKeySubject     = "x-kacho-subject"      // canonical FGA subject: "user:usr_..." / "service_account:sa_..."
-	mdKeySubjectType = "x-kacho-subject-type" // legacy: "user" / "service_account"
-	mdKeySubjectID   = "x-kacho-subject-id"   // legacy: bare id
-	mdKeyActor       = "x-kacho-actor"        // for audit-trail (sub claim)
-	mdKeyAdmin       = "x-kacho-admin"        // cluster-admin marker (bypass FGA)
-)
-
-// SubjectFromCtx — извлекает FGA subject из gRPC metadata.
+// SubjectFromPrincipal — извлекает FGA-subject ("user:usr_x" / "service_account:sva_x")
+// из Principal запроса. Principal кладёт в ctx principal-extract-интерсептор,
+// читающий заголовки api-gateway `x-kacho-principal-type` / `x-kacho-principal-id`.
 //
-// Поддерживает два формата:
-//  1. Каноничный: `x-kacho-subject: user:usr_alice` (предпочитаемый, api-gateway Phase 3+).
-//  2. Legacy: `x-kacho-subject-type: user` + `x-kacho-subject-id: usr_alice` (Phase 0-2).
+// Это ЕДИНЫЙ источник caller-identity и для per-RPC Check, и для list-filter —
+// тот же путь, что в kacho-vpc (pbconv.SubjectFromContext). system-principal
+// (control-plane bootstrap / no-auth) либо неполный principal → "" (handler
+// трактует пустой subject как fail-closed: пустой List, НЕ bypass-all).
 //
-// admin=true возвращается если `x-kacho-admin: true` — caller имеет
-// cluster-wide read и handler должен bypass FGA filter (BypassAll).
-// Anonymous caller (нет ни одного header) → subject="", admin=false —
-// handler решает что делать (production-mode → PermissionDenied, dev → bypass).
-func SubjectFromCtx(ctx context.Context) (subject string, admin bool) {
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return "", false
+// Прежний источник из gRPC-метадаты `x-kacho-subject*` упразднён: api-gateway
+// такие заголовки не шлёт, что приводило к subject="" → bypass → утечке всего
+// списка мимо list-authz (over-show leak).
+func SubjectFromPrincipal(ctx context.Context) string {
+	p := operations.PrincipalFromContext(ctx)
+	if p.Type == "" || p.ID == "" || p.Type == "system" {
+		return ""
 	}
-
-	if v := md.Get(mdKeyAdmin); len(v) > 0 && strings.EqualFold(v[0], "true") {
-		admin = true
-	}
-
-	if v := md.Get(mdKeySubject); len(v) > 0 && v[0] != "" {
-		return v[0], admin
-	}
-
-	// Legacy fallback.
-	sType := first(md.Get(mdKeySubjectType))
-	sID := first(md.Get(mdKeySubjectID))
-	if sType != "" && sID != "" {
-		return sType + ":" + sID, admin
-	}
-
-	// Final fallback: actor header (best-effort, treat as user).
-	if actor := first(md.Get(mdKeyActor)); actor != "" {
-		// Only build subject if actor looks like an opaque id (no "@" — that
-		// would be a service account / human display name we shouldn't treat
-		// as an FGA subject).
-		if !strings.ContainsAny(actor, "@:/ ") {
-			return "user:" + actor, admin
-		}
-	}
-
-	return "", admin
-}
-
-func first(s []string) string {
-	if len(s) > 0 {
-		return s[0]
-	}
-	return ""
+	return p.Type + ":" + p.ID
 }
