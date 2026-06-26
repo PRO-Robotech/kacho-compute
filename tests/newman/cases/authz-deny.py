@@ -43,11 +43,62 @@ def allow_asserts(case_id):
     ]
 
 
+def unauth_asserts(case_id):
+    # Anonymous (no credentials) → 401 + code 16 (UNAUTHENTICATED), not 403 + code 7
+    # (PERMISSION_DENIED). gRPC/HTTP convention: missing credentials → UNAUTHENTICATED
+    # (16) → HTTP 401; authenticated-but-denied → PERMISSION_DENIED (7) → HTTP 403.
+    return [
+        f"pm.test('[{case_id}] UNAUTH: status 401', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(401));",
+        "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
+        f"pm.test('[{case_id}] UNAUTH: grpc code 16 (UNAUTHENTICATED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(16));",
+    ]
+
+
+def read_deny_asserts(case_id):
+    # Hide-existence: a denied single-resource read (Get) on a verb-bearing compute
+    # resource is surfaced as NotFound (404 / code 5), never PermissionDenied — no
+    # enumeration / existence leak. Applies to authenticated-but-denied AND to a denied
+    # read of a (well-formed) nonexistent id — both yield the same 404, so an attacker
+    # cannot tell "exists but forbidden" from "does not exist".
+    return [
+        f"pm.test('[{case_id}] READ-DENY: status 404 (hide existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(404));",
+        "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
+        f"pm.test('[{case_id}] READ-DENY: grpc code 5 (NOT_FOUND, not 7)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(5));",
+        f"pm.test('[{case_id}] READ-DENY: no deny_reasons leak', () => pm.expect(JSON.stringify(j || {{}}).toLowerCase()).to.not.include('deny_reasons'));",
+    ]
+
+
+def _is_single_resource_get(path):
+    # A single-resource Get targets one object: the path's last segment is a concrete id
+    # — a `{{var}}` placeholder or a literal resource id (3-char prefix + ≥17 chars) —
+    # with NO query string. A List (collection) carries a ?query (e.g. ?folderId=…) or
+    # ends in the bare plural (`/instances`); those are NOT single reads and a denied List
+    # stays PermissionDenied (403), not hidden as 404.
+    if "?" in path:
+        return False
+    last = path.rstrip("/").rsplit("/", 1)[-1]
+    if last.startswith("{{") and last.endswith("}}"):
+        return True
+    # Literal resource id: 3-char alpha prefix + ≥17 trailing alnum chars (matches the
+    # GARBAGE_ID format), distinguishing it from the bare plural collection name.
+    return len(last) >= 20 and last[:3].isalpha() and last[3:].isalnum()
+
+
 def emit(case_id_prefix, title, scope, method, path, body, subject):
     code, label, auth = subject
     decision = EXPECT[scope][code]
     case_id = f"AUTHZ-{case_id_prefix}-{code}"
-    asserts = deny_asserts(case_id) if decision == "DENY" else allow_asserts(case_id)
+    if decision == "DENY":
+        if method == "GET" and _is_single_resource_get(path):
+            # Hide-existence: a denied single-resource Get on a verb-bearing compute
+            # resource → NotFound (404 / code 5), not 403. ONLY a single-resource Get
+            # (path ends in /{id}, no ?query) hides existence; a denied List stays
+            # PermissionDenied (403). Anonymous (no token) → 401 (authN before authz).
+            asserts = unauth_asserts(case_id) if code == "ANON" else read_deny_asserts(case_id)
+        else:
+            asserts = deny_asserts(case_id)
+    else:
+        asserts = allow_asserts(case_id)
     CASES.append(Case(
         id=case_id,
         title=f"[{decision}] {title} as {label} ({scope})",
