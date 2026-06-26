@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "1b1e7a05-66d6-4863-9375-bf142ed9c330",
+    "_postman_id": "054babe0-01f0-4ee1-85de-dffb72ffb7c2",
     "name": "kacho-compute / newman / authz-deny",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -296,10 +296,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-INSTANCE-GT-ANON] DENY: status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(403));",
+                  "pm.test('[AUTHZ-INSTANCE-GT-ANON] UNAUTH: status 401', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(401));",
                   "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('[AUTHZ-INSTANCE-GT-ANON] DENY: grpc code 7 (PERMISSION_DENIED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(7));",
-                  "pm.test('[AUTHZ-INSTANCE-GT-ANON] DENY: message contains permission denied', () => pm.expect((j && j.message || '').toLowerCase()).to.contain('permission denied'));"
+                  "pm.test('[AUTHZ-INSTANCE-GT-ANON] UNAUTH: grpc code 16 (UNAUTHENTICATED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(16));"
                 ]
               }
             }
@@ -722,10 +721,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-INSTANCE-GT-NOB] DENY: status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(403));",
+                  "pm.test('[AUTHZ-INSTANCE-GT-NOB] READ-DENY: status 404 (hide existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(404));",
                   "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('[AUTHZ-INSTANCE-GT-NOB] DENY: grpc code 7 (PERMISSION_DENIED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(7));",
-                  "pm.test('[AUTHZ-INSTANCE-GT-NOB] DENY: message contains permission denied', () => pm.expect((j && j.message || '').toLowerCase()).to.contain('permission denied'));"
+                  "pm.test('[AUTHZ-INSTANCE-GT-NOB] READ-DENY: grpc code 5 (NOT_FOUND, not 7)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(5));",
+                  "pm.test('[AUTHZ-INSTANCE-GT-NOB] READ-DENY: no deny_reasons leak', () => pm.expect(JSON.stringify(j || {}).toLowerCase()).to.not.include('deny_reasons'));"
                 ]
               }
             }
@@ -2018,10 +2017,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-INSTANCE-GT-AAB] DENY: status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(403));",
+                  "pm.test('[AUTHZ-INSTANCE-GT-AAB] READ-DENY: status 404 (hide existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(404));",
                   "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('[AUTHZ-INSTANCE-GT-AAB] DENY: grpc code 7 (PERMISSION_DENIED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(7));",
-                  "pm.test('[AUTHZ-INSTANCE-GT-AAB] DENY: message contains permission denied', () => pm.expect((j && j.message || '').toLowerCase()).to.contain('permission denied'));"
+                  "pm.test('[AUTHZ-INSTANCE-GT-AAB] READ-DENY: grpc code 5 (NOT_FOUND, not 7)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(5));",
+                  "pm.test('[AUTHZ-INSTANCE-GT-AAB] READ-DENY: no deny_reasons leak', () => pm.expect(JSON.stringify(j || {}).toLowerCase()).to.not.include('deny_reasons'));"
                 ]
               }
             }
@@ -2858,10 +2857,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-DISK-GT-ANON] DENY: status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(403));",
+                  "pm.test('[AUTHZ-DISK-GT-ANON] UNAUTH: status 401', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(401));",
                   "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('[AUTHZ-DISK-GT-ANON] DENY: grpc code 7 (PERMISSION_DENIED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(7));",
-                  "pm.test('[AUTHZ-DISK-GT-ANON] DENY: message contains permission denied', () => pm.expect((j && j.message || '').toLowerCase()).to.contain('permission denied'));"
+                  "pm.test('[AUTHZ-DISK-GT-ANON] UNAUTH: grpc code 16 (UNAUTHENTICATED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(16));"
                 ]
               }
             }
@@ -3284,10 +3282,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-DISK-GT-NOB] DENY: status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(403));",
+                  "pm.test('[AUTHZ-DISK-GT-NOB] READ-DENY: status 404 (hide existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(404));",
                   "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('[AUTHZ-DISK-GT-NOB] DENY: grpc code 7 (PERMISSION_DENIED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(7));",
-                  "pm.test('[AUTHZ-DISK-GT-NOB] DENY: message contains permission denied', () => pm.expect((j && j.message || '').toLowerCase()).to.contain('permission denied'));"
+                  "pm.test('[AUTHZ-DISK-GT-NOB] READ-DENY: grpc code 5 (NOT_FOUND, not 7)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(5));",
+                  "pm.test('[AUTHZ-DISK-GT-NOB] READ-DENY: no deny_reasons leak', () => pm.expect(JSON.stringify(j || {}).toLowerCase()).to.not.include('deny_reasons'));"
                 ]
               }
             }
@@ -4580,10 +4578,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-DISK-GT-AAB] DENY: status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(403));",
+                  "pm.test('[AUTHZ-DISK-GT-AAB] READ-DENY: status 404 (hide existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(404));",
                   "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('[AUTHZ-DISK-GT-AAB] DENY: grpc code 7 (PERMISSION_DENIED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(7));",
-                  "pm.test('[AUTHZ-DISK-GT-AAB] DENY: message contains permission denied', () => pm.expect((j && j.message || '').toLowerCase()).to.contain('permission denied'));"
+                  "pm.test('[AUTHZ-DISK-GT-AAB] READ-DENY: grpc code 5 (NOT_FOUND, not 7)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(5));",
+                  "pm.test('[AUTHZ-DISK-GT-AAB] READ-DENY: no deny_reasons leak', () => pm.expect(JSON.stringify(j || {}).toLowerCase()).to.not.include('deny_reasons'));"
                 ]
               }
             }
@@ -5420,10 +5418,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-IMAGE-GT-ANON] DENY: status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(403));",
+                  "pm.test('[AUTHZ-IMAGE-GT-ANON] UNAUTH: status 401', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(401));",
                   "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('[AUTHZ-IMAGE-GT-ANON] DENY: grpc code 7 (PERMISSION_DENIED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(7));",
-                  "pm.test('[AUTHZ-IMAGE-GT-ANON] DENY: message contains permission denied', () => pm.expect((j && j.message || '').toLowerCase()).to.contain('permission denied'));"
+                  "pm.test('[AUTHZ-IMAGE-GT-ANON] UNAUTH: grpc code 16 (UNAUTHENTICATED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(16));"
                 ]
               }
             }
@@ -5846,10 +5843,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-IMAGE-GT-NOB] DENY: status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(403));",
+                  "pm.test('[AUTHZ-IMAGE-GT-NOB] READ-DENY: status 404 (hide existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(404));",
                   "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('[AUTHZ-IMAGE-GT-NOB] DENY: grpc code 7 (PERMISSION_DENIED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(7));",
-                  "pm.test('[AUTHZ-IMAGE-GT-NOB] DENY: message contains permission denied', () => pm.expect((j && j.message || '').toLowerCase()).to.contain('permission denied'));"
+                  "pm.test('[AUTHZ-IMAGE-GT-NOB] READ-DENY: grpc code 5 (NOT_FOUND, not 7)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(5));",
+                  "pm.test('[AUTHZ-IMAGE-GT-NOB] READ-DENY: no deny_reasons leak', () => pm.expect(JSON.stringify(j || {}).toLowerCase()).to.not.include('deny_reasons'));"
                 ]
               }
             }
@@ -7142,10 +7139,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-IMAGE-GT-AAB] DENY: status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(403));",
+                  "pm.test('[AUTHZ-IMAGE-GT-AAB] READ-DENY: status 404 (hide existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(404));",
                   "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('[AUTHZ-IMAGE-GT-AAB] DENY: grpc code 7 (PERMISSION_DENIED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(7));",
-                  "pm.test('[AUTHZ-IMAGE-GT-AAB] DENY: message contains permission denied', () => pm.expect((j && j.message || '').toLowerCase()).to.contain('permission denied'));"
+                  "pm.test('[AUTHZ-IMAGE-GT-AAB] READ-DENY: grpc code 5 (NOT_FOUND, not 7)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(5));",
+                  "pm.test('[AUTHZ-IMAGE-GT-AAB] READ-DENY: no deny_reasons leak', () => pm.expect(JSON.stringify(j || {}).toLowerCase()).to.not.include('deny_reasons'));"
                 ]
               }
             }
@@ -7982,10 +7979,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-SNAPSHOT-GT-ANON] DENY: status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(403));",
+                  "pm.test('[AUTHZ-SNAPSHOT-GT-ANON] UNAUTH: status 401', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(401));",
                   "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('[AUTHZ-SNAPSHOT-GT-ANON] DENY: grpc code 7 (PERMISSION_DENIED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(7));",
-                  "pm.test('[AUTHZ-SNAPSHOT-GT-ANON] DENY: message contains permission denied', () => pm.expect((j && j.message || '').toLowerCase()).to.contain('permission denied'));"
+                  "pm.test('[AUTHZ-SNAPSHOT-GT-ANON] UNAUTH: grpc code 16 (UNAUTHENTICATED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(16));"
                 ]
               }
             }
@@ -8408,10 +8404,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-SNAPSHOT-GT-NOB] DENY: status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(403));",
+                  "pm.test('[AUTHZ-SNAPSHOT-GT-NOB] READ-DENY: status 404 (hide existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(404));",
                   "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('[AUTHZ-SNAPSHOT-GT-NOB] DENY: grpc code 7 (PERMISSION_DENIED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(7));",
-                  "pm.test('[AUTHZ-SNAPSHOT-GT-NOB] DENY: message contains permission denied', () => pm.expect((j && j.message || '').toLowerCase()).to.contain('permission denied'));"
+                  "pm.test('[AUTHZ-SNAPSHOT-GT-NOB] READ-DENY: grpc code 5 (NOT_FOUND, not 7)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(5));",
+                  "pm.test('[AUTHZ-SNAPSHOT-GT-NOB] READ-DENY: no deny_reasons leak', () => pm.expect(JSON.stringify(j || {}).toLowerCase()).to.not.include('deny_reasons'));"
                 ]
               }
             }
@@ -9704,10 +9700,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('[AUTHZ-SNAPSHOT-GT-AAB] DENY: status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(403));",
+                  "pm.test('[AUTHZ-SNAPSHOT-GT-AAB] READ-DENY: status 404 (hide existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(404));",
                   "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
-                  "pm.test('[AUTHZ-SNAPSHOT-GT-AAB] DENY: grpc code 7 (PERMISSION_DENIED)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(7));",
-                  "pm.test('[AUTHZ-SNAPSHOT-GT-AAB] DENY: message contains permission denied', () => pm.expect((j && j.message || '').toLowerCase()).to.contain('permission denied'));"
+                  "pm.test('[AUTHZ-SNAPSHOT-GT-AAB] READ-DENY: grpc code 5 (NOT_FOUND, not 7)', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(5));",
+                  "pm.test('[AUTHZ-SNAPSHOT-GT-AAB] READ-DENY: no deny_reasons leak', () => pm.expect(JSON.stringify(j || {}).toLowerCase()).to.not.include('deny_reasons'));"
                 ]
               }
             }
