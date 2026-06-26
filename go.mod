@@ -7,7 +7,7 @@ replace github.com/PRO-Robotech/kacho-corelib => ../kacho-corelib
 replace github.com/PRO-Robotech/kacho-proto => ../kacho-proto
 
 require (
-	github.com/PRO-Robotech/kacho-corelib v0.0.0-00010101000000-000000000000
+	github.com/PRO-Robotech/kacho-corelib v0.0.0-20260626201420-0844c6ec5ef2
 	github.com/PRO-Robotech/kacho-proto v0.0.0-00010101000000-000000000000
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/pressly/goose/v3 v3.27.1

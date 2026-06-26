@@ -11,7 +11,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho-corelib/operations"
 	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
-	operationpb "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/operation"
+	operationpb "github.com/PRO-Robotech/kacho-corelib/proto/gen/go/kacho/cloud/operation"
 
 	"github.com/PRO-Robotech/kacho-compute/internal/ports/portmock"
 	"github.com/PRO-Robotech/kacho-compute/internal/service"
