@@ -6,9 +6,12 @@ replace github.com/PRO-Robotech/kacho-corelib => ../kacho-corelib
 
 replace github.com/PRO-Robotech/kacho-proto => ../kacho-proto
 
+replace github.com/PRO-Robotech/kacho-geo => ../kacho-geo
+
 require (
-	github.com/PRO-Robotech/kacho-corelib v0.0.0-20260626201420-0844c6ec5ef2
-	github.com/PRO-Robotech/kacho-proto v0.0.0-00010101000000-000000000000
+	github.com/PRO-Robotech/kacho-corelib v0.1.1-0.20260618025241-a8dbc86653dc
+	github.com/PRO-Robotech/kacho-geo v0.0.0-00010101000000-000000000000
+	github.com/PRO-Robotech/kacho-proto v0.1.1-0.20260624203923-05d1904e3797
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/pressly/goose/v3 v3.27.1
 	github.com/stretchr/testify v1.11.1
@@ -74,11 +77,11 @@ require (
 	go.opentelemetry.io/otel/metric v1.43.0 // indirect
 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/crypto v0.50.0 // indirect
-	golang.org/x/net v0.53.0 // indirect
+	golang.org/x/crypto v0.52.0 // indirect
+	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.43.0 // indirect
-	golang.org/x/text v0.36.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260427160629-7cedc36a6bc4 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

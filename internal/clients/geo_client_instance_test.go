@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/PRO-Robotech/kacho-corelib/operations"
-	geov1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/geo/v1"
+	geov1 "github.com/PRO-Robotech/kacho-geo/proto/gen/go/kacho/cloud/geo/v1"
 
 	"github.com/PRO-Robotech/kacho-compute/internal/clients"
 	"github.com/PRO-Robotech/kacho-compute/internal/ports/portmock"
