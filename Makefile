@@ -2,7 +2,7 @@ BINARY         := kacho-compute
 CMD            := ./cmd/compute
 IMAGE          := kacho-compute:dev
 
-.PHONY: build test test-short vet lint docker sync-migrations audit-list-filter proto-install-plugins proto-lint proto-gen
+.PHONY: build test test-short vet lint docker sync-migrations audit-list-filter proto-install-plugins proto-lint proto-vendor proto-gen
 
 build:
 	CGO_ENABLED=0 go build -o bin/$(BINARY) $(CMD)
@@ -42,12 +42,27 @@ proto-install-plugins:
 proto-lint:
 	cd proto && buf lint
 
+# proto-vendor — подтягивает corelib-owned инфра-протосы
+# (operation/validation/authz_options/cloud-api + vendored google) из ../kacho-corelib/proto
+# в proto/ для buf-резолва импортов. Единственный источник истины этих файлов —
+# kacho-corelib; здесь они gitignored и в git не коммитятся (Go-stubs тоже single-source
+# corelib). Запускается перед proto-gen.
+proto-vendor:
+	@set -e; src=../kacho-corelib/proto; \
+	for f in google/api/annotations.proto google/api/field_behavior.proto \
+	         google/api/http.proto google/rpc/status.proto \
+	         kacho/cloud/api/operation.proto kacho/cloud/operation/operation.proto \
+	         kacho/cloud/validation.proto kacho/iam/authz/v1/authz_options.proto; do \
+	  mkdir -p "proto/$$(dirname $$f)"; \
+	  cp "$$src/$$f" "proto/$$f"; \
+	done
+
 # proto-gen — регенерация Go-stubs доменного proto compute (kacho/cloud/compute/v1,
 # kacho/cloud/access, kacho/cloud/maintenance/v2) из proto/. Универсальная ИНФРА
-# (operation/validation/authz_options/cloud-api/google) вендорится в proto/ только для
-# buf-резолва импортов и НЕ генерируется (Go-stubs живут в kacho-corelib / canonical
+# (operation/validation/authz_options/cloud-api/google) подтягивается proto-vendor только
+# для buf-резолва импортов и НЕ генерируется (Go-stubs живут в kacho-corelib / canonical
 # genproto) — см. proto/buf.gen.yaml inputs.paths.
-proto-gen:
+proto-gen: proto-vendor
 	cd proto && buf generate
 
 .PHONY: migrate-up migrate-down migrate-status
