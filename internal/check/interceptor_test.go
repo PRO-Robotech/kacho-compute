@@ -174,14 +174,15 @@ func TestInterceptor_Unary_UnmappedRPC_Denied(t *testing.T) {
 	require.Equal(t, codes.PermissionDenied, st.Code())
 }
 
-func TestInterceptor_Unary_InternalRPC_Bypass(t *testing.T) {
-	// InternalWatchService/Watch is proto-annotated `<exempt>` and is NOT in the
-	// PermissionMap, so methodIsInternal-фолбэк пропускает его без Check. The
-	// relation-gated internal catalog mutations (Internal{DiskType,Zone,Region}
-	// /Create|Update|Delete) ARE mapped post-KAC-31 and would trigger a Check —
-	// see permission_map_internal_test.go.
+func TestInterceptor_Unary_UnmappedInternalRPC_FailClosed(t *testing.T) {
+	// Не-замапленный RPC fail-closed даже при "Internal" в имени: interceptor
+	// больше не делает name-based исключений (молчаливый пропуск по имени
+	// "Internal*" был fail-open вектором на internal-периметре). Exempt-RPC
+	// обязан явно стоять в PermissionMap (Public либо relation-gated).
+	// InternalWatchService/Watch в Map отсутствует, поэтому запрос отклоняется
+	// с PermissionDenied (rpc not mapped): ни handler, ни Check не вызываются.
 	intr, calls := newTestInterceptor(t, func(_ context.Context, _, _, _ string) (bool, error) {
-		t.Fatal("Check не должен вызываться для exempt Internal* RPC")
+		t.Fatal("Check не должен вызываться для unmapped Internal* RPC")
 		return false, nil
 	})
 	uIntr := intr.Unary()
@@ -193,10 +194,12 @@ func TestInterceptor_Unary_InternalRPC_Bypass(t *testing.T) {
 	info := &grpc.UnaryServerInfo{FullMethod: "/kacho.cloud.compute.v1.InternalWatchService/Watch"}
 	ctx := principalCtx("user", "usr_alice")
 
-	resp, err := uIntr(ctx, struct{}{}, info, handler)
-	require.NoError(t, err)
-	require.Equal(t, "ok", resp)
-	require.True(t, called)
+	_, err := uIntr(ctx, struct{}{}, info, handler)
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	require.Equal(t, codes.PermissionDenied, st.Code())
+	require.False(t, called)
 	require.Equal(t, 0, *calls)
 }
 
