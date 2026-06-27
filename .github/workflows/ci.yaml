@@ -7,14 +7,9 @@ on:
 permissions:
   contents: read
 
-# kacho-compute — polyrepo: go.mod has `replace github.com/PRO-Robotech/kacho-{corelib,proto} => ../...`
-# и Dockerfile COPY ../kacho-corelib и т.п. → CI должен воспроизвести local layout
-# (kacho-workspace/project/{kacho-compute, kacho-corelib, ...}). actions/checkout не пускает
-# path вне $GITHUB_WORKSPACE, поэтому: main-репо в подкаталог `kacho-compute/`, siblings рядом.
-# kacho-proto / kacho-corelib чекаутятся без `ref:` (→ `main`): compute-vendored proto-stubs
-# (compute domain + InternalDiskType/Zone) и corelib (compute id-prefixes + NameCompute) уже
-# смёржены в их `main`. Если снова появится незакрытая upstream-зависимость — временно вернуть
-# `ref: feat/...` и убрать после merge. См. workspace CLAUDE.md «Кросс-репо…».
+# kacho-compute собирается из своего репо; зависимости (kacho-corelib, kacho-iam,
+# kacho-geo, kacho-vpc) — versioned-модули с GitHub (go.mod без replace), поэтому
+# siblings checkout не нужен.
 
 defaults:
   run:
@@ -27,10 +22,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with: { path: kacho-compute }
-      - uses: actions/checkout@v6
-        with: { repository: PRO-Robotech/kacho-corelib, ref: main, path: kacho-corelib }
-      - uses: actions/checkout@v6
-        with: { repository: PRO-Robotech/kacho-proto, ref: main, path: kacho-proto }
       - uses: actions/setup-go@v6
         with: { go-version-file: kacho-compute/go.mod, cache-dependency-path: kacho-compute/go.sum }
       - run: go mod download
@@ -44,10 +35,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with: { path: kacho-compute }
-      - uses: actions/checkout@v6
-        with: { repository: PRO-Robotech/kacho-corelib, ref: main, path: kacho-corelib }
-      - uses: actions/checkout@v6
-        with: { repository: PRO-Robotech/kacho-proto, ref: main, path: kacho-proto }
       - uses: actions/setup-go@v6
         with: { go-version-file: kacho-compute/go.mod, cache-dependency-path: kacho-compute/go.sum }
       - uses: golangci/golangci-lint-action@v7
@@ -61,10 +48,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with: { path: kacho-compute }
-      - uses: actions/checkout@v6
-        with: { repository: PRO-Robotech/kacho-corelib, ref: main, path: kacho-corelib }
-      - uses: actions/checkout@v6
-        with: { repository: PRO-Robotech/kacho-proto, ref: main, path: kacho-proto }
       - uses: actions/setup-go@v6
         with: { go-version-file: kacho-compute/go.mod, cache-dependency-path: kacho-compute/go.sum }
       - run: |
@@ -78,10 +61,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with: { path: kacho-compute }
-      - uses: actions/checkout@v6
-        with: { repository: PRO-Robotech/kacho-corelib, ref: main, path: kacho-corelib }
-      - uses: actions/checkout@v6
-        with: { repository: PRO-Robotech/kacho-proto, ref: main, path: kacho-proto }
       - uses: actions/setup-go@v6
         with: { go-version-file: kacho-compute/go.mod, cache-dependency-path: kacho-compute/go.sum }
       - run: go mod download

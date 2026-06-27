@@ -1,0 +1,8 @@
+.git
+bin/
+docs-site/
+.github/
+*.md
+LICENSE
+.golangci.yml
+.gitignore
