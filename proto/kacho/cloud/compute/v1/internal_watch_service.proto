@@ -1,0 +1,53 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
+syntax = "proto3";
+
+package kacho.cloud.compute.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "kacho/iam/authz/v1/authz_options.proto";
+
+option go_package = "github.com/PRO-Robotech/kacho-compute/proto/gen/go/kacho/cloud/compute/v1;computev1";
+
+// InternalWatchService — internal RPC, exposed только на cluster-internal порту
+// kacho-compute (не через api-gateway external endpoint). Поток событий из
+// compute_outbox для будущих consumer'ов / observability / admin-tooling.
+//
+// Реализация на сервере: SELECT compute_outbox WHERE sequence_no > cursor
+// ORDER BY sequence_no + PG LISTEN/NOTIFY для real-time wake-up.
+service InternalWatchService {
+  // Watch — server-stream события из compute_outbox с указанной позиции
+  // (sequence_no exclusive).
+  rpc Watch (WatchRequest) returns (stream Event) {
+    option (kacho.iam.authz.v1.permission) = "<exempt>";
+  }
+}
+
+// WatchRequest — параметры подписки.
+message WatchRequest {
+  // Список kind-ов для подписки (empty = все).
+  // Допустимые значения: "Instance", "Disk", "Image", "Snapshot".
+  repeated string kinds = 1;
+  // Возобновить с этой позиции (sequence_no exclusive).
+  // 0 = начать с current end (только новые события).
+  int64 from_sequence_no = 2;
+}
+
+// Event — одно событие изменения ресурса.
+message Event {
+  // Монотонно возрастающий идентификатор события (BIGSERIAL).
+  int64 sequence_no = 1;
+  // Тип ресурса: "Instance", "Disk", "Image", "Snapshot".
+  string resource_kind = 2;
+  // ID ресурса (YC-style: epd..., fd8...).
+  string resource_id = 3;
+  // Тип события: "CREATED", "UPDATED", "DELETED".
+  string event_type = 4;
+  // Полное состояние ресурса в момент события (для CREATED/UPDATED) или
+  // tombstone (для DELETED). Структура — JSON-репрезентация domain-объекта.
+  google.protobuf.Struct payload = 5;
+  // Время записи события в outbox.
+  google.protobuf.Timestamp created_at = 6;
+}

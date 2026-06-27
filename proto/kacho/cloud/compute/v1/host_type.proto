@@ -1,0 +1,24 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
+syntax = "proto3";
+
+package kacho.cloud.compute.v1;
+
+option go_package = "github.com/PRO-Robotech/kacho-compute/proto/gen/go/kacho/cloud/compute/v1;computev1";
+
+// Represents host resources.
+// Note: Platform can use hosts with different number of memory and cores.
+// TODO: Do we need sockets here?
+message HostType {
+  // Unique type identifier.
+  string id = 1;
+  // Total number of cores available for instances.
+  int64 cores = 2;
+  // Ammount of memory available for instances.
+  int64 memory = 3;
+  // Number of local disks available for instances
+  int64 disks = 4;
+  // Size of each local disk
+  int64 disk_size = 5;
+}
