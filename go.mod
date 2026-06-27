@@ -4,7 +4,7 @@ go 1.25.11
 
 replace github.com/PRO-Robotech/kacho-corelib => ../kacho-corelib
 
-replace github.com/PRO-Robotech/kacho-proto => ../kacho-proto
+replace github.com/PRO-Robotech/kacho-iam => ../kacho-iam
 
 replace github.com/PRO-Robotech/kacho-geo => ../kacho-geo
 
@@ -13,7 +13,7 @@ replace github.com/PRO-Robotech/kacho-vpc => ../kacho-vpc
 require (
 	github.com/PRO-Robotech/kacho-corelib v0.1.1-0.20260618025241-a8dbc86653dc
 	github.com/PRO-Robotech/kacho-geo v0.0.0-00010101000000-000000000000
-	github.com/PRO-Robotech/kacho-proto v0.1.1-0.20260624203923-05d1904e3797
+	github.com/PRO-Robotech/kacho-iam v0.0.0-00010101000000-000000000000
 	github.com/PRO-Robotech/kacho-vpc v0.0.0-00010101000000-000000000000
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0
 	github.com/jackc/pgx/v5 v5.9.2
