@@ -3,11 +3,9 @@ ARG TARGETOS
 ARG TARGETARCH
 WORKDIR /src
 
-COPY kacho-corelib /src/kacho-corelib
-COPY kacho-proto /src/kacho-proto
-COPY kacho-compute /src/kacho-compute
-
-WORKDIR /src/kacho-compute
+# Single-repo build: зависимости (kacho-corelib, kacho-iam, kacho-geo, kacho-vpc) —
+# versioned-модули с GitHub (go.mod без replace), build-context — этот репо.
+COPY . .
 RUN go mod download
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /kacho-compute ./cmd/compute
 

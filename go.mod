@@ -2,19 +2,11 @@ module github.com/PRO-Robotech/kacho-compute
 
 go 1.25.11
 
-replace github.com/PRO-Robotech/kacho-corelib => ../kacho-corelib
-
-replace github.com/PRO-Robotech/kacho-iam => ../kacho-iam
-
-replace github.com/PRO-Robotech/kacho-geo => ../kacho-geo
-
-replace github.com/PRO-Robotech/kacho-vpc => ../kacho-vpc
-
 require (
-	github.com/PRO-Robotech/kacho-corelib v0.1.1-0.20260618025241-a8dbc86653dc
-	github.com/PRO-Robotech/kacho-geo v0.0.0-00010101000000-000000000000
-	github.com/PRO-Robotech/kacho-iam v0.0.0-00010101000000-000000000000
-	github.com/PRO-Robotech/kacho-vpc v0.0.0-00010101000000-000000000000
+	github.com/PRO-Robotech/kacho-corelib v0.1.1-0.20260627132909-f6782af68bb7
+	github.com/PRO-Robotech/kacho-geo v0.0.0-20260627135501-91749bab7263
+	github.com/PRO-Robotech/kacho-iam v1.0.2-0.20260627095713-09310cc50004
+	github.com/PRO-Robotech/kacho-vpc v0.0.0-20260627094558-d12bf4ced65d
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/pressly/goose/v3 v3.27.1
