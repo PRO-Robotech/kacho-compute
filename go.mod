@@ -8,7 +8,7 @@ require (
 	github.com/PRO-Robotech/kacho-iam v1.0.2
 	github.com/PRO-Robotech/kacho-vpc v1.0.2
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0
-	github.com/jackc/pgx/v5 v5.9.2
+	github.com/jackc/pgx/v5 v5.10.0
 	github.com/pressly/goose/v3 v3.27.1
 	github.com/prometheus/client_golang v1.23.2
 	github.com/stretchr/testify v1.11.1
