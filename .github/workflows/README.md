@@ -36,13 +36,13 @@ gh secret set DOCKERHUB_USERNAME --body "<value>" --repo PRO-Robotech/kacho-comp
 gh secret set DOCKERHUB_TOKEN    --body "<value>" --repo PRO-Robotech/kacho-compute
 ```
 
-### Polyrepo build
+### Single-repo build
 
-`kacho-compute` — часть polyrepo: `go.mod` использует `replace ../kacho-corelib`,
-`../kacho-proto`; `Dockerfile` делает `COPY kacho-corelib` / `COPY kacho-proto`.
-Workflow чекаутит main-репо + siblings (`kacho-corelib`, `kacho-proto`) в один
-каталог; build context = этот каталог. Siblings пиннятся к `ref: KAC-127` —
-после merge зависимостей в `main` вернуть на `ref: main`.
+`kacho-compute` собирается из своего репо: `go.mod` пиннит внутренние зависимости
+(`kacho-corelib`, `kacho-iam`, `kacho-vpc`, `kacho-geo`) к versioned-модулям с GitHub
+(без `replace ../`), а `.proto` теперь per-service внутри модуля. `Dockerfile` делает
+`COPY . .` + `go mod download` (без COPY siblings); build context = `kacho-compute`.
+Siblings чекаутить для go-сборки не нужно — `go mod download` тянет их с GitHub по тегам.
 
 ### arm64 runner (GitHub-hosted)
 
@@ -76,9 +76,9 @@ shared authz-фикстуры и гоняет сьюты `kacho-iam` через 
 ### Что делает
 
 1. Checkout этого репо (ref под тестом) + sibling-репо (`kacho-deploy`,
-   `kacho-corelib`, `kacho-proto`, `kacho-vpc`, `kacho-iam`, `kacho-compute`,
-   `kacho-api-gateway`, `kacho-workspace`) на `ref: main` (KAC-127 смержен —
-   pin снят).
+   `kacho-corelib`, `kacho-vpc`, `kacho-iam`, `kacho-geo`, `kacho-nlb`,
+   `kacho-api-gateway`, `kacho-workspace`) на `ref: main` (`.proto` теперь
+   per-service внутри каждого модуля — отдельного `kacho-proto`-checkout нет).
 2. Билд всех `kacho-*:dev` образов, `kind load`.
 3. `helm install` umbrella (`values.dev.yaml`), ожидание openfga-bootstrap.
 4. Сид shared authz-фикстур + прогон 2 newman-сьют (`authz-deny`,
