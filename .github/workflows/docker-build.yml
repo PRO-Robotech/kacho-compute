@@ -50,7 +50,7 @@ jobs:
     name: build & push multiarch
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { path: kacho-compute }
 
       - uses: benjlevesque/short-sha@v3.0

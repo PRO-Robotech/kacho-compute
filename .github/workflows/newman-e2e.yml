@@ -53,39 +53,39 @@ jobs:
     timeout-minutes: 50
     steps:
       # The repo under test — checked out at the PR/push ref under test.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { path: kacho-compute }
 
       # Siblings are needed both as Go build context (Dockerfile COPY ../kacho-*)
       # and as helm sub-chart sources (umbrella Chart.yaml file:// deps). The
       # authz fixtures bootstrap lives in kacho-workspace. KAC-127 is merged, so
       # every sibling is pinned to `main`.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { repository: PRO-Robotech/kacho-deploy, ref: main, path: kacho-deploy }
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { repository: PRO-Robotech/kacho-corelib, ref: main, path: kacho-corelib }
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { repository: PRO-Robotech/kacho-vpc, ref: main, path: kacho-vpc }
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { repository: PRO-Robotech/kacho-iam, ref: main, path: kacho-iam }
       # kacho-geo leaf-service (Geography Region/Zone, extracted from compute):
       # helm dep (vendored sub-chart) + Dockerfile build context for kacho-geo:dev.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { repository: PRO-Robotech/kacho-geo, ref: main, path: kacho-geo }
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { repository: PRO-Robotech/kacho-api-gateway, ref: main, path: kacho-api-gateway }
       # KAC-NLB / KAC-161: kacho-nlb sibling — helm umbrella sub-chart
       # (file://../../../kacho-nlb/deploy) + Dockerfile build context.
       # Without this checkout, `helm install umbrella` fails with
       # «directory ../../../kacho-nlb/deploy not found» (KAC-177).
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { repository: PRO-Robotech/kacho-nlb, ref: main, path: kacho-nlb }
       # kacho-workspace carries the shared authz-fixtures bootstrap
       # (tests/authz-fixtures/setup.sh + setup-jwt.py + patch-env.py).
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { repository: PRO-Robotech/kacho-workspace, ref: main, path: kacho-workspace }
       # kacho-ui is a private repo; best-effort checkout (parity with ci.yaml).
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         continue-on-error: true
         with: { repository: PRO-Robotech/kacho-ui, ref: main, path: kacho-ui }
       - name: stub kacho-ui/deploy if checkout was skipped (private repo)

@@ -21,7 +21,7 @@ jobs:
     name: gosec
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with: { path: kacho-compute }
       - uses: actions/setup-go@v6
         with: { go-version-file: kacho-compute/go.mod }
@@ -45,7 +45,7 @@ jobs:
     name: trivy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with: { path: kacho-compute }
       - uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -64,7 +64,7 @@ jobs:
     name: govulncheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with: { path: kacho-compute }
       - uses: actions/setup-go@v6
         with: { go-version-file: kacho-compute/go.mod }
