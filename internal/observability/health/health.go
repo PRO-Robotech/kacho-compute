@@ -95,7 +95,6 @@ func (a *Aggregator) Evaluate(ctx context.Context) (bool, []string) {
 	}
 	results := make(chan res, len(a.checkers))
 	for _, c := range a.checkers {
-		c := c
 		go func() {
 			results <- res{name: c.Name, up: a.runChecker(ctx, c)}
 		}()

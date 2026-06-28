@@ -387,7 +387,6 @@ func runServe(cfg config.Config) error {
 	// Фоновые loop'ы под супервизором: неожиданный exit (ctx ещё жив) флипает
 	// readiness и триггерит shutdown; штатный возврат после ctx-cancel → nil.
 	for _, bg := range background {
-		bg := bg
 		g.Go(func() error {
 			return superviseBackground(ctx, bg.name, bg.run, triggerShutdown, logger)
 		})
