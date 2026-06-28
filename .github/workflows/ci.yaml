@@ -23,7 +23,7 @@ jobs:
     name: build + vet + test (unit)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with: { path: kacho-compute }
       - uses: actions/setup-go@v6
         with: { go-version-file: kacho-compute/go.mod, cache-dependency-path: kacho-compute/go.sum }
@@ -36,7 +36,7 @@ jobs:
     name: golangci-lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with: { path: kacho-compute }
       - uses: actions/setup-go@v6
         with: { go-version-file: kacho-compute/go.mod, cache-dependency-path: kacho-compute/go.sum }
@@ -49,7 +49,7 @@ jobs:
     name: govulncheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with: { path: kacho-compute }
       - uses: actions/setup-go@v6
         with: { go-version-file: kacho-compute/go.mod, cache-dependency-path: kacho-compute/go.sum }
@@ -62,7 +62,7 @@ jobs:
     name: integration (testcontainers Postgres)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with: { path: kacho-compute }
       - uses: actions/setup-go@v6
         with: { go-version-file: kacho-compute/go.mod, cache-dependency-path: kacho-compute/go.sum }
@@ -73,7 +73,7 @@ jobs:
     name: authz-deny suite — generate + validate (KAC-122)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with: { path: kacho-compute }
       - uses: actions/setup-python@v6
         with: { python-version: '3.12' }
