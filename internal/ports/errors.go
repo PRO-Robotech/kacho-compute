@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package ports
 
 import "errors"
@@ -17,7 +20,7 @@ var (
 	ErrInvalidArg = errors.New("invalid argument")
 	// ErrFailedPrecondition возвращается, когда операция отклонена из-за
 	// состояния ресурса (например, удаление Disk пока он attached — нарушение
-	// FK 23503). Маппится в gRPC FailedPrecondition (verbatim YC).
+	// FK 23503). Маппится в gRPC FailedPrecondition.
 	ErrFailedPrecondition = errors.New("failed precondition")
 	// ErrInternal — generic-ошибка для неклассифицированных DB-проблем.
 	// Маппится на gRPC Internal с фиксированным сообщением (no leak).

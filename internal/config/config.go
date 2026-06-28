@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package config
 
 import (
@@ -38,8 +41,13 @@ type Config struct {
 	// dedicated pgx.Conn под LISTEN).
 	WatchMaxStreams int `envconfig:"KACHO_COMPUTE_WATCH_MAX_STREAMS" default:"32"`
 
-	// IAMGRPCAddr — адрес kacho-iam (ProjectService.Get; KAC-106 E1: переключение
-	// с kacho-resource-manager на kacho-iam). KAC-127: legacy RM-fallback удалён.
+	// MetricsAddr — адрес cluster-internal diagnostic HTTP-listener'а
+	// (/metrics + /healthz + /readyz). Default ":9095" — отдельный internal-порт
+	// (НЕ маршрутизируется на external endpoint; cluster-internal scrape +
+	// kubelet-проба /readyz). Пустое значение явно отключает listener (back-compat).
+	MetricsAddr string `envconfig:"KACHO_COMPUTE_METRICS_ADDR" default:":9095"`
+
+	// IAMGRPCAddr — адрес kacho-iam (ProjectService.Get — project-existence-check).
 	IAMGRPCAddr string `envconfig:"KACHO_COMPUTE_IAM_GRPC_ADDR" default:"kacho-iam.kacho.svc.cluster.local:9090"`
 	// IAMTLS — TLS для cross-service gRPC к kacho-iam.
 	IAMTLS bool `envconfig:"KACHO_COMPUTE_IAM_TLS" default:"false"`
@@ -58,9 +66,9 @@ type Config struct {
 	VPCInternalTLS bool `envconfig:"KACHO_COMPUTE_VPC_INTERNAL_TLS" default:"false"`
 
 	// GeoGRPCAddr — адрес kacho-geo (geo.v1.ZoneService.Get, public :9090) для
-	// валидации Instance/Disk.zone_id (эпик kacho-geo, Stage S4). Geography
-	// (Region/Zone) — leaf-сервис kacho-geo; compute больше не валидирует zone_id по
-	// своей таблице `zones` и не обслуживает Region/Zone (serving снят в Stage S7).
+	// валидации Instance/Disk.zone_id. Geography (Region/Zone) — leaf-сервис
+	// kacho-geo; compute больше не валидирует zone_id по своей таблице `zones` и не
+	// обслуживает Region/Zone.
 	GeoGRPCAddr string `envconfig:"KACHO_COMPUTE_GEO_GRPC_ADDR" default:"kacho-geo.kacho.svc.cluster.local:9090"`
 
 	// SkipPeerValidation — отключить cross-service existence-check (subnet/SG/address
@@ -70,8 +78,8 @@ type Config struct {
 	// AuthMode — fail-closed гейт перед IAM merge: `dev` | `production` | `production-strict`.
 	AuthMode string `envconfig:"KACHO_COMPUTE_AUTH_MODE" default:"dev"`
 
-	// AuthZIAMGRPCAddr — gRPC адрес kacho-iam internal-port'а для Check
-	// (E3 / KAC-108). Если пуст и AuthZBreakglass=false — interceptor НЕ
+	// AuthZIAMGRPCAddr — gRPC адрес kacho-iam internal-port'а для Check.
+	// Если пуст и AuthZBreakglass=false — interceptor НЕ
 	// навешивается (graceful start без kacho-iam в dev). Обычно совпадает
 	// с IAMGRPCAddr (тот же сервис), но porт другой: 9091 (internal) vs
 	// 9090 (публичный ProjectService.Get).
@@ -79,10 +87,22 @@ type Config struct {
 	// AuthZIAMTLS — TLS для AuthZ-вызовов к kacho-iam.
 	AuthZIAMTLS bool `envconfig:"KACHO_COMPUTE_AUTHZ_IAM_TLS" default:"false"`
 	// AuthZBreakglass — emergency-режим: пропускать все RPC без Check + WARN.
-	// Dev / break-glass only (см. acceptance §6 D-6).
+	// Dev / break-glass only.
 	AuthZBreakglass bool `envconfig:"KACHO_COMPUTE_AUTHZ_BREAKGLASS" default:"false"`
 
-	// ===== KAC-127 Phase 4: FGA-filtered List =====
+	// AuthZTrustedForwarderSANs — allow-list cert-identity SAN'ов, которым разрешено
+	// форвардить end-user principal в x-kacho-principal-* metadata (обычно
+	// единственный — api-gateway SA, SAN spiffe://kacho.cloud/ns/<ns>/sa/kacho-api-gateway).
+	// Принимает comma-separated список. Пусто (default) → любой mTLS-verified peer
+	// доверен как форвардер (паритет с insecure dev back-compat и kacho-iam). Задаётся
+	// в production для defense-in-depth против confused-deputy: внутренний сервис со
+	// своим валидным client-cert'ом не сможет выдать себя за пользователя. На обоих
+	// листенерах principal trust-gated через grpcsrv.UnaryCertIdentityExtract +
+	// UnaryTrustedPrincipalExtract(WithTrustedForwarders(...)) — без verified cert'а
+	// (или вне allow-list) forwarded principal снимается.
+	AuthZTrustedForwarderSANs []string `envconfig:"KACHO_COMPUTE_AUTHZ_TRUSTED_FORWARDER_SANS"`
+
+	// ===== FGA-filtered List =====
 	//
 	// Все ListFilter* — production-edition: configurable, no hardcoded.
 	// Reuses AuthZIAMGRPCAddr/AuthZIAMTLS as the iam-authorize endpoint
@@ -109,59 +129,59 @@ type Config struct {
 	// (fail-closed = secure). Set to true только в break-glass.
 	ListFilterFailOpen bool `envconfig:"KACHO_COMPUTE_LIST_FILTER_FAIL_OPEN" default:"false"`
 
-	// ===== SEC-D: register-drainer (FGA owner-tuple через kacho-iam) =====
+	// ===== register-drainer (FGA owner-tuple через kacho-iam) =====
 	//
 	// FGARegisterDrainerEnabled — включает register-drainer (corelib outbox/drainer):
 	// дренит compute_fga_register_outbox, применяя intent через
-	// InternalIAMService.RegisterResource/UnregisterResource. SEC-D OQ-5: default-on
+	// InternalIAMService.RegisterResource/UnregisterResource. Default-on
 	// в dev (без него созданные ресурсы не получат owner-tuple → per-resource Check
 	// DENY). Это in-process goroutine, не cross-cluster rollout-flag.
 	FGARegisterDrainerEnabled bool `envconfig:"KACHO_COMPUTE_FGA_REGISTER_DRAINER_ENABLED" default:"true"`
 
-	// RequireIAM — sub-phase 1.4 S3 fail-closed boot-gate (D-8). When true,
+	// RequireIAM — fail-closed boot-gate. When true,
 	// mutating Create is refused (UNAVAILABLE) and readiness is NotReady until the
 	// register-drainer is IAM-connected, so no resource is ever created without a
 	// deliverable owner-tuple intent. Default false (dev back-compat: old Warn
 	// behaviour, Create allowed). In production: true (single canonical mode, N5).
 	RequireIAM bool `envconfig:"KACHO_COMPUTE_REQUIRE_IAM" default:"false"`
 
-	// ===== SEC-D: opt-in mTLS (per-edge, corelib SEC-B) =====
+	// ===== opt-in mTLS (per-edge) =====
 	//
 	// Каждое ребро — независимый grpcclient.TLSClient / grpcsrv.TLSServer value-struct.
 	// envconfig.Process(envPrefix, &cfg) выводит env-имена из тега родительского поля:
 	// `IAM_REGISTER_MTLS` → KACHO_COMPUTE_IAM_REGISTER_MTLS_{ENABLE,CERTFILE,KEYFILE,
-	// CAFILES,SERVERNAME}. Enable=false (default) → insecure (dev backward-compat,
-	// эпик §5). Per-edge enable → независимый rollback/rollout (§6.5).
+	// CAFILES,SERVERNAME}. Enable=false (default) → insecure (dev backward-compat).
+	// Per-edge enable → независимый rollback/rollout.
 
 	// IAMRegisterMTLS — client-creds для ребра compute→iam (register-drainer →
-	// InternalIAMService.RegisterResource/UnregisterResource). FGA-proxy edge (SEC-A).
+	// InternalIAMService.RegisterResource/UnregisterResource). FGA-proxy edge.
 	IAMRegisterMTLS grpcclient.TLSClient `envconfig:"IAM_REGISTER_MTLS"`
 
-	// ===== SEC-I: CLIENT mTLS на read/authz рёбрах compute→iam =====
+	// ===== CLIENT mTLS на read/authz рёбрах compute→iam =====
 	//
-	// SEC-D закрыл register-drainer ребро. SEC-I — зеркало того же паттерна на
-	// ОСТАВШИХСЯ read/authz iam-conn'ах, которые до сих пор диалились server-auth-only
-	// bool'ами (IAMTLS / AuthZIAMTLS) БЕЗ client-cert. Под SEC-H (iam
-	// RequireAndVerifyClientCert на обоих listener'ах) такой dial падает на
+	// register-drainer ребро закрыто отдельно (IAMRegisterMTLS). Это — зеркало того
+	// же паттерна на ОСТАВШИХСЯ read/authz iam-conn'ах, которые до сих пор диалились
+	// server-auth-only bool'ами (IAMTLS / AuthZIAMTLS) БЕЗ client-cert. Когда iam
+	// требует RequireAndVerifyClientCert на обоих listener'ах, такой dial падает на
 	// TLS-handshake — оба ребра ОБЯЗАНЫ предъявлять kacho-compute-client-tls cert
-	// (completeness-инвариант I2). Два отдельных поля, т.к. ServerName различается
-	// per-listener (I6): ProjectService.Get → :9090 (kacho-iam), Check/list-filter →
+	// (completeness-инвариант). Два отдельных поля, т.к. ServerName различается
+	// per-listener: ProjectService.Get → :9090 (kacho-iam), Check/list-filter →
 	// :9091 (kacho-iam-internal); один общий TLSClient не несёт оба ServerName.
 
 	// IAMProjectMTLS — client-creds для ребра compute→iam ProjectService.Get
-	// (existence + leaf-owner, public :9090). ServerName = kacho-iam.* (SEC-I C-02).
+	// (existence + leaf-owner, public :9090). ServerName = kacho-iam.*.
 	IAMProjectMTLS grpcclient.TLSClient `envconfig:"IAM_PROJECT_MTLS"`
 
 	// IAMAuthzMTLS — client-creds для ребра compute→iam per-RPC
 	// InternalIAMService.Check + FGA-filtered List (один conn → AuthZIAMGRPCAddr,
-	// internal :9091). ServerName = kacho-iam-internal.* (SEC-I C-03/C-04).
+	// internal :9091). ServerName = kacho-iam-internal.*.
 	IAMAuthzMTLS grpcclient.TLSClient `envconfig:"IAM_AUTHZ_MTLS"`
 
 	// VPCMTLS — client-creds для ребра compute→vpc (NIC-spec валидация + IPAM Address).
 	VPCMTLS grpcclient.TLSClient `envconfig:"VPC_MTLS"`
 
 	// GeoMTLS — client-creds для ребра compute→geo (geo.v1.ZoneService.Get,
-	// zone_id-валидация Instance, Stage S4). Enable=false (default) → insecure
+	// zone_id-валидация Instance). Enable=false (default) → insecure
 	// (dev backward-compat); enable=true без валидного cert-trio → startup error
 	// (fail-closed, без silent insecure-fallback) — паритет с VPCMTLS/IAM*MTLS.
 	GeoMTLS grpcclient.TLSClient `envconfig:"GEO_MTLS"`
@@ -183,14 +203,14 @@ func (c Config) IAMRegisterClientCreds() (grpc.DialOption, error) {
 
 // IAMProjectClientCreds возвращает grpc.DialOption для ребра compute→iam
 // ProjectService.Get (existence/leaf-owner, :9090). Enable=false → insecure (dev);
-// enable=true без валидного cert-trio → error (fail-closed). SEC-I.
+// enable=true без валидного cert-trio → error (fail-closed).
 func (c Config) IAMProjectClientCreds() (grpc.DialOption, error) {
 	return grpcclient.TLSClientCreds(c.IAMProjectMTLS)
 }
 
 // IAMAuthzClientCreds возвращает grpc.DialOption для ребра compute→iam
 // InternalIAMService.Check + FGA-filtered List (:9091). Enable=false → insecure
-// (dev); enable=true без валидного cert-trio → error (fail-closed). SEC-I.
+// (dev); enable=true без валидного cert-trio → error (fail-closed).
 func (c Config) IAMAuthzClientCreds() (grpc.DialOption, error) {
 	return grpcclient.TLSClientCreds(c.IAMAuthzMTLS)
 }
@@ -252,7 +272,7 @@ func (c Config) MigrateDSN() string {
 // (`envconfig:"KACHO_COMPUTE_..."`) резолвятся как есть, а вложенные
 // per-edge TLS value-структуры (grpcclient.TLSClient / grpcsrv.TLSServer) с
 // относительным тегом (`IAM_REGISTER_MTLS`) получают независимые
-// KACHO_COMPUTE_<EDGE>_<NAME> имена (SEC-D, FD-3 per-edge prefixing).
+// KACHO_COMPUTE_<EDGE>_<NAME> имена (per-edge prefixing).
 func Load() (Config, error) {
 	var c Config
 	err := corecfg.LoadPrefixed(envPrefix, &c)
@@ -262,7 +282,7 @@ func Load() (Config, error) {
 // LoadInto — тест-хелпер: выставляет переданные env-переменные на время вызова
 // и загружает конфиг через тот же LoadPrefixed-путь, что и Load (без глобального
 // state-leak между тестами — все ключи восстанавливаются через t.Setenv-семантику
-// os.Setenv/Unsetenv с очисткой). Используется mTLS-конфиг-тестами (SEC-D).
+// os.Setenv/Unsetenv с очисткой). Используется mTLS-конфиг-тестами.
 func LoadInto(c *Config, env map[string]string) error {
 	saved := make(map[string]*string, len(env))
 	for k, v := range env {

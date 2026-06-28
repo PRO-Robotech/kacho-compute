@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package check
 
 import (
@@ -19,8 +22,7 @@ import (
 )
 
 // fakeInternalIAM — recording-stub InternalIAMServiceServer для проверки
-// outgoing-MD wrapping в IAMCheckClient.Check (W1.4 / KAC-140) — зеркало
-// kacho-vpc check_client_propagation_test.go.
+// outgoing-MD wrapping в IAMCheckClient.Check.
 type fakeInternalIAM struct {
 	iamv1.UnimplementedInternalIAMServiceServer
 
@@ -58,8 +60,8 @@ func startFakeInternalIAM(t *testing.T, fake *fakeInternalIAM) *grpc.ClientConn 
 	return conn
 }
 
-// TestIAMCheckClient_Check_PropagatesPrincipal — W1.4 §3.6
-// PROP-COMPUTE-CHECK-01 (mirror of vpc PROP-VPC-CHECK-01).
+// TestIAMCheckClient_Check_PropagatesPrincipal проверяет, что реальный principal
+// прокидывается в outgoing metadata вызова Check.
 func TestIAMCheckClient_Check_PropagatesPrincipal(t *testing.T) {
 	fake := &fakeInternalIAM{}
 	conn := startFakeInternalIAM(t, fake)
@@ -98,10 +100,9 @@ func TestIAMCheckClient_Check_PropagatesPrincipal(t *testing.T) {
 	assert.Equal(t, "compute_instance:epd_xxx", fake.lastReq.Object)
 }
 
-// TestIAMCheckClient_Check_SystemPrincipalFallback — W1.4 §3.6 mirror of
-// PROP-VPC-CHECK-02: empty ctx → SystemPrincipal fallback headers ставятся
-// (auth.PropagateOutgoing семантика: PrincipalFromContext fallback'ит на
-// SystemPrincipal, который непуст → форсятся headers).
+// TestIAMCheckClient_Check_SystemPrincipalFallback — empty ctx → SystemPrincipal
+// fallback headers ставятся (auth.PropagateOutgoing семантика: PrincipalFromContext
+// fallback'ит на SystemPrincipal, который непуст → форсятся headers).
 func TestIAMCheckClient_Check_SystemPrincipalFallback(t *testing.T) {
 	fake := &fakeInternalIAM{}
 	conn := startFakeInternalIAM(t, fake)

@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package check
 
 import (
@@ -5,7 +8,7 @@ import (
 	"github.com/PRO-Robotech/kacho-corelib/authz"
 )
 
-// FGA object types для kacho-compute (FGA model E3 §4 acceptance).
+// FGA object types для kacho-compute (соответствуют FGA-модели kacho-iam).
 const (
 	objectTypeProject  = "project"
 	objectTypeDisk     = "compute_disk"
@@ -17,11 +20,10 @@ const (
 	// "viewer on project:<project_id>" недоступен (request не несёт project_id).
 	// Решение: справочник видим всем authenticated principal'ам на
 	// cluster singleton (паттерн `viewer on cluster:cluster_kacho_root`).
-	// KAC-178 §3: switched from "system:catalog" → "cluster:cluster_kacho_root"
-	// — FGA model имеет `type cluster` с `viewer: [user, user:*] or ...`,
-	// type `system` не определён → старая семантика всегда deny. cluster_kacho_root
-	// — singleton (kacho-iam ClusterSingletonID), один на весь deploy. Region/Zone
-	// serving снят (Stage S7) — Geography принадлежит kacho-geo.
+	// Catalog object — "cluster:cluster_kacho_root": FGA model имеет `type cluster`
+	// с `viewer: [user, user:*] or ...`. cluster_kacho_root — singleton (kacho-iam
+	// ClusterSingletonID), один на весь deploy. Region/Zone serving снят — Geography
+	// принадлежит kacho-geo.
 	objectTypeCluster      = "cluster"
 	clusterSingletonObject = "cluster_kacho_root"
 )
@@ -60,8 +62,7 @@ const (
 )
 
 // staticClusterCatalog — extractor, всегда возвращающий (cluster, cluster_kacho_root).
-// Используется для DiskType read-only RPC. KAC-178 §3 — заменил
-// staticClusterCatalog (`system:catalog`).
+// Используется для DiskType read-only RPC.
 func staticClusterCatalog() authz.ObjectExtractor {
 	return func(req any) (string, string, error) {
 		return objectTypeCluster, clusterSingletonObject, nil
@@ -70,7 +71,7 @@ func staticClusterCatalog() authz.ObjectExtractor {
 
 // PermissionMap — карта RPC → required relation+extract.
 //
-// Семантика per-RPC (enforcement по verb, развязан с tier — D-6/D-6a):
+// Семантика per-RPC (enforcement по verb, развязан с tier):
 //   - Create                          — parent scope `project:<project_id>`, tier `editor` (F-7)
 //   - top-level List                  — parent scope `project:<project_id>`, tier `viewer`;
 //     visibility per-object — через iam ListObjects `viewer ∪ v_list`
@@ -81,7 +82,7 @@ func staticClusterCatalog() authz.ObjectExtractor {
 //   - DiskType Get/List               — `viewer` на cluster singleton (не verb-bearing)
 //   - OperationService.Get            — Public (op-id opaque, поллится creator'ом)
 //
-// scope-guard (KAC-108): для object-self RPC мы НЕ резолвим project_id из БД
+// scope-guard: для object-self RPC мы НЕ резолвим project_id из БД
 // заранее — проверяем v_*-relation на самом ресурсе. reconciler kacho-iam
 // материализует per-object `v_get/v_list/v_update/v_delete` для grant'а
 // соответствующего verb'а; cluster-admin резолвится через iam short-circuit.
@@ -350,8 +351,8 @@ func PermissionMap() authz.RPCMap {
 		},
 
 		// =========================
-		// DiskType — read-only catalog (viewer on system:catalog). Region/Zone
-		// serving removed (Stage S7) — Geography is owned by kacho-geo.
+		// DiskType — read-only catalog (viewer on cluster singleton). Region/Zone
+		// serving removed — Geography is owned by kacho-geo.
 		// =========================
 		"/kacho.cloud.compute.v1.DiskTypeService/Get": {
 			Relation: relationViewer,
@@ -364,8 +365,8 @@ func PermissionMap() authz.RPCMap {
 
 		// =========================
 		// InternalDiskTypeService — kacho-only catalog admin CRUD
-		// (Create/Update/Delete) on the cluster-internal listener (:9091). KAC-31:
-		// the internal listener now runs the same per-RPC FGA Check as public, so
+		// (Create/Update/Delete) on the cluster-internal listener (:9091). The
+		// internal listener runs the same per-RPC FGA Check as public, so
 		// these relation-gated RPCs MUST be mapped (else methodIsInternal-фолбэк
 		// would silently bypass them). Each requires `system_admin on
 		// cluster:cluster_kacho_root` — mirrors proto `required_relation=system_admin`,
@@ -389,7 +390,7 @@ func PermissionMap() authz.RPCMap {
 		// Proto-пакет — `kacho.cloud.operation` (без `.v1`); fullMethod
 		// соответственно `/kacho.cloud.operation.OperationService/*`.
 		// =========================
-		// KAC-127: Operation poll is NOT gated per-RPC. The FGA model has no
+		// Operation poll is NOT gated per-RPC. The FGA model has no
 		// `compute_operation` object type and no per-operation tuples are
 		// emitted, so a `viewer on compute_operation:<id>` Check has no path
 		// and every poll — including the creating client's own poll right

@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package repo
 
 import (
@@ -158,7 +161,7 @@ func (r *InstanceRepo) Insert(ctx context.Context, in *domain.Instance, inlineDi
 	}
 	for _, ad := range in.AttachedDisks {
 		if err := insertAttachedDiskTx(ctx, tx, in.ID, ad); err != nil {
-			// KAC-90: UNIQUE на attached_disks.disk_id — диск уже attached другой Instance.
+			// UNIQUE на attached_disks.disk_id — диск уже attached другой Instance.
 			if isAttachedDisksDiskIDUniqViolation(err) {
 				return nil, fmt.Errorf("%w: disk already attached to another instance", service.ErrFailedPrecondition)
 			}
@@ -169,8 +172,8 @@ func (r *InstanceRepo) Insert(ctx context.Context, in *domain.Instance, inlineDi
 		if err := emitCompute(ctx, tx, "Disk", d.ID, "CREATED", diskPayload(d)); err != nil {
 			return nil, service.ErrInternal
 		}
-		// SEC-D: inline boot/secondary disks are created resources → register their
-		// owner-tuple too, in the same writer-tx. RSAB β: carry the disk labels.
+		// inline boot/secondary disks are created resources → register their
+		// owner-tuple too, in the same writer-tx, carrying the disk labels.
 		if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Disk", d.ID, d.ProjectID, d.Labels); err != nil {
 			return nil, service.ErrInternal
 		}
@@ -181,8 +184,8 @@ func (r *InstanceRepo) Insert(ctx context.Context, in *domain.Instance, inlineDi
 	if err := emitCompute(ctx, tx, "Instance", created.ID, "CREATED", instancePayload(created)); err != nil {
 		return nil, service.ErrInternal
 	}
-	// SEC-D: FGA owner-tuple register-intent for the Instance in the SAME writer-tx.
-	// RSAB β: carry the instance labels + parent-scope to feed IAM resource_mirror.
+	// FGA owner-tuple register-intent for the Instance in the SAME writer-tx,
+	// carrying the instance labels + parent-scope to feed IAM resource_mirror.
 	if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Instance", created.ID, created.ProjectID, created.Labels); err != nil {
 		return nil, service.ErrInternal
 	}
@@ -194,13 +197,13 @@ func (r *InstanceRepo) Insert(ctx context.Context, in *domain.Instance, inlineDi
 
 // Update обновляет mutable поля ВМ + status + outbox UPDATED.
 //
-// emitLabelsRegister (epic RSAB β, D-β6): when true (the use-case saw "labels" in
-// the update-mask, or a full-object PATCH that applies labels) a fresh FGA
-// register-intent carrying the updated labels + parent-scope is emitted IN THE
-// SAME writer-tx as the UPDATE (atomic, ban #10) so the IAM resource_mirror stays
-// in sync (dev→prod label dynamics). When false (name/description/… without
-// labels) NO register-intent is emitted — labels-membership and the immutable
-// parent are unchanged, so a refresh would be pointless traffic (β-04b).
+// emitLabelsRegister: when true (the use-case saw "labels" in the update-mask, or
+// a full-object PATCH that applies labels) a fresh FGA register-intent carrying the
+// updated labels + parent-scope is emitted IN THE SAME writer-tx as the UPDATE
+// (atomic) so the IAM resource_mirror stays in sync. When false
+// (name/description/… without labels) NO register-intent is emitted — labels-
+// membership and the immutable parent are unchanged, so a refresh would be
+// pointless traffic.
 func (r *InstanceRepo) Update(ctx context.Context, in *domain.Instance, emitLabelsRegister bool) (*domain.Instance, error) {
 	labelsJSON, err := marshalJSONB(in.Labels, "Instance.labels")
 	if err != nil {
@@ -229,8 +232,8 @@ func (r *InstanceRepo) Update(ctx context.Context, in *domain.Instance, emitLabe
 	if err := emitCompute(ctx, tx, "Instance", updated.ID, "UPDATED", instancePayload(updated)); err != nil {
 		return nil, service.ErrInternal
 	}
-	// RSAB β (D-β6): refresh the IAM resource_mirror only when labels were in the
-	// update-mask. Emitted in the SAME writer-tx as the UPDATE (atomic, ban #10).
+	// refresh the IAM resource_mirror only when labels were in the update-mask.
+	// Emitted in the SAME writer-tx as the UPDATE (atomic).
 	if emitLabelsRegister {
 		if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Instance", updated.ID, updated.ProjectID, updated.Labels); err != nil {
 			return nil, service.ErrInternal
@@ -243,14 +246,14 @@ func (r *InstanceRepo) Update(ctx context.Context, in *domain.Instance, emitLabe
 }
 
 // SetStatusCAS атомарно переводит instance из expected-status в next-status
-// (workspace CLAUDE.md §«Within-service refs — DB-уровень обязателен»).
+// (within-service-инвариант на DB-уровне, не software check-then-act).
 //
 // Conditional UPDATE: `WHERE id=$1 AND status=$expected` — Postgres row-level
 // lock сериализует concurrent writer'ов на одной row; второй writer ждёт
 // commit'а первого, после чего видит уже обновлённый status, WHERE не
 // matches, 0 rows → FailedPrecondition. Различаем NotFound vs
 // FailedPrecondition дополнительным `SELECT EXISTS` в той же TX. Закрывает
-// G2 audit KAC-85 (TOCTOU `Get→check→SetStatus`), parity c kacho-vpc KAC-52.
+// TOCTOU `Get→check→SetStatus` (software check-then-act race).
 func (r *InstanceRepo) SetStatusCAS(ctx context.Context, id string, expected, next domain.InstanceStatus) (*domain.Instance, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -361,7 +364,7 @@ func (r *InstanceRepo) Delete(ctx context.Context, id string, autoDeleteDiskIDs 
 		if err := emitCompute(ctx, tx, "Disk", did, "DELETED", map[string]any{"id": did}); err != nil {
 			return service.ErrInternal
 		}
-		// SEC-D: symmetric FGA unregister-intent for the auto-deleted disk.
+		// symmetric FGA unregister-intent for the auto-deleted disk.
 		// Unregister removes the mirror row by object → labels are irrelevant (nil).
 		if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventUnregister, "Disk", did, diskProject, nil); err != nil {
 			return service.ErrInternal
@@ -378,7 +381,7 @@ func (r *InstanceRepo) Delete(ctx context.Context, id string, autoDeleteDiskIDs 
 	if err := emitCompute(ctx, tx, "Instance", id, "DELETED", map[string]any{"id": id}); err != nil {
 		return service.ErrInternal
 	}
-	// SEC-D: symmetric FGA unregister-intent for the instance in the SAME writer-tx.
+	// symmetric FGA unregister-intent for the instance in the SAME writer-tx.
 	// Unregister removes the mirror row by object → labels are irrelevant (nil).
 	if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventUnregister, "Instance", id, projectID, nil); err != nil {
 		return service.ErrInternal
@@ -409,7 +412,7 @@ func (r *InstanceRepo) mutateAndReload(ctx context.Context, id, eventType string
 		if isFKViolation(err) {
 			return nil, fmt.Errorf("%w: Instance %s has dependent resources", service.ErrFailedPrecondition, id)
 		}
-		// KAC-90: UNIQUE на attached_disks.disk_id — диск уже attached другой Instance.
+		// UNIQUE на attached_disks.disk_id — диск уже attached другой Instance.
 		// Отделяем от generic AlreadyExists (мапит в FailedPrecondition, не AlreadyExists).
 		if isAttachedDisksDiskIDUniqViolation(err) {
 			return nil, fmt.Errorf("%w: disk already attached to another instance", service.ErrFailedPrecondition)

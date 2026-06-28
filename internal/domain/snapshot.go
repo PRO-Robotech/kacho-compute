@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package domain
 
 import (
@@ -19,7 +22,7 @@ const (
 )
 
 // Snapshot — снапшот (folder-level ресурс). source_disk_id обязателен в Create
-// (не FK — YC семантика допускает удаление source-диска). disk_size/storage_size
+// (не FK — семантика Kachō допускает удаление source-диска). disk_size/storage_size
 // фиксируются на момент создания (= disk.size) и immutable.
 type Snapshot struct {
 	ID                 string

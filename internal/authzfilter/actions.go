@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package authzfilter
 
 // Compute-domain FGA object types (consumed by iam.ListObjects.resource_type).
@@ -15,9 +18,8 @@ const (
 // Compute-domain action strings — server-side resolves to FGA relation.
 // Format: `<domain>.<resource>.<verb>`.
 //
-// D-consumer (§11, D-40..D-45 / issue #111): the verb MUST be one the
-// kacho-iam AuthorizeService.ListObjects server maps to the FGA `viewer`
-// relation. Under the scope_grant rules-model (sub-phase B/C/#193),
+// The verb MUST be one the kacho-iam AuthorizeService.ListObjects server maps to
+// the FGA `viewer` relation. Under the scope_grant rules-model,
 // `resolveActionToRelation` maps ONLY the canonical RPC verbs get/list →
 // "viewer"; the verb "read" is UNMAPPED → it returns "Illegal argument action"
 // (InvalidArgument), which the compute filter wraps as Unavailable for every

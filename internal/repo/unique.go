@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package repo
 
 import (
@@ -25,7 +28,7 @@ func isUniqueViolation(err error) bool {
 }
 
 // isAttachedDisksDiskIDUniqViolation — true если 23505 пришла именно на индекс
-// `attached_disks_disk_id_uniq` (миграция 0007, KAC-90). Используется для
+// `attached_disks_disk_id_uniq` (миграция 0007). Используется для
 // отделения «диск уже attached к другой Instance» (FailedPrecondition) от
 // общего AlreadyExists по другим UNIQUE-constraint.
 func isAttachedDisksDiskIDUniqViolation(err error) bool {
@@ -44,7 +47,7 @@ func isAttachedDisksDiskIDUniqViolation(err error) bool {
 
 // isFKViolation — Postgres foreign_key_violation (SQLSTATE 23503). Возникает на
 // Delete Disk пока он attached (FK attached_disks.disk_id RESTRICT). Маппится в
-// gRPC FailedPrecondition (verbatim YC: "The disk is being used").
+// gRPC FailedPrecondition ("The disk is being used").
 func isFKViolation(err error) bool {
 	if err == nil {
 		return false

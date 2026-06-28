@@ -1,3 +1,6 @@
+-- Copyright (c) PRO-Robotech
+-- SPDX-License-Identifier: BUSL-1.1
+
 -- +goose Up
 -- KAC-90 (G1 из compute within-service refs audit KAC-85):
 -- attached_disks.disk_id UNIQUE — предотвращение двойного attach одного и того

@@ -1,4 +1,7 @@
-// Package authzfilter — FGA-filtered List integration (KAC-127 Phase 4).
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
+// Package authzfilter — FGA-filtered List integration.
 //
 // Provides ListAllowedIDs(ctx, principal, resourceType, action) wrapping
 // kacho-iam.AuthorizeService.ListObjects. Caches per-(subject, resourceType,

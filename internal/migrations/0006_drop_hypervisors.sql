@@ -1,3 +1,6 @@
+-- Copyright (c) PRO-Robotech
+-- SPDX-License-Identifier: BUSL-1.1
+
 -- +goose Up
 -- Упразднение Hypervisor (KAC-80/KAC-36): InternalHypervisorService удалён из proto,
 -- inventory нод после kube-ovn перейдёт на k8s Node objects (управляется kube-ovn,

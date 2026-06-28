@@ -1,15 +1,15 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package clients содержит gRPC-адаптеры к peer-сервисам (Clean Architecture
 // outbound adapters): kacho-iam (ProjectService) и kacho-vpc
 // (Subnet/SecurityGroup/Address). Реализуют port-интерфейсы из internal/ports.
 //
-// KAC-106 (E1): peer для project-existence-check переключён с
-// kacho-resource-manager.FolderService.Get на kacho-iam.ProjectService.Get.
-// File-name retained for git-history continuity.
+// peer для project-existence-check — kacho-iam.ProjectService.Get.
 //
-// W1.4 (KAC-140): outgoing ctx обёрнут `auth.PropagateOutgoing` — peer-call
-// несёт `x-kacho-principal-*` MD, чтобы iam-side scope-filter увидел реального
-// caller'а (раньше — anonymous/system, NOT_FOUND, тихий fail Operation; mirror
-// of kacho-vpc KAC-127 Bug-2 + W1.4 lift to corelib).
+// outgoing ctx обёрнут `auth.PropagateOutgoing` — peer-call несёт
+// `x-kacho-principal-*` MD, чтобы iam-side scope-filter увидел реального caller'а
+// (иначе — anonymous/system, NOT_FOUND, тихий fail Operation).
 package clients
 
 import (

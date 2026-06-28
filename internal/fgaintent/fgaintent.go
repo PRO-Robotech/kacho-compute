@@ -1,9 +1,11 @@
-// Package fgaintent — SEC-D: serialisation of FGA owner-tuple register/unregister
-// intents written to the compute_fga_register_outbox table (transactional outbox,
-// epic §3.1 Variant A).
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
+// Package fgaintent — serialisation of FGA owner-tuple register/unregister intents
+// written to the compute_fga_register_outbox table (transactional outbox).
 //
-// kacho-compute does NOT talk to OpenFGA directly any more (epic requirement #6,
-// GitHub Issue N5). Instead, on every resource Create/Delete it records an
+// kacho-compute does NOT talk to OpenFGA directly any more. Instead, on every
+// resource Create/Delete it records an
 // "intent" row IN THE SAME writer-tx as the resource Insert/Delete. A separate
 // register-drainer (corelib outbox/drainer) later replays each intent by calling
 // kacho-iam InternalIAMService.RegisterResource / UnregisterResource over mTLS —
@@ -41,8 +43,8 @@ type Tuple struct {
 	Object    string `json:"object"`
 }
 
-// Payload — the JSONB stored in one outbox row. OQ-SEC-D-2: a SET of tuples per
-// row (the whole tuple-set of one resource is one RegisterResource transaction in
+// Payload — the JSONB stored in one outbox row. A SET of tuples per row (the
+// whole tuple-set of one resource is one RegisterResource transaction in
 // IAM). Today compute resources carry exactly one project-hierarchy tuple, but
 // the set form keeps the contract stable if a creator/parent-link tuple is added.
 //

@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package service
 
 import (
@@ -11,7 +14,7 @@ import (
 // mapRepoErr — единая трансляция repo-sentinel в gRPC status (копия VPC).
 //
 // Sentinel-prefix (`failed precondition: `, `not found`, ...) удаляется при
-// преобразовании в gRPC-сообщение, чтобы клиент видел verbatim YC text без
+// преобразовании в gRPC-сообщение, чтобы клиент видел чистый текст без
 // internal-обёртки.
 //
 // Fallthrough: неклассифицированный err → codes.Internal с фиксированным
@@ -41,11 +44,11 @@ func mapRepoErr(err error) error {
 }
 
 // mapZoneRefErr транслирует ошибку existence-check zone_id (через ZoneRegistry —
-// kacho-geo geo.v1.ZoneService.Get; Geography принадлежит kacho-geo, Stage S7) в
-// gRPC-status, сохраняя текущий контракт compute: неизвестная зона → InvalidArgument
-// "Zone <id> not found" (паритет с предыдущей логикой; CLAUDE.md §4.1, §6).
-// Транспортная ошибка к kacho-geo (Unavailable) пробрасывается как
-// Unavailable "zone check: <err>" (зеркалит folder/subnet-check).
+// kacho-geo geo.v1.ZoneService.Get; Geography принадлежит kacho-geo) в
+// gRPC-status, сохраняя контракт compute: неизвестная зона → InvalidArgument
+// "Zone <id> not found". Транспортная ошибка к kacho-geo (Unavailable)
+// пробрасывается как Unavailable "zone check: <err>" (зеркалит
+// folder/subnet-check).
 func mapZoneRefErr(err error, zoneID string) error {
 	if err == nil {
 		return nil
@@ -60,7 +63,7 @@ func mapZoneRefErr(err error, zoneID string) error {
 }
 
 // stripSentinel — извлекает «полезную» часть сообщения (после «sentinel: »),
-// чтобы выдать клиенту verbatim text без internal-обёртки sentinel-ошибки.
+// чтобы выдать клиенту чистый текст без internal-обёртки sentinel-ошибки.
 func stripSentinel(err, sentinel error) string {
 	msg := err.Error()
 	prefix := sentinel.Error() + ": "

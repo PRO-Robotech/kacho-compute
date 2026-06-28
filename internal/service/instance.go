@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package service
 
 import (
@@ -23,9 +26,9 @@ import (
 	"github.com/PRO-Robotech/kacho-compute/internal/protoconv"
 )
 
-// validCoreFractions — допустимые значения core_fraction (verbatim YC).
-// Полная per-platform валидация (cores/memory/gpus per standard-v1/v2/v3, gpu-*)
-// — TODO platforms.go; пока — basic sanity check (см. CLAUDE.md §5).
+// validCoreFractions — допустимые значения core_fraction (конвенция Kachō).
+// Полная per-platform валидация (cores/memory/gpus по платформам standard-v1/v2/v3,
+// gpu-*) живет в platforms.go; здесь — базовая проверка допустимых core_fraction.
 var validCoreFractions = map[int64]struct{}{0: {}, 5: {}, 20: {}, 50: {}, 100: {}}
 
 // NatSpec — спека one-to-one NAT.
@@ -90,14 +93,14 @@ type UpdateInstanceReq struct {
 	UpdateMask          []string
 }
 
-// InstanceService — бизнес-логика управления ВМ + state-машина (CLAUDE.md §8).
+// InstanceService — бизнес-логика управления ВМ + state-машина.
 type InstanceService struct {
 	repo         InstanceRepo
 	diskRepo     DiskRepo
 	imageRepo    ImageRepo
 	snapshotRepo SnapshotRepo
 	// zones — existence-check zone_id. Авторитетный источник — kacho-geo
-	// (geo.v1.ZoneService.Get; Geography принадлежит kacho-geo, Stage S7); при
+	// (geo.v1.ZoneService.Get; Geography принадлежит kacho-geo); при
 	// SKIP_PEER_VALIDATION — no-op. Wiring — cmd/compute/main.go.
 	zones         ZoneRegistry
 	projectClient ProjectClient
@@ -191,7 +194,7 @@ func (s *InstanceService) doCreate(ctx context.Context, instanceID string, req C
 		return nil, mapZoneRefErr(err, req.ZoneID)
 	}
 
-	// KAC-266: Instance is created WITHOUT any network interface. NIC binding has
+	// Instance is created WITHOUT any network interface. NIC binding has
 	// been removed from the Instance lifecycle entirely (no auto-NIC) — no
 	// kacho-vpc Address/NetworkInterface resources are created or attached at
 	// Create time. NICs can be managed independently through kacho-vpc.
@@ -247,7 +250,7 @@ func (s *InstanceService) doCreate(ctx context.Context, instanceID string, req C
 	if err != nil {
 		return nil, mapRepoErr(err)
 	}
-	// SEC-D: the compute_instance→project owner-tuple (and any inline boot/secondary
+	// the compute_instance→project owner-tuple (and any inline boot/secondary
 	// disk tuples) is registered transactionally — repo.Insert writes the FGA
 	// register-intent in the SAME writer-tx as the rows (compute_fga_register_outbox)
 	// and the register-drainer applies it via kacho-iam InternalIAMService
@@ -587,12 +590,10 @@ func (s *InstanceService) UpdateMetadata(ctx context.Context, instanceID string,
 	return &op, nil
 }
 
-// Start/Stop/Restart — state-машина (см. CLAUDE.md §8). DB-уровневый CAS
-// (workspace CLAUDE.md §«Within-service refs — DB-уровень обязателен»):
-// `Get → check → SetStatus` заменено на atomic `SetStatusCAS(expected, next)`
-// в одной транзакции — concurrent Stop+Restart на RUNNING ВМ не может
-// привести к second-writer-wins / lost-state (KAC-91, gap G2 audit KAC-85,
-// parity c kacho-vpc KAC-52 NIC-attach race).
+// Start/Stop/Restart — state-машина. DB-уровневый CAS (within-service-инвариант
+// на DB-уровне): `Get → check → SetStatus` заменено на atomic
+// `SetStatusCAS(expected, next)` в одной транзакции — concurrent Stop+Restart на
+// RUNNING ВМ не может привести к second-writer-wins / lost-state.
 func (s *InstanceService) Start(ctx context.Context, id string) (*operations.Operation, error) {
 	return s.lifecycle(ctx, id, "Start", domain.InstanceStatusStopped, domain.InstanceStatusRunning,
 		"Instance is not stopped", &computev1.StartInstanceMetadata{InstanceId: id})
@@ -663,8 +664,8 @@ func (s *InstanceService) lifecycle(ctx context.Context, id, action string, from
 
 // mapLifecycleErr маппит ошибку SetStatusCAS в gRPC-status: ErrFailedPrecondition
 // от CAS-промаха («status != expected») транслируется в FailedPrecondition с
-// verbatim YC-style precondMsg ("Instance is not running"/"... not stopped");
-// все остальные (ErrNotFound, ErrInternal, ...) — стандартный mapRepoErr.
+// precondMsg ("Instance is not running"/"... not stopped"); все остальные
+// (ErrNotFound, ErrInternal, ...) — стандартный mapRepoErr.
 func mapLifecycleErr(err error, precondMsg string) error {
 	if errors.Is(err, ErrFailedPrecondition) {
 		return status.Error(codes.FailedPrecondition, precondMsg)

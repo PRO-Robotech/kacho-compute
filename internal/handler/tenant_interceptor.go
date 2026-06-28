@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package handler — tenant_interceptor.go: gRPC unary/stream interceptor
 // который извлекает caller-folder identity из metadata и кладёт в context.
 //

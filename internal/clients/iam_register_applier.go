@@ -1,21 +1,24 @@
-// Package clients — iam_register_applier.go (SEC-D).
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
+// Package clients — iam_register_applier.go.
 //
 // IAMRegisterApplier is the register-drainer Applier (corelib outbox/drainer):
 // it replays a decoded FGA register/unregister intent by calling kacho-iam
 // InternalIAMService.RegisterResource / UnregisterResource over (optionally) mTLS.
 //
-// kacho-compute никогда не ходит в FGA напрямую (epic #6); FGA спрятан за IAM.
+// kacho-compute никогда не ходит в FGA напрямую; FGA спрятан за IAM.
 // The applier is the ONLY place compute reaches IAM's FGA-proxy, and it does so
 // asynchronously off the Operation hot-path (intent durable in the outbox), so
 // an IAM outage cannot lose the owner-tuple nor fail the resource mutation
-// (closes GitHub Issue N5, the best-effort dual-write bug).
+// (no best-effort dual-write).
 //
-// Idempotency (SEC-A contract): RegisterResource / UnregisterResource return gRPC
+// Idempotency contract: RegisterResource / UnregisterResource return gRPC
 // OK on a repeated tuple — the drainer can retry safely (at-least-once → exactly
 // applied). The applier maps gRPC status → drainer disposition:
 //   - OK                         → nil (drainer marks sent_at).
 //   - codes.InvalidArgument      → drainer.ErrPermanent (poison; malformed tuple,
-//     e.g. SEC-C poison classification).
+//     e.g. poison classification).
 //   - any other (Unavailable,…)  → transient (drainer retries with backoff).
 package clients
 
@@ -130,9 +133,9 @@ func sourceVersionPB(t time.Time) *timestamppb.Timestamp {
 }
 
 // classifyApplyErr maps a gRPC status to the drainer disposition. InvalidArgument
-// is a permanent poison (malformed tuple — retry is pointless, SEC-D-14); every
-// other code (notably Unavailable from IAM-down or an mTLS handshake mismatch) is
-// transient → drainer retries with backoff (intent stays durable, SEC-D-11/21).
+// is a permanent poison (malformed tuple — retry is pointless); every other code
+// (notably Unavailable from IAM-down or an mTLS handshake mismatch) is transient →
+// drainer retries with backoff (intent stays durable).
 func classifyApplyErr(err error) error {
 	if err == nil {
 		return nil

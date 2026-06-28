@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package service
 
 import (
@@ -43,7 +46,7 @@ func baseCreateReq() CreateInstanceReq {
 	}
 }
 
-// TestInstance_Create_OK — KAC-266: the Instance is created WITHOUT any network
+// TestInstance_Create_OK — the Instance is created WITHOUT any network
 // interface (no auto-NIC). The rest of the lifecycle (boot disk, status,
 // operation envelope) is unaffected.
 func TestInstance_Create_OK(t *testing.T) {
@@ -88,7 +91,7 @@ func TestInstance_Create_SyncValidation(t *testing.T) {
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
-// TestInstance_Create_NoNIC_Materialization — KAC-266: even with peer validation
+// TestInstance_Create_NoNIC_Materialization — even with peer validation
 // enabled (skipIPAM=false), Create must not touch the VPC for NIC/address
 // allocation. No ephemeral Address resources are created.
 func TestInstance_Create_NoNIC_Materialization(t *testing.T) {
@@ -240,8 +243,8 @@ func TestInstance_AttachDetachDisk(t *testing.T) {
 }
 
 // TestInstance_AddRemoveNAT — one-to-one NAT operates on a NIC already present on
-// the Instance row (NIC binding itself is out of the Instance Create lifecycle
-// after KAC-266; here a NIC is seeded directly into the row).
+// the Instance row (NIC binding itself is out of the Instance Create lifecycle;
+// here a NIC is seeded directly into the row).
 func TestInstance_AddRemoveNAT(t *testing.T) {
 	svc, repo, _, _, ops := newInstanceSvc(t, true)
 	seedRunningInstance(repo, domain.InstanceStatusRunning)
@@ -376,7 +379,7 @@ func TestInstance_AddNAT_ReservedAddress_SetsReferenceOnly(t *testing.T) {
 }
 
 // TestInstance_Create_ZoneFromSource — zone_id валидируется через ZoneRegistry
-// port. Stage S4: в продакшене этот порт реализует clients.GeoClient (kacho-geo
+// port. В продакшене этот порт реализует clients.GeoClient (kacho-geo
 // geo.v1.ZoneService.Get), а не локальная таблица `zones`; здесь use-case
 // тестируется port-агностично через mock. Неизвестная зона → операция падает с
 // InvalidArgument "Zone ... not found" (geo NOT_FOUND → InvalidArgument).

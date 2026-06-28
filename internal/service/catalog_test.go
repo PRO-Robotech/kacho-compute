@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package service
 
 import (
@@ -37,6 +40,6 @@ func TestDiskType_AdminCRUD(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(svc.Delete(context.Background(), "network-ssd-io-m3")))
 }
 
-// Region/Zone serving (ZoneService/RegionService) removed (Stage S7) — Geography
+// Region/Zone serving (ZoneService/RegionService) removed — Geography
 // (Region/Zone) is owned by kacho-geo. zone_id validation goes through the geo
 // client (service.ZoneRegistry), exercised in disk_test.go / instance_test.go.

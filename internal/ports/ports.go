@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package ports содержит port-интерфейсы (Clean Architecture boundaries) и
 // связанные value-объекты (Pagination, *Filter) для kacho-compute.
 //
@@ -24,10 +27,10 @@ type Pagination struct {
 // DiskFilter — фильтр для списка дисков.
 type DiskFilter struct {
 	ProjectID string
-	// Filter — raw filter expression (YC-syntax: `name="<value>"`).
+	// Filter — raw filter expression (синтаксис Kachō: `name="<value>"`).
 	Filter string
 	// AllowedIDs — если non-nil, ограничивает выборку этим id-множеством
-	// (FGA-фильтр, KAC-127 Phase 4). nil = без фильтра (bypass).
+	// (FGA-фильтр). nil = без фильтра (bypass).
 	AllowedIDs []string
 }
 
@@ -57,11 +60,14 @@ type DiskRepo interface {
 	Get(ctx context.Context, id string) (*domain.Disk, error)
 	List(ctx context.Context, f DiskFilter, p Pagination) ([]*domain.Disk, string, error)
 	Insert(ctx context.Context, d *domain.Disk) (*domain.Disk, error)
-	// Update — emitLabelsRegister эмитит mirror.upsert при labels-в-маске (#113/T3.1, parity с Instance).
+	// Update — emitLabelsRegister эмитит mirror.upsert при labels-в-маске (parity с Instance).
 	Update(ctx context.Context, d *domain.Disk, emitLabelsRegister bool) (*domain.Disk, error)
 	Delete(ctx context.Context, id string) error
-	// SetZoneID меняет zone_id (для Relocate).
-	SetZoneID(ctx context.Context, id, zoneID string) (*domain.Disk, error)
+	// SetZoneIfDetached атомарно меняет zone_id, но только если диск НЕ attached
+	// (Relocate). Гонка с AttachDisk закрывается на DB-уровне (row-lock на disks),
+	// а не software-check-then-act: detached → новый zone_id; attached →
+	// ErrFailedPrecondition; нет диска → ErrNotFound.
+	SetZoneIfDetached(ctx context.Context, id, zoneID string) (*domain.Disk, error)
 	// IsAttached — true если есть строка attached_disks для disk_id.
 	IsAttached(ctx context.Context, id string) (bool, error)
 }
@@ -72,7 +78,7 @@ type ImageRepo interface {
 	GetLatestByFamily(ctx context.Context, folderID, family string) (*domain.Image, error)
 	List(ctx context.Context, f ImageFilter, p Pagination) ([]*domain.Image, string, error)
 	Insert(ctx context.Context, i *domain.Image) (*domain.Image, error)
-	// Update — emitLabelsRegister эмитит mirror.upsert при labels-в-маске (#113/T3.1, parity с Instance).
+	// Update — emitLabelsRegister эмитит mirror.upsert при labels-в-маске (parity с Instance).
 	Update(ctx context.Context, i *domain.Image, emitLabelsRegister bool) (*domain.Image, error)
 	Delete(ctx context.Context, id string) error
 }
@@ -82,7 +88,7 @@ type SnapshotRepo interface {
 	Get(ctx context.Context, id string) (*domain.Snapshot, error)
 	List(ctx context.Context, f SnapshotFilter, p Pagination) ([]*domain.Snapshot, string, error)
 	Insert(ctx context.Context, s *domain.Snapshot) (*domain.Snapshot, error)
-	// Update — emitLabelsRegister эмитит mirror.upsert при labels-в-маске (#113/T3.1, parity с Instance).
+	// Update — emitLabelsRegister эмитит mirror.upsert при labels-в-маске (parity с Instance).
 	Update(ctx context.Context, s *domain.Snapshot, emitLabelsRegister bool) (*domain.Snapshot, error)
 	Delete(ctx context.Context, id string) error
 }
@@ -96,18 +102,17 @@ type InstanceRepo interface {
 	// созданную ВМ (с заполненными NICs/AttachedDisks).
 	Insert(ctx context.Context, in *domain.Instance, inlineDisks []*domain.Disk) (*domain.Instance, error)
 	// Update обновляет mutable поля + status (для lifecycle-операций).
-	// emitLabelsRegister (epic RSAB β, D-β6): true когда "labels" присутствует в
-	// update-mask (или full-object PATCH применяет labels) → repo эмитит свежий
-	// FGA register-intent с обновлёнными labels в той же writer-tx (IAM
-	// resource_mirror refresh, ban #10); false → register-intent НЕ эмитится.
+	// emitLabelsRegister: true когда "labels" присутствует в update-mask (или
+	// full-object PATCH применяет labels) → repo эмитит свежий FGA register-intent
+	// с обновлёнными labels в той же writer-tx (refresh IAM resource_mirror —
+	// within-service-инвариант на DB-уровне); false → register-intent НЕ эмитится.
 	Update(ctx context.Context, in *domain.Instance, emitLabelsRegister bool) (*domain.Instance, error)
 	// SetStatusCAS атомарно переводит instance из expected-status в next-status
 	// (CAS на DB-уровне: conditional UPDATE WHERE id=$1 AND status=$expected).
 	// Если row не существует → ErrNotFound; если status не совпадает с
 	// expected → ErrFailedPrecondition (state transition not allowed). Возвращает
-	// обновлённую ВМ (+ outbox UPDATED в той же TX). Workspace CLAUDE.md
-	// §«Within-service refs — DB-уровень обязателен» (KAC-91/KAC-87 G2,
-	// parity c kacho-vpc KAC-52 NIC-attach race).
+	// обновлённую ВМ (+ outbox UPDATED в той же TX). Within-service-инвариант на
+	// DB-уровне (CAS), не software check-then-act — защита от second-writer-wins.
 	SetStatusCAS(ctx context.Context, id string, expected, next domain.InstanceStatus) (*domain.Instance, error)
 	// AttachDisk добавляет строку attached_disks. Возвращает обновлённую ВМ.
 	AttachDisk(ctx context.Context, id string, ad domain.AttachedDisk) (*domain.Instance, error)
@@ -162,7 +167,7 @@ type VPCAddress struct {
 // VPCClient — port для cross-service взаимодействия с kacho-vpc: IPAM-аллокация
 // эфемерных external Address-ресурсов под one-to-one NAT (AddOneToOneNat),
 // teardown этих ресурсов и referrer-tracking адресов. NIC-привязка убрана из
-// lifecycle Instance (KAC-266, no auto-NIC) — методов управления NIC здесь нет.
+// lifecycle Instance (no auto-NIC) — методов управления NIC здесь нет.
 type VPCClient interface {
 	// CreateExternalAddress создаёт эфемерный external Address в указанном
 	// folder/zone; kacho-vpc inline выделяет публичный IPv4 из AddressPool

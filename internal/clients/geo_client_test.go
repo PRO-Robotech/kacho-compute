@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package clients
 
 import (
@@ -61,7 +64,7 @@ func TestGeoClient_GetZone_NotFound(t *testing.T) {
 // TestGeoClient_GetZone_Unavailable — geo недоступен (transport-ошибка) →
 // GeoClient НЕ трактует это как not-found и НЕ возвращает nil (fail-closed для
 // мутаций Instance: mapZoneRefErr пробросит non-NotFound как Unavailable
-// "zone check: ...", см. data-integrity.md §cross-domain).
+// "zone check: ...").
 //
 // Retry.OnUnavailable имеет 30s-бюджет; чтобы тест был быстрым и детерминированным,
 // контекст отменяется до вызова — retry-цикл прерывается немедленно после первой

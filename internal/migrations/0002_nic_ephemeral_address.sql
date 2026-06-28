@@ -1,3 +1,6 @@
+-- Copyright (c) PRO-Robotech
+-- SPDX-License-Identifier: BUSL-1.1
+
 -- +goose Up
 -- Track the VPC Address resource id that kacho-compute created to auto-allocate
 -- a NIC's internal IPv4 (when the user didn't pass a manual address). On

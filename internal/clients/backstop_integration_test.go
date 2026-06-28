@@ -1,12 +1,15 @@
-// backstop_integration_test.go — sub-phase 1.4 S3 (kacho-compute backstop, D-9):
-// reconciler + metrics + fail-closed boot-gate over the existing SEC-D
-// register-outbox, WITHOUT changing co-commit atomicity (no migration).
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
+// backstop_integration_test.go — kacho-compute backstop: reconciler + metrics +
+// fail-closed boot-gate over the register-outbox, WITHOUT changing co-commit
+// atomicity (no migration).
 //
-//	1.4-30  reconciler re-drives a poisoned row back to claimable → delivered
-//	1.4-31  fail-closed boot-gate: require-iam + no drainer → Create refused
-//	1.4-32  long-outage no-poison: IAM down > MaxAttempts (transient) → not
-//	        poisoned → delivered exactly once on recovery (corelib D-5 classify) +
-//	        metrics surface backlog/poisoned while pending (1.4-23)
+//   - reconciler re-drives a poisoned row back to claimable → delivered
+//   - fail-closed boot-gate: require-iam + no drainer → Create refused
+//   - long-outage no-poison: IAM down > MaxAttempts (transient) → not poisoned →
+//     delivered exactly once on recovery + metrics surface backlog/poisoned while
+//     pending
 //
 // testcontainers Postgres 16; real corelib reconciler/drainer/metrics + fake IAM.
 // Reuses the harness in register_drainer_integration_test.go (setupDrainerDB,

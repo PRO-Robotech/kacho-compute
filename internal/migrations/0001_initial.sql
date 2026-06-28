@@ -1,3 +1,6 @@
+-- Copyright (c) PRO-Robotech
+-- SPDX-License-Identifier: BUSL-1.1
+
 -- +goose Up
 -- kacho-compute squashed baseline (sub-phase 0.4).
 -- Flat resources (без K8s envelope) + Operations (corelib) + outbox + LISTEN/NOTIFY.

@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package check
 
 import (
@@ -24,10 +27,9 @@ func NewIAMCheckClient(conn grpc.ClientConnInterface) *IAMCheckClient {
 
 // Check вызывает `InternalIAMService.Check`.
 //
-// W1.4 (KAC-140): outgoing ctx обёрнут `auth.PropagateOutgoing`, чтобы iam-side
+// outgoing ctx обёрнут `auth.PropagateOutgoing`, чтобы iam-side
 // `grpcsrv.UnaryPrincipalExtract` увидел реального caller'а, а не SystemPrincipal()
-// = user:bootstrap. Mirror of kacho-vpc fix. См.
-// `docs/specs/sub-phase-W1.4-principal-propagation-acceptance.md`.
+// = user:bootstrap.
 func (c *IAMCheckClient) Check(ctx context.Context, subjectID, relation, object string) (bool, error) {
 	resp, err := c.cli.Check(auth.PropagateOutgoing(ctx), &iamv1.CheckRequest{
 		SubjectId: subjectID,

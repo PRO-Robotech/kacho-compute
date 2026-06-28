@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 import (
@@ -18,15 +21,17 @@ import (
 	"github.com/PRO-Robotech/kacho-corelib/operations"
 )
 
-// TestCompute_PublicChain_ExtractsPrincipalFromMD — KAC-178 §2 (W1.4 mirror
-// of kacho-vpc). Verifies that the public gRPC chain assembled in main.go's
-// runServe() includes grpcsrv.UnaryPrincipalExtract() as the first interceptor.
-// Без него operations.PrincipalFromContext(ctx) внутри любого handler видит
-// SystemPrincipal() = user:bootstrap вместо реального caller'а, форварднутого
-// api-gateway через x-kacho-principal-* MD → Operation.created_by = "anonymous".
+// TestCompute_PublicChain_ExtractsPrincipalFromMD — integration-проверка
+// principal-extract цепочки, как её навешивает runServe на оба листенера
+// (CertIdentityExtract → TrustedPrincipalExtract), поверх РЕАЛЬНОГО insecure
+// gRPC-транспорта. На insecure dev-listener'е (mTLS off) trust-инвариант N/A:
+// peer не предъявляет client-cert вовсе → forwarded x-kacho-principal-* metadata
+// доверяется (back-compat). Без extract'а operations.PrincipalFromContext(ctx)
+// внутри handler'а видел бы SystemPrincipal() = user:bootstrap вместо реального
+// caller'а, форварднутого api-gateway → Operation.created_by = "anonymous".
 //
-// Тест воспроизводит chain main.go (порядок ВАЖЕН: principal-extract → tenant);
-// при изменении composition в runServe — chain здесь нужно держать в sync.
+// Anti-spoof поведение под mTLS (forged principal недоверенного peer'а снимается)
+// проверяет cert_bound_identity_test.go; этот тест держит insecure-back-compat.
 func TestCompute_PublicChain_ExtractsPrincipalFromMD(t *testing.T) {
 	// Recording handler — фиксирует Principal, который видит handler через
 	// operations.PrincipalFromContext после прохода через цепочку.
@@ -43,10 +48,12 @@ func TestCompute_PublicChain_ExtractsPrincipalFromMD(t *testing.T) {
 		return handler(ctx, req)
 	}
 
-	// Public chain — порядок mirror'ит main.go: principal-extract ПЕРВЫМ.
-	// Recording interceptor СТАВИМ ПОСЛЕДНИМ, чтобы он видел уже-extract'ed Principal.
+	// Public chain — mirror'ит main.go: trust-aware principal-extract ПЕРВЫМ
+	// (CertIdentityExtract → TrustedPrincipalExtract). Recording interceptor СТАВИМ
+	// ПОСЛЕДНИМ, чтобы он видел уже-extract'ed Principal.
 	publicUnary := []grpc.UnaryServerInterceptor{
-		grpcsrv.UnaryPrincipalExtract(),
+		grpcsrv.UnaryCertIdentityExtract(),
+		grpcsrv.UnaryTrustedPrincipalExtract(),
 		recordingInterceptor,
 	}
 
@@ -100,7 +107,8 @@ func TestCompute_PublicChain_FallsBackToSystem_WhenNoMD(t *testing.T) {
 	}
 
 	publicUnary := []grpc.UnaryServerInterceptor{
-		grpcsrv.UnaryPrincipalExtract(),
+		grpcsrv.UnaryCertIdentityExtract(),
+		grpcsrv.UnaryTrustedPrincipalExtract(),
 		recordingInterceptor,
 	}
 

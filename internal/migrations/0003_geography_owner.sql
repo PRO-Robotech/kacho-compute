@@ -1,3 +1,6 @@
+-- Copyright (c) PRO-Robotech
+-- SPDX-License-Identifier: BUSL-1.1
+
 -- +goose Up
 -- kacho-compute becomes the owner of Geography (Region/Zone), moved from kacho-vpc
 -- (epic KAC-15). Add a regions table, add a name column to zones, FK zones→regions,

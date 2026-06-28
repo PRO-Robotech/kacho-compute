@@ -1,11 +1,14 @@
-// actions_test.go — D-consumer (§11, D-40..D-45): the compute list-filter must
-// call iam AuthorizeService.ListObjects with an `action` whose verb the iam
-// server resolves to the FGA `viewer` relation (read==enforce parity under the
-// scope_grant rules-model, sub-phase B/C/#193).
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
+// actions_test.go — the compute list-filter must call iam
+// AuthorizeService.ListObjects with an `action` whose verb the iam server
+// resolves to the FGA `viewer` relation (read==enforce parity under the
+// scope_grant rules-model).
 //
 // Why this test exists (the bug it pins):
 //
-//	Before D-consumer, compute sent action="compute.<resource>.read" (verb
+//	Before this fix, compute sent action="compute.<resource>.read" (verb
 //	"read"). The iam ListObjects server (kacho-iam internal/service/
 //	authorize_service.go::resolveActionToRelation) maps ONLY the canonical RPC
 //	verbs get/list → "viewer"; the verb "read" is NOT in the map → it returns

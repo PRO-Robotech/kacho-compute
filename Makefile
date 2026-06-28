@@ -1,3 +1,6 @@
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: BUSL-1.1
+
 BINARY         := kacho-compute
 CMD            := ./cmd/compute
 IMAGE          := kacho-compute:dev

@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package handler — internal_watch_handler.go реализует
 // kacho.cloud.compute.v1.InternalWatchService — internal RPC, поток событий из
 // compute_outbox (Outbox pattern + LISTEN/NOTIFY wake-up). Handler НЕ выставлен

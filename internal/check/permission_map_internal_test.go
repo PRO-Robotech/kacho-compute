@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package check_test
 
 import (
@@ -13,12 +16,11 @@ import (
 // catalogAdminMutations — internal catalog-admin RPC, которые ОБЯЗАНЫ быть
 // замаплены на FGA-relation `system_admin` @ `cluster:cluster_kacho_root`
 // (proto-аннотация `required_relation=system_admin`, object_type=cluster в
-// kacho-proto/.../internal_catalog_service.proto). Эти RPC живут на internal
-// listener'е :9091 — после KAC-31 он гоняет тот же authzIntr, что и public,
-// поэтому каждая catalog-мутация должна резолвиться в Check, а не пропускаться
-// methodIsInternal-фолбэком.
-// Internal{Zone,Region}Service serving removed (Stage S7) — Geography is owned by
-// kacho-geo; only InternalDiskTypeService remains compute-owned.
+// internal_catalog_service.proto). Эти RPC живут на internal listener'е :9091 —
+// он гоняет тот же authzIntr, что и public, поэтому каждая catalog-мутация должна
+// резолвиться в Check, а не пропускаться methodIsInternal-фолбэком.
+// Internal{Zone,Region}Service serving removed — Geography is owned by kacho-geo;
+// only InternalDiskTypeService remains compute-owned.
 var catalogAdminMutations = []string{
 	"/kacho.cloud.compute.v1.InternalDiskTypeService/Create",
 	"/kacho.cloud.compute.v1.InternalDiskTypeService/Update",

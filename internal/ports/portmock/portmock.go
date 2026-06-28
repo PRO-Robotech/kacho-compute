@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package portmock содержит in-memory fake-реализации port-интерфейсов из
 // `internal/ports` плюс helper'ы для ожидания async-Operation'ов. Используется
 // unit-тестами `internal/service` и `internal/handler`.
@@ -30,7 +33,7 @@ type DiskRepo struct {
 	data     map[string]*domain.Disk
 	attached map[string]bool // disk_id → attached?
 	// LastUpdateEmitLabels — последнее значение emitLabelsRegister, переданное в
-	// Update (#113/T3.1) для проверки labels-gated mirror-эмита use-case-тестом.
+	// Update, для проверки labels-gated mirror-эмита use-case-тестом.
 	LastUpdateEmitLabels *bool
 }
 
@@ -66,8 +69,8 @@ func (r *DiskRepo) Get(_ context.Context, id string) (*domain.Disk, error) {
 
 // List возвращает диски по folder.
 //
-// KAC-127 Phase 4: honors AllowedIDs — if non-nil, only return ids contained
-// in the allow-list (empty allow-list → empty result, NO repo scan).
+// Honors AllowedIDs — if non-nil, only return ids contained in the allow-list
+// (empty allow-list → empty result, NO repo scan).
 func (r *DiskRepo) List(_ context.Context, f ports.DiskFilter, _ ports.Pagination) ([]*domain.Disk, string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -118,7 +121,7 @@ func (r *DiskRepo) Insert(_ context.Context, d *domain.Disk) (*domain.Disk, erro
 }
 
 // Update обновляет диск. Записывает emitLabelsRegister в LastUpdateEmitLabels
-// (#113/T3.1) для проверки use-case-тестом.
+// для проверки use-case-тестом.
 func (r *DiskRepo) Update(_ context.Context, d *domain.Disk, emitLabelsRegister bool) (*domain.Disk, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -145,13 +148,16 @@ func (r *DiskRepo) Delete(_ context.Context, id string) error {
 	return nil
 }
 
-// SetZoneID меняет zone_id.
-func (r *DiskRepo) SetZoneID(_ context.Context, id, zoneID string) (*domain.Disk, error) {
+// SetZoneIfDetached меняет zone_id, только если диск не attached (Relocate).
+func (r *DiskRepo) SetZoneIfDetached(_ context.Context, id, zoneID string) (*domain.Disk, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	d, ok := r.data[id]
 	if !ok {
 		return nil, ports.ErrNotFound
+	}
+	if r.attached[id] {
+		return nil, ports.ErrFailedPrecondition
 	}
 	d.ZoneID = zoneID
 	return d, nil
@@ -170,7 +176,7 @@ func (r *DiskRepo) IsAttached(_ context.Context, id string) (bool, error) {
 type ImageRepo struct {
 	mu   sync.Mutex
 	data map[string]*domain.Image
-	// LastUpdateEmitLabels — последнее emitLabelsRegister из Update (#113/T3.1).
+	// LastUpdateEmitLabels — последнее emitLabelsRegister из Update.
 	LastUpdateEmitLabels *bool
 }
 
@@ -214,7 +220,7 @@ func (r *ImageRepo) GetLatestByFamily(_ context.Context, folderID, family string
 	return best, nil
 }
 
-// List возвращает образы по folder. Honors AllowedIDs (KAC-127 Phase 4).
+// List возвращает образы по folder. Honors AllowedIDs.
 func (r *ImageRepo) List(_ context.Context, f ports.ImageFilter, _ ports.Pagination) ([]*domain.Image, string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -252,7 +258,7 @@ func (r *ImageRepo) Insert(_ context.Context, i *domain.Image) (*domain.Image, e
 	return i, nil
 }
 
-// Update обновляет образ. Записывает emitLabelsRegister (#113/T3.1).
+// Update обновляет образ. Записывает emitLabelsRegister.
 func (r *ImageRepo) Update(_ context.Context, i *domain.Image, emitLabelsRegister bool) (*domain.Image, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -282,7 +288,7 @@ func (r *ImageRepo) Delete(_ context.Context, id string) error {
 type SnapshotRepo struct {
 	mu   sync.Mutex
 	data map[string]*domain.Snapshot
-	// LastUpdateEmitLabels — последнее emitLabelsRegister из Update (#113/T3.1).
+	// LastUpdateEmitLabels — последнее emitLabelsRegister из Update.
 	LastUpdateEmitLabels *bool
 }
 
@@ -307,7 +313,7 @@ func (r *SnapshotRepo) Get(_ context.Context, id string) (*domain.Snapshot, erro
 	return s, nil
 }
 
-// List возвращает снапшоты по folder. Honors AllowedIDs (KAC-127 Phase 4).
+// List возвращает снапшоты по folder. Honors AllowedIDs.
 func (r *SnapshotRepo) List(_ context.Context, f ports.SnapshotFilter, _ ports.Pagination) ([]*domain.Snapshot, string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -345,7 +351,7 @@ func (r *SnapshotRepo) Insert(_ context.Context, s *domain.Snapshot) (*domain.Sn
 	return s, nil
 }
 
-// Update обновляет снапшот. Записывает emitLabelsRegister (#113/T3.1).
+// Update обновляет снапшот. Записывает emitLabelsRegister.
 func (r *SnapshotRepo) Update(_ context.Context, s *domain.Snapshot, emitLabelsRegister bool) (*domain.Snapshot, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -652,7 +658,7 @@ func (r *DiskTypeRepo) Delete(_ context.Context, id string) error {
 
 // ZoneRegistry — in-memory ports.ZoneRegistry (zone_id existence-check для
 // Disk/Instance Create + Disk Relocate). В проде реализуется clients.GeoClient
-// (geo.v1.ZoneService.Get) — Geography принадлежит kacho-geo (Stage S7).
+// (geo.v1.ZoneService.Get) — Geography принадлежит kacho-geo.
 type ZoneRegistry struct {
 	mu   sync.Mutex
 	data map[string]string // zoneID → regionID
@@ -819,7 +825,7 @@ func (r *OpsRepo) Create(_ context.Context, op operations.Operation) error {
 	return nil
 }
 
-// CreateWithPrincipal сохраняет операцию + principal (KAC-113 operations.Repo iface).
+// CreateWithPrincipal сохраняет операцию + principal (operations.Repo iface).
 func (r *OpsRepo) CreateWithPrincipal(_ context.Context, op operations.Operation, p operations.Principal) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

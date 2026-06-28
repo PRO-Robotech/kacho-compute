@@ -1,3 +1,6 @@
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: BUSL-1.1
+
 """Case-set для DiskTypeService (kacho-compute) — read-only справочник.
 
 Covered RPCs: Get, List. Seed: network-hdd, network-ssd, network-ssd-nonreplicated,

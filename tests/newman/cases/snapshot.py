@@ -1,3 +1,6 @@
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: BUSL-1.1
+
 """Case-set для SnapshotService (kacho-compute).
 
 Covered RPCs: Get, List, Create (из Disk), Update, Delete, ListOperations.

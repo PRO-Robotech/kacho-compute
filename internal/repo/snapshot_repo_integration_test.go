@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package repo_test
 
 import (
@@ -27,9 +30,9 @@ func newTestSnapshot(id, projectID string, labels map[string]string) *domain.Sna
 // TestSnapshotRepo_T31Revoke03Snapshot_LabelRemoveEmitsMirrorUpsert —
 // T3.1-REVOKE-03-snapshot: removing a Snapshot label on Update (labels in mask)
 // must emit an fga.register (mirror.upsert) intent carrying the CURRENT (now empty)
-// labels, in the SAME writer-tx as the UPDATE — NOT an unregister (G-3). RED before
-// snapshot_repo.go Update emits a labels-gated register intent (bug #113:
-// compute.snapshot Update-on-label-change does NOT refresh the IAM resource_mirror).
+// labels, in the SAME writer-tx as the UPDATE — NOT an unregister. RED before
+// snapshot_repo.go Update emits a labels-gated register intent
+// (compute.snapshot Update-on-label-change does NOT refresh the IAM resource_mirror).
 func TestSnapshotRepo_T31Revoke03Snapshot_LabelRemoveEmitsMirrorUpsert(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")

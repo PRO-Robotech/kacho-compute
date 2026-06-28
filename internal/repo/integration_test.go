@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package repo_test
 
 import (
@@ -209,7 +212,7 @@ func TestIntegration_CatalogRepo(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 
-	// Region/Zone serving (ZoneRepo/RegionRepo) removed (Stage S7) — Geography is
+	// Region/Zone serving (ZoneRepo/RegionRepo) removed — Geography is
 	// owned by kacho-geo; the local zones/regions tables are dropped by migration
 	// 0011_drop_geography (see TestIntegration_DropGeographyMigration). DiskType
 	// stays compute-owned.

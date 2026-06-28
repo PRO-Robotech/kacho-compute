@@ -1,3 +1,6 @@
+-- Copyright (c) PRO-Robotech
+-- SPDX-License-Identifier: BUSL-1.1
+
 -- +goose Up
 -- SEC-D (epic §3.1 Variant A): transactional outbox for FGA owner-tuple
 -- register/unregister intents. kacho-compute no longer writes to OpenFGA directly

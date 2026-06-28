@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package repo_test
 
 import (
@@ -44,7 +47,7 @@ func newTestDisk(id, projectID string, labels map[string]string) *domain.Disk {
 // mirror row must stay with labels={} so ARM_LABELS selectors stop matching while
 // the owner-tuple/containment survive). RED before disk_repo.go Update emits a
 // labels-gated register intent (the Update signature has no emitLabelsRegister flag
-// yet — bug #113, compute.disk Update-on-label-change does NOT refresh the mirror).
+// yet — compute.disk Update-on-label-change does NOT refresh the mirror).
 func TestDiskRepo_T31Revoke03Disk_LabelRemoveEmitsMirrorUpsert(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -61,7 +64,7 @@ func TestDiskRepo_T31Revoke03Disk_LabelRemoveEmitsMirrorUpsert(t *testing.T) {
 	created, err := diskRepo.Insert(ctx, newTestDisk(dID, projectID, map[string]string{"tier": "treska"}))
 	require.NoError(t, err)
 
-	// Sanity: Create already feeds labels (disk has no bare-create bug, §0.1).
+	// Sanity: Create already feeds labels (disk has no bare-create bug).
 	regsAfterCreate := registerIntents(queryFGARegisterRows(ctx, t, pool, dID))
 	require.Len(t, regsAfterCreate, 1, "Create emits one register intent")
 	assert.Equal(t, map[string]string{"tier": "treska"}, payloadMirror(t, regsAfterCreate[0].payload).Labels)

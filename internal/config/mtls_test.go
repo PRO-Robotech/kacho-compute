@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package config_test
 
 import (
@@ -20,7 +23,7 @@ import (
 )
 
 // writeTestCert generates a throwaway self-signed cert+key+CA PEM trio for the
-// mTLS-wiring tests (no real PKI — that's SEC-F). Returns cert, key, ca paths.
+// mTLS-wiring tests (no real PKI). Returns cert, key, ca paths.
 func writeTestCert(t *testing.T) (certFile, keyFile, caFile string) {
 	t.Helper()
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -51,8 +54,8 @@ func writeTestCert(t *testing.T) (certFile, keyFile, caFile string) {
 	return certFile, keyFile, caFile
 }
 
-// TestMTLS_SEC_D_16_DisabledDefaultInsecure — SEC-D-16: enable=false (default) →
-// dial opts build insecure; backward-compat, no cert files read.
+// TestMTLS_SEC_D_16_DisabledDefaultInsecure — enable=false (default) → dial opts
+// build insecure; backward-compat, no cert files read.
 func TestMTLS_SEC_D_16_DisabledDefaultInsecure(t *testing.T) {
 	var cfg config.Config
 	require.NoError(t, config.LoadInto(&cfg, map[string]string{
@@ -67,9 +70,9 @@ func TestMTLS_SEC_D_16_DisabledDefaultInsecure(t *testing.T) {
 	require.NotNil(t, opt)
 }
 
-// TestMTLS_SEC_D_17_EnabledClientCredsBuild — SEC-D-17/18/19 (compute wiring):
-// enable=true with a valid cert/key/ca trio builds client transport creds
-// (handshake itself is covered by corelib SEC-B bufconn tests).
+// TestMTLS_SEC_D_17_EnabledClientCredsBuild — enable=true with a valid cert/key/ca
+// trio builds client transport creds (handshake itself is covered by corelib
+// bufconn tests).
 func TestMTLS_SEC_D_17_EnabledClientCredsBuild(t *testing.T) {
 	certFile, keyFile, caFile := writeTestCert(t)
 	var cfg config.Config

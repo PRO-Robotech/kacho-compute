@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package handler
 
 import (
@@ -20,7 +23,7 @@ import (
 // Unimplemented RPC (наследуются из UnimplementedInstanceServiceServer →
 // codes.Unimplemented): AttachFilesystem/DetachFilesystem (blocked:kacho-filesystem),
 // AttachNetworkInterface/DetachNetworkInterface/UpdateNetworkInterface (NIC binding
-// removed from the Instance lifecycle — KAC-266, no auto-NIC), Relocate
+// removed from the Instance lifecycle — no auto-NIC), Relocate
 // (blocked: cross-zone disk move), ListAccessBindings/SetAccessBindings/UpdateAccessBindings
 // (AAA-скелет). См. docs/architecture/07-known-divergences.md.
 type InstanceHandler struct {
@@ -48,7 +51,7 @@ func (h *InstanceHandler) Get(ctx context.Context, req *computev1.GetInstanceReq
 		return nil, err
 	}
 	p := protoconv.Instance(in)
-	// verbatim YC: GetInstanceRequest.view — metadata возвращается только при view=FULL.
+	// GetInstanceRequest.view — metadata возвращается только при view=FULL.
 	if req.View != computev1.InstanceView_FULL {
 		p.Metadata = nil
 	}
@@ -57,9 +60,9 @@ func (h *InstanceHandler) Get(ctx context.Context, req *computev1.GetInstanceReq
 
 // List возвращает список ВМ в folder.
 //
-// KAC-127 Phase 4: вызов фильтруется через iam.AuthorizeService.ListObjects
+// Вызов фильтруется через iam.AuthorizeService.ListObjects
 // (caller subject → allowed instance_ids). admin / dev-bypass → no filtering.
-// Empty grant → empty list (NOT 403 — verbatim YC behaviour для list-empty).
+// Empty grant → empty list (NOT 403 — конвенция Kachō для list-empty).
 func (h *InstanceHandler) List(ctx context.Context, req *computev1.ListInstancesRequest) (*computev1.ListInstancesResponse, error) {
 	if err := AssertFolderOwnership(ctx, req.ProjectId); err != nil {
 		return nil, err
@@ -83,7 +86,7 @@ func (h *InstanceHandler) List(ctx context.Context, req *computev1.ListInstances
 	resp := &computev1.ListInstancesResponse{NextPageToken: nextToken}
 	for _, in := range ins {
 		p := protoconv.Instance(in)
-		// verbatim YC: metadata всегда опускается в List response (в ListInstancesRequest
+		// metadata всегда опускается в List response (в ListInstancesRequest
 		// нет view-параметра — это документировано в instance.proto комментарии к Instance.metadata).
 		p.Metadata = nil
 		resp.Instances = append(resp.Instances, p)
@@ -123,8 +126,8 @@ func (h *InstanceHandler) Create(ctx context.Context, req *computev1.CreateInsta
 	for _, sd := range req.SecondaryDiskSpecs {
 		cr.SecondaryDisks = append(cr.SecondaryDisks, diskSourceFromSpec(sd))
 	}
-	// KAC-266: network_interface_specs are ignored — the Instance is created
-	// without any auto-NIC (NIC binding removed from the Instance lifecycle).
+	// network_interface_specs are ignored — the Instance is created without any
+	// auto-NIC (NIC binding removed from the Instance lifecycle).
 	op, err := h.svc.Create(ctx, cr)
 	if err != nil {
 		return nil, err

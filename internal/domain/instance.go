@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package domain
 
 import (
@@ -6,8 +9,8 @@ import (
 	computev1 "github.com/PRO-Robotech/kacho-compute/proto/gen/go/kacho/cloud/compute/v1"
 )
 
-// InstanceStatus — состояние ВМ (control-plane: детерминированная state-машина,
-// см. kacho-compute CLAUDE.md §8). Значения зеркалят computev1.Instance_Status.
+// InstanceStatus — состояние ВМ (control-plane: детерминированная state-машина).
+// Значения зеркалят computev1.Instance_Status.
 type InstanceStatus int
 
 // Значения InstanceStatus.
@@ -68,8 +71,8 @@ type OneToOneNat struct {
 // "" если IP задан клиентом вручную (тогда Address-ресурс не создаётся) либо
 // если IP синтетический (SKIP_PEER_VALIDATION). Непустой PrimaryV4AddressID
 // означает «эфемерный» Address — compute удалит его при teardown.
-// NICID — id связанного kacho-vpc NetworkInterface-ресурса (vpc.NetworkInterface;
-// эпик KAC-2). Пусто для legacy-NIC, созданных до KAC-9, и в SKIP_PEER_VALIDATION
+// NICID — id связанного kacho-vpc NetworkInterface-ресурса
+// (vpc.NetworkInterface). Пусто для legacy-NIC и в SKIP_PEER_VALIDATION
 // (синтетический NIC без vpc-ресурса). Поля SubnetID/PrimaryV4Address/
 // SecurityGroupIDs становятся read-only denormalised mirror NIC-ресурса (source of
 // truth = kacho-vpc) когда NICID непуст.

@@ -1,5 +1,8 @@
-// Package fgaboot wires the corelib fail-closed boot-gate (sub-phase 1.4 D-8)
-// into kacho-compute's gRPC server: a unary interceptor that refuses mutating
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
+// Package fgaboot wires the corelib fail-closed boot-gate into kacho-compute's
+// gRPC server: a unary interceptor that refuses mutating
 // tenant-resource Create RPCs when --require-iam is armed and the IAM-connected
 // register-drainer is not up, so no resource is ever created without a
 // deliverable owner-tuple intent. Read RPCs and Internal-admin Creates (DiskType/

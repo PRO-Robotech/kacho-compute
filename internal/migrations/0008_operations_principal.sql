@@ -1,3 +1,6 @@
+-- Copyright (c) PRO-Robotech
+-- SPDX-License-Identifier: BUSL-1.1
+
 -- +goose Up
 
 -- KAC-113 (subtask KAC-105 / epic KAC-104 IAM DoD #4):

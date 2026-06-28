@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package repo_test
 
 import (
@@ -18,7 +21,7 @@ import (
 	"github.com/PRO-Robotech/kacho-compute/internal/repo"
 )
 
-// fgaRegisterRow is a decoded compute_fga_register_outbox row used by the SEC-D
+// fgaRegisterRow is a decoded compute_fga_register_outbox row used by the
 // transactional-outbox assertions (intent written IN THE SAME writer-tx as the
 // resource Insert/Delete).
 type fgaRegisterRow struct {
@@ -57,8 +60,8 @@ func payloadTuples(t *testing.T, b []byte) []fgaintent.Tuple {
 	return p.Tuples
 }
 
-// TestInstance_SEC_D_04_RegisterIntentInWriterTx — SEC-D-04: Instance.Create
-// writes exactly one fga.register intent in the SAME writer-tx as the Insert,
+// TestInstance_SEC_D_04_RegisterIntentInWriterTx — Instance.Create writes
+// exactly one fga.register intent in the SAME writer-tx as the Insert,
 // payload carries project:<id> #project @compute_instance:<id>; sent_at IS NULL
 // (register-drainer not run here).
 func TestInstance_SEC_D_04_RegisterIntentInWriterTx(t *testing.T) {
@@ -104,7 +107,7 @@ func TestInstance_SEC_D_04_RegisterIntentInWriterTx(t *testing.T) {
 	assert.Equal(t, 1, domainCount)
 }
 
-// TestInstance_SEC_D_02_AbortNoIntent — SEC-D-02: a failed writer-tx (duplicate
+// TestInstance_SEC_D_02_AbortNoIntent — a failed writer-tx (duplicate
 // attached disk → tx aborts) leaves NO fga.register intent and NO orphan instance
 // row (intent + Insert are one commit; both roll back).
 func TestInstance_SEC_D_02_AbortNoIntent(t *testing.T) {
@@ -152,8 +155,8 @@ func TestInstance_SEC_D_02_AbortNoIntent(t *testing.T) {
 	require.Error(t, gerr)
 }
 
-// TestInstance_SEC_D_03_UnregisterIntentOnDelete — SEC-D-03 (compute mirror):
-// Instance.Delete writes an fga.unregister intent in the same writer-tx; payload
+// TestInstance_SEC_D_03_UnregisterIntentOnDelete — Instance.Delete writes an
+// fga.unregister intent in the same writer-tx; payload
 // carries the project-hierarchy tuple; the instance row is gone.
 func TestInstance_SEC_D_03_UnregisterIntentOnDelete(t *testing.T) {
 	if testing.Short() {

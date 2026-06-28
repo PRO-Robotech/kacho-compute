@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package service
 
 import "github.com/PRO-Robotech/kacho-compute/internal/ports"
@@ -36,7 +39,7 @@ type (
 	ProjectClient = ports.ProjectClient
 	// VPCClient — port для cross-service взаимодействия с kacho-vpc
 	// (IPAM-аллокация эфемерных external Address под one-to-one NAT + teardown +
-	// referrer-tracking). NIC-привязка убрана из lifecycle Instance (KAC-266).
+	// referrer-tracking). NIC-привязка убрана из lifecycle Instance.
 	VPCClient = ports.VPCClient
 	// VPCAddress — выделенный IP-адрес VPC (IP + id Address-ресурса).
 	VPCAddress = ports.VPCAddress

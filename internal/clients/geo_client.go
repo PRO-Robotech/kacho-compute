@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package clients
 
 import (
@@ -16,15 +19,14 @@ import (
 )
 
 // GeoClient реализует service.ZoneRegistry через gRPC к kacho-geo
-// (geo.v1.ZoneService.Get). Заменяет in-process ZoneRepoSource как источник
-// existence-check для Instance.zone_id (эпик kacho-geo, Stage S4): Geography —
-// домен нового leaf-сервиса kacho-geo, compute больше не владеет зонами для
-// валидации (compute по-прежнему СЛУЖИТ свой Region/Zone до S7 — снимается там).
+// (geo.v1.ZoneService.Get) — источник existence-check для Instance.zone_id.
+// Geography (Region/Zone) — домен leaf-сервиса kacho-geo; compute зонами не
+// владеет и их не обслуживает, лишь валидирует свой zone_id как consumer.
 //
 // Контракт ZoneRegistry (см. mapZoneRefErr): geo NOT_FOUND → service.ErrNotFound
 // (→ InvalidArgument "Zone <id> not found", fail-closed на мутации Instance);
 // транспортная ошибка (geo недоступен) → проброс gRPC Unavailable (→ Unavailable
-// "zone check: ...", fail-closed для мутаций, data-integrity.md §cross-domain).
+// "zone check: ...", fail-closed для мутаций).
 //
 // W1.4-паритет с iam/vpc-клиентами: outgoing ctx обёрнут auth.PropagateOutgoing,
 // чтобы geo-side authz-Check (security.md: per-RPC Check на каждом RPC) видел

@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package handler
 
 import (
@@ -57,7 +60,7 @@ func (h *ImageHandler) GetLatestByFamily(ctx context.Context, req *computev1.Get
 
 // List возвращает список образов в folder.
 //
-// KAC-127 Phase 4: вызов фильтруется через iam.AuthorizeService.ListObjects
+// Вызов фильтруется через iam.AuthorizeService.ListObjects
 // (caller subject → allowed image_ids).
 func (h *ImageHandler) List(ctx context.Context, req *computev1.ListImagesRequest) (*computev1.ListImagesResponse, error) {
 	if err := AssertFolderOwnership(ctx, req.ProjectId); err != nil {

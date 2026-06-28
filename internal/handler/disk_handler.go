@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package handler
 
 import (
@@ -49,7 +52,7 @@ func (h *DiskHandler) Get(ctx context.Context, req *computev1.GetDiskRequest) (*
 
 // List возвращает список дисков в folder.
 //
-// KAC-127 Phase 4: вызов фильтруется через iam.AuthorizeService.ListObjects
+// Вызов фильтруется через iam.AuthorizeService.ListObjects
 // (caller subject → allowed disk_ids). admin / dev-bypass → no filtering.
 func (h *DiskHandler) List(ctx context.Context, req *computev1.ListDisksRequest) (*computev1.ListDisksResponse, error) {
 	if err := AssertFolderOwnership(ctx, req.ProjectId); err != nil {

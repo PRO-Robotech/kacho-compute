@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package repo_test
 
 import (
@@ -27,8 +30,8 @@ func newTestImage(id, projectID string, labels map[string]string) *domain.Image 
 // TestImageRepo_T31Revoke03Image_LabelRemoveEmitsMirrorUpsert — T3.1-REVOKE-03-image:
 // removing an Image label on Update (labels in mask) must emit an fga.register
 // (mirror.upsert) intent carrying the CURRENT (now empty) labels, in the SAME
-// writer-tx as the UPDATE — NOT an unregister (G-3). RED before image_repo.go Update
-// emits a labels-gated register intent (bug #113: compute.image Update-on-label-change
+// writer-tx as the UPDATE — NOT an unregister. RED before image_repo.go Update
+// emits a labels-gated register intent (compute.image Update-on-label-change
 // does NOT refresh the IAM resource_mirror).
 func TestImageRepo_T31Revoke03Image_LabelRemoveEmitsMirrorUpsert(t *testing.T) {
 	if testing.Short() {

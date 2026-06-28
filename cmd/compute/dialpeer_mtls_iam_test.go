@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 import (
@@ -21,7 +24,7 @@ import (
 )
 
 // writeCmdTestCert generates a throwaway self-signed cert+key+CA PEM trio for the
-// cmd-level mTLS seam tests (no real PKI — that's SEC-F). Returns cert, key, ca paths.
+// cmd-level mTLS seam tests (no real PKI). Returns cert, key, ca paths.
 func writeCmdTestCert(t *testing.T) (certFile, keyFile, caFile string) {
 	t.Helper()
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -52,14 +55,14 @@ func writeCmdTestCert(t *testing.T) (certFile, keyFile, caFile string) {
 	return certFile, keyFile, caFile
 }
 
-// SEC-I (sub-phase SEC-I §C) — the compute→iam read/authz dial seam must thread a
-// per-edge grpcclient.TLSClient (client-cert mTLS) rather than the server-auth-only
-// bool. These guard the seam refactor (OQ-3): peerDialOptsCreds(creds, idle) builds
-// the dial-opts from corelib-resolved transport creds, and the iam ProjectService.Get
-// and Check/list-filter conns resolve their creds from the new TLSClient edges.
+// CLIENT mTLS on the compute→iam read/authz dial seam: it must thread a per-edge
+// grpcclient.TLSClient (client-cert mTLS) rather than the server-auth-only bool.
+// These guard the seam: peerDialOptsCreds(creds, idle) builds the dial-opts from
+// corelib-resolved transport creds, and the iam ProjectService.Get and
+// Check/list-filter conns resolve their creds from the TLSClient edges.
 
 // TestSEC_I_PeerDialOptsCreds_KeepsKeepalive — the creds-aware seam (used for the
-// iam read/authz edges) keeps the keepalive dial-option (KAC-244) and presents the
+// iam read/authz edges) keeps the keepalive dial-option and presents the
 // passed transport-creds. Mirrors dialpeer_test.go's keepalive guard for the new seam.
 func TestSEC_I_PeerDialOptsCreds_KeepsKeepalive(t *testing.T) {
 	creds, err := grpcclient.TLSClientTransportCreds(grpcclient.TLSClient{Enable: false})
@@ -86,7 +89,7 @@ func TestSEC_I_IAMProjectDialCreds_Insecure_Default(t *testing.T) {
 // TestSEC_I_IAMAuthzDialCreds_ClientCert_Enabled — Check/list-filter edge:
 // enable=true with a valid trio → corelib builds client-cert mTLS creds; the
 // authz conn presents the kacho-compute-client-tls cert (handshake-level behavior
-// is covered by corelib SEC-B bufconn tests).
+// is covered by corelib bufconn tests).
 func TestSEC_I_IAMAuthzDialCreds_ClientCert_Enabled(t *testing.T) {
 	certFile, keyFile, caFile := writeCmdTestCert(t)
 	var cfg config.Config

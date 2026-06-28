@@ -1,3 +1,6 @@
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: BUSL-1.1
+
 """Case-set для ImageService (kacho-compute).
 
 Covered RPCs: Get, GetLatestByFamily, List, Create, Update, Delete, ListOperations.

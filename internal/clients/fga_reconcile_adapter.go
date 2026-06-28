@@ -1,16 +1,19 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 // fga_reconcile_adapter.go — per-service adapters for the corelib
-// outbox/reconciler (sub-phase 1.4 S3 backstop, D-6).
+// outbox/reconciler backstop.
 //
 // The reconciler orchestrates re-drive / derive-from-state backfill / inverse-
 // orphan GC; the DOMAIN knowledge (which tables hold tenant resources, their
 // project_id, whether one still exists) is per-service and injected through
 // reconciler.ResourceEnumerator + reconciler.TupleRegistry. This file implements
 // those ports over the compute resource tables (project-hierarchy only — every
-// compute resource carries project_id; compute has no owner-self-grant, D-4).
+// compute resource carries project_id; compute has no owner-self-grant).
 //
 // Clean Architecture note: this adapter imports pgx (an adapter concern) only;
 // it reaches FGA exclusively through kacho-iam via the register-outbox (no direct
-// FGA write/read here — SEC-D-07 structural gate).
+// FGA write/read here — structural gate).
 package clients
 
 import (
@@ -104,7 +107,7 @@ func (a *FGAReconcileAdapter) ResourceExists(ctx context.Context, kind, id strin
 // ListRegistered derives the orphan-GC candidate set from the register-outbox:
 // every (resource_kind, resource_id) whose LATEST intent is a delivered
 // fga.register (sent_at NOT NULL). The reconciler then confirms absence +
-// anti-race before any unregister. No direct FGA read (SEC-D-07).
+// anti-race before any unregister. No direct FGA read.
 func (a *FGAReconcileAdapter) ListRegistered(ctx context.Context) ([]reconciler.RegisteredTuple, error) {
 	rows, err := a.pool.Query(ctx, fmt.Sprintf(`
 		SELECT DISTINCT ON (resource_id) resource_kind, resource_id, event_type

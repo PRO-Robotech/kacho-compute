@@ -1,3 +1,6 @@
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: BUSL-1.1
+
 """Case-set authz-deny для kacho-compute (KAC-122).
 
 Проверяет default-deny matrix для 6 субъектов на каждом публичном CRUD compute-ресурсов

@@ -1,9 +1,12 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package protoconv — единственное место конверсии domain-сущностей kacho-compute
 // в proto-сообщения. Используется и service-слоем (для Operation.response), и
 // handler-слоем (для Get/List) — НЕ два дублирующих конвертера (как в kacho-vpc).
 //
-// Контракт: `created_at` всегда truncate до секунд (verbatim YC —
-// YC-DIFF-TIMESTAMP-PRECISION).
+// Контракт: `created_at` всегда truncate до секунд (конвенция Kachō по
+// timestamp-точности в proto-ответах).
 package protoconv
 
 import (

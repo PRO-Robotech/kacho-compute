@@ -1,3 +1,6 @@
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: BUSL-1.1
+
 """Case-set для OperationService (kacho-compute) — Get / Cancel.
 
 Все compute-операции имеют prefix `epd` (PrefixOperationCompute == PrefixInstance);

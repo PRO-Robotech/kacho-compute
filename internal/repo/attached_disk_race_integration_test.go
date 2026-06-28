@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package repo_test
 
 import (
@@ -20,15 +23,14 @@ import (
 )
 
 // TestIntegration_AttachedDisksDiskIDUniq_ConcurrentAttachRace проверяет
-// инвариант KAC-90 (миграция 0007): один disk_id может присутствовать в
+// инвариант (миграция 0007): один disk_id может присутствовать в
 // attached_disks ровно один раз. 5 concurrent goroutines пытаются прикрепить
 // один и тот же Disk к 5 разным Instance — DB должна пропустить ровно одну
 // INSERT, остальные — отбить SQLSTATE 23505 на индексе
 // attached_disks_disk_id_uniq.
 //
-// Это parity с NIC-attach race инцидентом KAC-52: software-side guard
-// (IsAttached / cycle по AttachedDisks) — TOCTOU-prone; единственная
-// race-proof защита — DB-уровень.
+// software-side guard (IsAttached / cycle по AttachedDisks) — TOCTOU-prone;
+// единственная race-proof защита — DB-уровень.
 func TestIntegration_AttachedDisksDiskIDUniq_ConcurrentAttachRace(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")

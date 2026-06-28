@@ -1,4 +1,7 @@
-// KAC-127 Phase 12 — Continuous fuzzing: Compute Instance spec validation.
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
+// Continuous fuzzing: Compute Instance spec validation.
 //
 // Instance create accepts a complex nested spec (boot_disk, secondary_disks,
 // network_interfaces, metadata). Malformed input must NOT panic, must

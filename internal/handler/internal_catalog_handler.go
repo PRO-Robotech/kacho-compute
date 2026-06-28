@@ -1,7 +1,10 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package handler — internal_catalog_handler.go: admin-CRUD над справочником
 // DiskType (kacho-only RPC). Регистрируется ТОЛЬКО на internal listener (:9091),
-// проброшен через api-gateway internal mux. На external TLS endpoint не доступен —
-// workspace CLAUDE.md §запрет 6.
+// проброшен через api-gateway internal mux. На external TLS endpoint не доступен:
+// Internal-методы не публикуются наружу.
 package handler
 
 import (

@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package service
 
 import (
@@ -63,7 +66,7 @@ type DiskService struct {
 	snapshotRepo SnapshotRepo
 	diskTypeRepo DiskTypeRepo
 	// zones — existence-check zone_id. Авторитетный источник — kacho-geo
-	// (geo.v1.ZoneService.Get; Geography принадлежит kacho-geo, Stage S7); при
+	// (geo.v1.ZoneService.Get; Geography принадлежит kacho-geo); при
 	// SKIP_PEER_VALIDATION — no-op. Wiring — cmd/compute/main.go.
 	zones         ZoneRegistry
 	projectClient ProjectClient
@@ -196,7 +199,7 @@ func (s *DiskService) doCreate(ctx context.Context, diskID string, req CreateDis
 	if err != nil {
 		return nil, mapRepoErr(err)
 	}
-	// SEC-D: the compute_disk→project owner-tuple is registered transactionally —
+	// the compute_disk→project owner-tuple is registered transactionally —
 	// repo.Insert writes the FGA register-intent in the SAME writer-tx as the row
 	// (compute_fga_register_outbox), and the register-drainer applies it via
 	// kacho-iam InternalIAMService.RegisterResource (no direct FGA, no dual-write).
@@ -234,7 +237,7 @@ func (s *DiskService) doUpdate(ctx context.Context, req UpdateDiskReq) (*anypb.A
 	if len(updates) == 0 {
 		updates = []string{"name", "description", "labels", "size", "disk_placement_policy"}
 	}
-	// labelsInMask (#113 / T3.1, parity с InstanceService.Update): triggers an FGA
+	// labelsInMask (parity с InstanceService.Update): triggers an FGA
 	// register-intent refresh (mirror.upsert) so the IAM resource_mirror tracks label
 	// dynamics and ARM_LABELS grants revoke on label-remove/change. Empty mask =
 	// full-PATCH applies labels too, so `updates` already includes it.
@@ -348,14 +351,10 @@ func (s *DiskService) Relocate(ctx context.Context, id, destZoneID string) (*ope
 		if _, err := s.zones.GetZone(ctx, destZoneID); err != nil {
 			return nil, mapZoneRefErr(err, destZoneID)
 		}
-		attached, err := s.repo.IsAttached(ctx, id)
-		if err != nil {
-			return nil, mapRepoErr(err)
-		}
-		if attached {
-			return nil, status.Error(codes.FailedPrecondition, "Disk is in use")
-		}
-		updated, err := s.repo.SetZoneID(ctx, id, destZoneID)
+		// Атомарный CAS на DB-уровне: zone_id меняется только если диск не attached.
+		// Software-side check-then-act (TOCTOU) допускал релокацию диска, который
+		// параллельный AttachDisk прикреплял между проверкой и update.
+		updated, err := s.repo.SetZoneIfDetached(ctx, id, destZoneID)
 		if err != nil {
 			return nil, mapRepoErr(err)
 		}

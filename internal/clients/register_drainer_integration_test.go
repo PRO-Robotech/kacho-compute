@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package clients_test
 
 import (
@@ -156,8 +159,8 @@ func countSent(ctx context.Context, t *testing.T, pool *pgxpool.Pool) (sent, pen
 	return
 }
 
-// TestRegisterDrainer_SEC_D_09_HappyApply — SEC-D-09: drainer applies a register
-// intent via IAM.RegisterResource, intent marked sent.
+// TestRegisterDrainer_SEC_D_09_HappyApply — drainer applies a register intent via
+// IAM.RegisterResource, intent marked sent.
 func TestRegisterDrainer_SEC_D_09_HappyApply(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -183,7 +186,7 @@ func TestRegisterDrainer_SEC_D_09_HappyApply(t *testing.T) {
 	assert.Equal(t, "compute_instance:epd-1", fake.registered[0].Object)
 }
 
-// TestRegisterDrainer_SEC_D_10_UnregisterApply — SEC-D-10: unregister intent →
+// TestRegisterDrainer_SEC_D_10_UnregisterApply — unregister intent →
 // IAM.UnregisterResource.
 func TestRegisterDrainer_SEC_D_10_UnregisterApply(t *testing.T) {
 	if testing.Short() {
@@ -209,7 +212,7 @@ func TestRegisterDrainer_SEC_D_10_UnregisterApply(t *testing.T) {
 	assert.Equal(t, "compute_instance:epd-2", fake.unregistered[0].Object)
 }
 
-// TestRegisterDrainer_SEC_D_11_IAMDownThenRecover (КРИТИЧНО) — SEC-D-11: IAM
+// TestRegisterDrainer_SEC_D_11_IAMDownThenRecover (КРИТИЧНО) — IAM
 // Unavailable on first N calls → intent stays durable (sent_at NULL, last_error
 // LIKE %Unavailable%), then recovers and is applied within the window. Tuple is
 // never lost.
@@ -243,7 +246,7 @@ func TestRegisterDrainer_SEC_D_11_IAMDownThenRecover(t *testing.T) {
 	}, 5*time.Second, 50*time.Millisecond)
 }
 
-// TestRegisterDrainer_SEC_D_13_ConcurrentTwoReplicas — SEC-D-13: two drainer
+// TestRegisterDrainer_SEC_D_13_ConcurrentTwoReplicas — two drainer
 // replicas on the same DB apply each of 20 intents exactly once (CAS-claim /
 // SKIP-LOCKED). no double-apply, no miss.
 func TestRegisterDrainer_SEC_D_13_ConcurrentTwoReplicas(t *testing.T) {
@@ -276,7 +279,7 @@ func TestRegisterDrainer_SEC_D_13_ConcurrentTwoReplicas(t *testing.T) {
 	assert.Equal(t, n, fake.registeredCount(), "exactly-once across replicas (no double-apply, no miss)")
 }
 
-// TestRegisterDrainer_SEC_D_14_PermanentPoison — SEC-D-14: IAM InvalidArgument →
+// TestRegisterDrainer_SEC_D_14_PermanentPoison — IAM InvalidArgument →
 // poison (attempt_count >= MaxAttempts, sent_at NULL), drainer keeps processing
 // other rows.
 func TestRegisterDrainer_SEC_D_14_PermanentPoison(t *testing.T) {

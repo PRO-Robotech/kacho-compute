@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package repo
 
 import (
@@ -15,7 +18,7 @@ import (
 // computeOutboxTable — имя таблицы outbox в kacho_compute DB.
 const computeOutboxTable = "compute_outbox"
 
-// fgaRegisterOutboxTable — таблица FGA-register-intent (SEC-D, миграция 0010).
+// fgaRegisterOutboxTable — таблица FGA-register-intent (миграция 0010).
 const fgaRegisterOutboxTable = "compute_fga_register_outbox"
 
 // emitCompute — обёртка над outbox.Emit с фиксированной таблицей compute_outbox.
@@ -46,10 +49,10 @@ func domainToMap(v any) map[string]any {
 
 // emitFGARegisterIntent writes one FGA-register/unregister intent row into
 // compute_fga_register_outbox IN THE SAME tx as the resource Insert/Update/Delete
-// (SEC-D transactional outbox — no dual-write). event ∈ {fga.register,
+// (transactional outbox — no dual-write). event ∈ {fga.register,
 // fga.unregister}; kind ∈ {Instance, Disk, Image, Snapshot}. The payload carries
-// the project-hierarchy owner-tuple set AND (epic RSAB β) the owner's labels +
-// parent-scope (project) so the register-drainer can feed IAM resource_mirror.
+// the project-hierarchy owner-tuple set AND the owner's labels + parent-scope
+// (project) so the register-drainer can feed IAM resource_mirror.
 // labels may be nil/empty (graceful — empty mirror labels). parent_account_id is
 // left empty: compute does not resolve project→account on the resource hot-path
 // (IAM handles an empty parent gracefully). Unknown kind / empty id / empty

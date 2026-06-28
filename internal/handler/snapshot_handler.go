@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package handler
 
 import (
@@ -45,7 +48,7 @@ func (h *SnapshotHandler) Get(ctx context.Context, req *computev1.GetSnapshotReq
 
 // List возвращает список снапшотов в folder.
 //
-// KAC-127 Phase 4: вызов фильтруется через iam.AuthorizeService.ListObjects
+// Вызов фильтруется через iam.AuthorizeService.ListObjects
 // (caller subject → allowed snapshot_ids).
 func (h *SnapshotHandler) List(ctx context.Context, req *computev1.ListSnapshotsRequest) (*computev1.ListSnapshotsResponse, error) {
 	if err := AssertFolderOwnership(ctx, req.ProjectId); err != nil {

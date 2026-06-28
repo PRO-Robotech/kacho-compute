@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package check_test
 
 import (
@@ -115,8 +118,8 @@ func TestInterceptor_Unary_Unavailable_FailClosed(t *testing.T) {
 }
 
 func TestInterceptor_Unary_DiskTypeList_ClusterCatalog(t *testing.T) {
-	// KAC-178 §3: catalog object switched from "system:catalog" → "cluster:cluster_kacho_root"
-	// — FGA model имеет `type cluster` с user:* viewer cascade, тип `system` нет.
+	// Catalog object — "cluster:cluster_kacho_root": FGA model имеет `type cluster`
+	// с user:* viewer cascade.
 	intr, _ := newTestInterceptor(t, func(_ context.Context, subject, relation, object string) (bool, error) {
 		require.Equal(t, "user:usr_alice", subject)
 		require.Equal(t, "viewer", relation)

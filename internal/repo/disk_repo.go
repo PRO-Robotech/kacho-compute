@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package repo
 
 import (
@@ -57,7 +60,7 @@ func (r *DiskRepo) List(ctx context.Context, f service.DiskFilter, p service.Pag
 		argIdx++
 	}
 	if f.AllowedIDs != nil {
-		// FGA filter (KAC-127 Phase 4). Empty allow-list must be short-circuited
+		// FGA filter. Empty allow-list must be short-circuited
 		// in the service-layer (no DB query); we defend here too.
 		if len(f.AllowedIDs) == 0 {
 			return nil, "", nil
@@ -146,7 +149,7 @@ func (r *DiskRepo) Insert(ctx context.Context, d *domain.Disk) (*domain.Disk, er
 	if err := emitCompute(ctx, tx, "Disk", result.ID, "CREATED", diskPayload(result)); err != nil {
 		return nil, service.ErrInternal
 	}
-	// SEC-D: FGA owner-tuple register-intent in the SAME writer-tx (no dual-write).
+	// FGA owner-tuple register-intent in the SAME writer-tx (no dual-write).
 	if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Disk", result.ID, result.ProjectID, result.Labels); err != nil {
 		return nil, service.ErrInternal
 	}
@@ -158,13 +161,13 @@ func (r *DiskRepo) Insert(ctx context.Context, d *domain.Disk) (*domain.Disk, er
 
 // Update обновляет mutable поля диска + outbox-event Disk UPDATED.
 //
-// emitLabelsRegister (#113 / T3.1, parity с InstanceRepo.Update): когда true (use-case
-// увидел "labels" в update-mask, либо full-object PATCH применяет labels) — в той же
+// emitLabelsRegister (parity с InstanceRepo.Update): когда true (use-case увидел
+// "labels" в update-mask, либо full-object PATCH применяет labels) — в той же
 // writer-tx, что и UPDATE, эмитится свежий FGA register-intent с текущими labels +
-// parent-scope (atomic, ban #10), чтобы IAM resource_mirror не протух и ARM_LABELS-грант
+// parent-scope (atomic), чтобы IAM resource_mirror не протух и label-scoped грант
 // ревокался при снятии/смене метки. Полное снятие меток (labels={}) эмитит mirror.upsert
-// с пустыми labels (НЕ Unregister — ресурс жив, G-3). Когда false (name/description/size
-// без labels) — register-intent НЕ эмитится (G-2: меньше reconcile-шума).
+// с пустыми labels (НЕ Unregister — ресурс жив). Когда false (name/description/size
+// без labels) — register-intent НЕ эмитится (меньше reconcile-шума).
 func (r *DiskRepo) Update(ctx context.Context, d *domain.Disk, emitLabelsRegister bool) (*domain.Disk, error) {
 	labelsJSON, err := marshalJSONB(d.Labels, "Disk.labels")
 	if err != nil {
@@ -188,9 +191,9 @@ func (r *DiskRepo) Update(ctx context.Context, d *domain.Disk, emitLabelsRegiste
 	if err := emitCompute(ctx, tx, "Disk", result.ID, "UPDATED", diskPayload(result)); err != nil {
 		return nil, service.ErrInternal
 	}
-	// #113 / T3.1: refresh the IAM resource_mirror only when labels were in the
-	// update-mask. mirror.upsert (EventRegister) with the CURRENT labels in the SAME
-	// writer-tx (atomic, ban #10); empty labels → upsert {}, NOT unregister (G-3).
+	// refresh the IAM resource_mirror only when labels were in the update-mask.
+	// mirror.upsert (EventRegister) with the CURRENT labels in the SAME writer-tx
+	// (atomic); empty labels → upsert {}, NOT unregister.
 	if emitLabelsRegister {
 		if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Disk", result.ID, result.ProjectID, result.Labels); err != nil {
 			return nil, service.ErrInternal
@@ -202,19 +205,42 @@ func (r *DiskRepo) Update(ctx context.Context, d *domain.Disk, emitLabelsRegiste
 	return result, nil
 }
 
-// SetZoneID меняет zone_id (для Relocate).
-func (r *DiskRepo) SetZoneID(ctx context.Context, id, zoneID string) (*domain.Disk, error) {
-	return r.simpleSet(ctx, id, "zone_id", zoneID)
-}
-
-func (r *DiskRepo) simpleSet(ctx context.Context, id, col, val string) (*domain.Disk, error) {
+// SetZoneIfDetached атомарно переносит диск в другую зону, но только если он не
+// attached (Relocate). Инвариант «не релоцировать attached-диск» обеспечивается на
+// DB-уровне, а не software check-then-act.
+//
+// Сериализация с конкурентным AttachDisk: `SELECT … FOR UPDATE` берёт на строке
+// disks row-lock `FOR UPDATE`, который конфликтует с `FOR KEY SHARE` — его берёт
+// INSERT в attached_disks по FK disk_id. Поэтому attach и relocate упорядочиваются:
+//   - relocate первым: attach-INSERT ждёт commit relocate, потом видит обновлённую
+//     зону (его собственный zone-guard отбивает несоответствие);
+//   - attach первым: relocate после его commit видит строку attached_disks и
+//     отдаёт FailedPrecondition.
+//
+// Один UPDATE с подзапросом `WHERE NOT EXISTS(…)` здесь недостаточен: он берёт лишь
+// `FOR NO KEY UPDATE`, который НЕ конфликтует с `FOR KEY SHARE` attach'а, и гонка
+// остаётся открытой. Нет диска → ErrNotFound; attached → ErrFailedPrecondition.
+func (r *DiskRepo) SetZoneIfDetached(ctx context.Context, id, zoneID string) (*domain.Disk, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, service.ErrInternal
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	q := fmt.Sprintf(`UPDATE disks SET %s = $2 WHERE id = $1 RETURNING %s`, col, diskCols)
-	result, err := scanDisk(tx.QueryRow(ctx, q, id, val))
+
+	var locked int
+	if err := tx.QueryRow(ctx, `SELECT 1 FROM disks WHERE id = $1 FOR UPDATE`, id).Scan(&locked); err != nil {
+		return nil, wrapPgErr(err, "Disk", id)
+	}
+	var attached bool
+	if err := tx.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM attached_disks WHERE disk_id = $1)`, id).Scan(&attached); err != nil {
+		return nil, wrapPgErr(err, "Disk", id)
+	}
+	if attached {
+		return nil, fmt.Errorf("%w: Disk is in use", service.ErrFailedPrecondition)
+	}
+	result, err := scanDisk(tx.QueryRow(ctx,
+		`UPDATE disks SET zone_id = $2 WHERE id = $1 RETURNING `+diskCols, id, zoneID))
 	if err != nil {
 		return nil, wrapPgErr(err, "Disk", id)
 	}
@@ -250,7 +276,7 @@ func (r *DiskRepo) Delete(ctx context.Context, id string) error {
 	if err := emitCompute(ctx, tx, "Disk", id, "DELETED", map[string]any{"id": id}); err != nil {
 		return service.ErrInternal
 	}
-	// SEC-D: symmetric FGA unregister-intent in the SAME writer-tx.
+	// symmetric FGA unregister-intent in the SAME writer-tx.
 	if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventUnregister, "Disk", id, projectID, nil); err != nil {
 		return service.ErrInternal
 	}

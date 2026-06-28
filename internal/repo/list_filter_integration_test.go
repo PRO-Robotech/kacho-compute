@@ -1,5 +1,8 @@
-// list_filter_integration_test.go — KAC-127 Phase 4 integration tests for
-// FGA-filtered List repo path.
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
+// list_filter_integration_test.go — integration tests for the FGA-filtered List
+// repo path.
 //
 // Validates the `WHERE id = ANY($1::text[])` clause against real Postgres
 // (testcontainers). Covers all 4 resources (Disk / Image / Snapshot / Instance)
@@ -225,7 +228,7 @@ func TestIntegration_SnapshotRepo_ListByAllowedIDs(t *testing.T) {
 // project, grant access (allow-list) to 60 of them, then page with page_size=25.
 // The 3 pages must cover EXACTLY the 60 accessible instances (25+25+10) with no
 // holes and no inaccessible instance ever leaking onto a page. This is the
-// compute.instance arm of §11/D-46 (the prompt's named example).
+// compute.instance arm of the FGA-filtered paginated List contract.
 //
 // RED-safety: if pagination were applied BEFORE the id=ANY filter (raw LIMIT
 // then filter), pages would be "holey" — a 25-row raw page could contain <25

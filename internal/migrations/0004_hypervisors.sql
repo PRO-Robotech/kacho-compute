@@ -1,3 +1,6 @@
+-- Copyright (c) PRO-Robotech
+-- SPDX-License-Identifier: BUSL-1.1
+
 -- +goose Up
 -- Hypervisor — физический хост, на котором kacho-compute размещает инстансы.
 -- INTERNAL-ONLY ресурс (placement/инвентарь железа — инфра-чувствительное; см.

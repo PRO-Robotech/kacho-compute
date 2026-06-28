@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 import (
@@ -7,12 +10,12 @@ import (
 	"testing"
 )
 
-// TestKAH1_NoBareGRPCDialWithoutKeepalive — анти-регресс-страж (KAC-244, KA-H1).
+// TestKAH1_NoBareGRPCDialWithoutKeepalive — анти-регресс-страж keepalive на dial.
 //
 // Любой inter-service `grpc.NewClient(...)` / `grpc.Dial(...)` в этом пакете обязан
 // нести keepalive (через grpcclient.KeepaliveDialOption/KeepaliveParams). Без него
 // idle-conn между всплесками трафика становится half-open, и первый RPC всплеска
-// висит ~30с на переустановке — ровно тот баг, что чинит KAC-244. Новый bare-dial
+// висит ~30с на переустановке. Новый bare-dial
 // без keepalive должен ронять этот тест ДО мержа.
 //
 // RED-демонстрация: убрать grpcclient.KeepaliveDialOption из peerDialOpts → тест падает.

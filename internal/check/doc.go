@@ -1,13 +1,14 @@
-// Package check содержит kacho-compute per-service Check-interceptor wiring
-// под E3 / KAC-108 (см. acceptance §6 D4).
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
+// Package check содержит kacho-compute per-service Check-interceptor wiring.
 //
 // Состав:
 //   - permission_map.go   — RPCMap для всех публичных RPC kacho-compute
 //     (Disk, Image, Snapshot, Instance, DiskType, Zone, Region + Operation).
 //     Reference/SetAccessBindings RPC опущены: их аутентификация делается
-//     самой kacho-iam, не повторяем здесь (см. acceptance §4 «Cascade /
-//     Computed Relation»). access-bindings handler-ы в compute сейчас —
-//     no-op скелет, см. CLAUDE.md §1.
+//     самой kacho-iam, не повторяем здесь. access-bindings handler-ы в compute
+//     сейчас — no-op скелет.
 //   - check_client.go     — gRPC adapter поверх `iamv1.InternalIAMServiceClient.Check`.
 //   - factory.go          — фабрика, собирающая `*authz.Interceptor` из
 //     (IAMConn, Breakglass). nil-conn + Breakglass=false → ErrIAMConnNotConfigured
@@ -28,5 +29,5 @@
 //	}
 //
 // Cache-invalidation (LISTEN/NOTIFY → `kacho_iam_subjects`) — НЕ wired в
-// этом MVP. TTL=5s + outbox-drain≤2s = ≤10s revoke propagation (KAC-104 DoD #5).
+// этом MVP. TTL=5s + outbox-drain≤2s = ≤10s revoke propagation.
 package check

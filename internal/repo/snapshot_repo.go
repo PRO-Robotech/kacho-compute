@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package repo
 
 import (
@@ -134,7 +137,7 @@ func (r *SnapshotRepo) Insert(ctx context.Context, s *domain.Snapshot) (*domain.
 	if err := emitCompute(ctx, tx, "Snapshot", result.ID, "CREATED", snapshotPayload(result)); err != nil {
 		return nil, service.ErrInternal
 	}
-	// SEC-D: FGA owner-tuple register-intent in the SAME writer-tx (no dual-write).
+	// FGA owner-tuple register-intent in the SAME writer-tx (no dual-write).
 	if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Snapshot", result.ID, result.ProjectID, result.Labels); err != nil {
 		return nil, service.ErrInternal
 	}
@@ -146,12 +149,12 @@ func (r *SnapshotRepo) Insert(ctx context.Context, s *domain.Snapshot) (*domain.
 
 // Update обновляет mutable поля снапшота + outbox-event Snapshot UPDATED.
 //
-// emitLabelsRegister (#113 / T3.1, parity с InstanceRepo.Update): когда true (use-case
-// увидел "labels" в update-mask или full-PATCH) — в той же writer-tx эмитится свежий FGA
-// register-intent (mirror.upsert) с текущими labels (atomic, ban #10), чтобы IAM
-// resource_mirror не протух и ARM_LABELS-грант ревокался при снятии/смене метки. Полное
-// снятие меток → upsert {} (НЕ Unregister, G-3). false (name/description без labels) →
-// register-intent НЕ эмитится (G-2).
+// emitLabelsRegister (parity с InstanceRepo.Update): когда true (use-case увидел
+// "labels" в update-mask или full-PATCH) — в той же writer-tx эмитится свежий FGA
+// register-intent (mirror.upsert) с текущими labels (atomic), чтобы IAM
+// resource_mirror не протух и label-scoped грант ревокался при снятии/смене метки.
+// Полное снятие меток → upsert {} (НЕ Unregister). false (name/description без labels) →
+// register-intent НЕ эмитится.
 func (r *SnapshotRepo) Update(ctx context.Context, s *domain.Snapshot, emitLabelsRegister bool) (*domain.Snapshot, error) {
 	labelsJSON, err := marshalJSONB(s.Labels, "Snapshot.labels")
 	if err != nil {
@@ -170,8 +173,8 @@ func (r *SnapshotRepo) Update(ctx context.Context, s *domain.Snapshot, emitLabel
 	if err := emitCompute(ctx, tx, "Snapshot", result.ID, "UPDATED", snapshotPayload(result)); err != nil {
 		return nil, service.ErrInternal
 	}
-	// #113 / T3.1: refresh the IAM resource_mirror only when labels were in the mask
-	// (mirror.upsert, EventRegister) in the SAME writer-tx; empty labels → upsert {} (G-3).
+	// refresh the IAM resource_mirror only when labels were in the mask
+	// (mirror.upsert, EventRegister) in the SAME writer-tx; empty labels → upsert {}.
 	if emitLabelsRegister {
 		if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Snapshot", result.ID, result.ProjectID, result.Labels); err != nil {
 			return nil, service.ErrInternal
@@ -203,7 +206,7 @@ func (r *SnapshotRepo) Delete(ctx context.Context, id string) error {
 	if err := emitCompute(ctx, tx, "Snapshot", id, "DELETED", map[string]any{"id": id}); err != nil {
 		return service.ErrInternal
 	}
-	// SEC-D: symmetric FGA unregister-intent in the SAME writer-tx.
+	// symmetric FGA unregister-intent in the SAME writer-tx.
 	if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventUnregister, "Snapshot", id, projectID, nil); err != nil {
 		return service.ErrInternal
 	}

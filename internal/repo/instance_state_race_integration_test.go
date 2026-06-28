@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package repo_test
 
 import (
@@ -21,8 +24,8 @@ import (
 
 // TestIntegration_InstanceSetStatusCAS_ConcurrentStopOnStopped: ВМ в STOPPED;
 // 5 concurrent Stop (CAS RUNNING → STOPPED) — все 5 должны получить
-// ErrFailedPrecondition, т.к. instance не в RUNNING. Закрывает G2 audit
-// KAC-85 (TOCTOU `Get → check status → SetStatus`); KAC-91/KAC-87.
+// ErrFailedPrecondition, т.к. instance не в RUNNING. Закрывает TOCTOU-гонку
+// `Get → check status → SetStatus` (software check-then-act).
 func TestIntegration_InstanceSetStatusCAS_ConcurrentStopOnStopped(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -93,7 +96,7 @@ func TestIntegration_InstanceSetStatusCAS_ConcurrentStopOnStopped(t *testing.T) 
 // RUNNING; 5 concurrent CAS RUNNING → RESTARTING. Postgres row-level lock
 // сериализует UPDATE-ы: первый writer переводит state в RESTARTING, остальные
 // 4 после ожидания commit'а видят RESTARTING, WHERE не matches, 0 rows →
-// ErrFailedPrecondition. KAC-91/KAC-87.
+// ErrFailedPrecondition.
 func TestIntegration_InstanceSetStatusCAS_ConcurrentRestartOnRunning(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -167,8 +170,8 @@ func TestIntegration_InstanceSetStatusCAS_ConcurrentRestartOnRunning(t *testing.
 // goroutine делает Stop (CAS RUNNING→STOPPED), другая — Restart-step-1 (CAS
 // RUNNING→RESTARTING). Один winner, второй — FailedPrecondition; финальный
 // state — что у winner'а (не second-writer-wins / lost-state). Парирует
-// race-сценарий из KAC-85 G2: Get→check OK на обеих goroutine-ах, потом
-// unconditional UPDATE — стерильный second-writer-wins. KAC-91/KAC-87.
+// race-сценарий: Get→check OK на обеих goroutine-ах, потом unconditional
+// UPDATE — стерильный second-writer-wins.
 func TestIntegration_InstanceSetStatusCAS_StopRestartRace(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -239,7 +242,7 @@ func TestIntegration_InstanceSetStatusCAS_StopRestartRace(t *testing.T) {
 // несуществующий instance возвращает ErrNotFound (не FailedPrecondition).
 // Отдельный кейс важен, потому что в SetStatusCAS «0 rows» может означать
 // либо «instance не существует», либо «status != expected»; они должны
-// различаться корректно. KAC-91/KAC-87.
+// различаться корректно.
 func TestIntegration_InstanceSetStatusCAS_NotFound(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")

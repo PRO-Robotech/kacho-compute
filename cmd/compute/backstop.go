@@ -1,9 +1,12 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
-// backstop.go — sub-phase 1.4 S3: the corelib outbox backstop wiring for
-// kacho-compute (D-6 reconciler + D-7 metrics + D-8 fail-closed boot-gate). It
-// adds observability + safety on TOP of the existing SEC-D register-drainer
-// WITHOUT changing co-commit atomicity (no migration; D-9).
+// backstop.go — обвязка corelib outbox-backstop для kacho-compute (reconciler +
+// metrics + fail-closed boot-gate). Добавляет наблюдаемость и страховку поверх
+// register-drainer, не меняя co-commit-атомарность writer-tx (без отдельной
+// миграции).
 //
 //   - reconciler: periodic RedrivePoisoned re-drives poisoned/exhausted intents
 //     (with their original decoder-correct payload) back to claimable.
@@ -33,41 +36,47 @@ const (
 )
 
 // startBackstop wires the reconciler RedrivePoisoned pass + metrics Collector over
-// the compute register-outbox and runs them in the background until ctx is
-// cancelled. Both are best-effort observability/repair — a transient error is
-// logged, never fatal.
-func startBackstop(ctx context.Context, pool *pgxpool.Pool, rec metrics.Recorder, logger *slog.Logger) error {
+// the compute register-outbox. Both are best-effort observability/repair — a
+// transient error is logged, never fatal. It returns their run-loops as supervised
+// tasks (reconRun / colRun), wired into the runServe errgroup — not fire-and-forget.
+func startBackstop(_ context.Context, pool *pgxpool.Pool, rec metrics.Recorder, logger *slog.Logger) (reconRun, colRun func(context.Context) error, err error) {
 	ad := clients.NewFGAReconcileAdapter(pool, computeFGAOutboxTable)
-	rc, err := reconciler.New(pool, reconciler.Config{
+	rc, rerr := reconciler.New(pool, reconciler.Config{
 		Table:       computeFGAOutboxTable,
 		Channel:     computeFGAOutboxChannel,
-		GraceWindow: time.Minute, // anti-race deferral (D-6c)
+		GraceWindow: time.Minute, // anti-race deferral
 	}, reconciler.Adapters{Enumerator: ad, Registry: ad},
 		logger.With(slog.String("component", "fga-register-reconciler")))
-	if err != nil {
-		return err
+	if rerr != nil {
+		return nil, nil, rerr
 	}
 
-	go runReconciler(ctx, rc, logger)
-
 	col := metrics.NewCollector(pool, rec, metrics.CollectorConfig{Table: computeFGAOutboxTable})
-	go col.Run(ctx, func(err error) {
-		logger.Warn("outbox metrics scan failed", "err", err)
-	})
 
 	logger.Info("FGA register backstop started (reconciler + metrics)", "table", computeFGAOutboxTable)
-	return nil
+
+	reconRun = func(ctx context.Context) error {
+		runReconciler(ctx, rc, logger)
+		return nil
+	}
+	colRun = func(ctx context.Context) error {
+		col.Run(ctx, func(err error) {
+			logger.Warn("outbox metrics scan failed", "err", err)
+		})
+		return nil
+	}
+	return reconRun, colRun, nil
 }
 
-// runReconciler runs the reconciler RedrivePoisoned pass on a periodic ticker
-// (1.4-30): poisoned/exhausted register-intents are reset to claimable so the
-// drainer re-delivers them with their ORIGINAL, decoder-correct tuple payload.
+// runReconciler runs the reconciler RedrivePoisoned pass on a periodic ticker:
+// poisoned/exhausted register-intents are reset to claimable so the drainer
+// re-delivers them with their ORIGINAL, decoder-correct tuple payload.
 //
 // BackfillFromState / GCOrphans are deliberately NOT run for kacho-compute: they
 // re-emit corelib-fixed payloads ({"project_id":…} / {}) the compute tuple-set
 // decoder ({tuples:[…]}) cannot decode — running them would poison good state. And
 // because every compute Create co-commits its register-intent in the resource
-// writer-tx (SEC-D atomicity, D-9 untouched), there are no legacy never-enqueued
+// writer-tx (atomically, no separate migration), there are no legacy never-enqueued
 // rows to backfill. The enumerator/registry adapter is still wired (reconciler.New
 // requires it) so the backstop is ready if the corelib re-emit contract grows a
 // per-service payload hook.

@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 import (
@@ -10,8 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// kacho-geo epic (Stage S4 deploy-wiring) — render-guard for the compute→geo edge in
-// the Helm chart. The Go composition root already dials kacho-geo via cfg.GeoGRPCAddr +
+// deploy-wiring render-guard for the compute→geo edge in the Helm chart. The Go
+// composition root already dials kacho-geo via cfg.GeoGRPCAddr +
 // cfg.GeoMTLS (geo.v1.ZoneService.Get, public :9090, Instance.zone_id validation), but
 // the deploy chart did NOT emit the geo env, so a deployed compute could not present its
 // client cert to geo (geo runs server-mTLS on :9090 in dev) → handshake fails.

@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 import (
@@ -12,14 +15,14 @@ import (
 	"github.com/PRO-Robotech/kacho-compute/internal/config"
 )
 
-// SEC-M (sub-phase SEC-M §B) — the compute→vpc resource-creation edge must thread a
-// per-edge grpcclient.TLSClient (client-cert mTLS) into BOTH vpc dials:
+// CLIENT mTLS on the compute→vpc resource-creation edge: it must thread a per-edge
+// grpcclient.TLSClient (client-cert mTLS) into BOTH vpc dials:
 //   - vpcConn         (:9090, Subnet/SecurityGroup/Address.Get — NIC-spec validation)
 //   - vpcInternalConn (:9091, InternalAddressService — one-to-one-NAT IPAM)
 // rather than the server-auth-only bools (cfg.VPCTLS / cfg.VPCInternalTLS). Mirror of
-// the already-shipped vpc→compute branch (mtlsCfg.ComputeMTLS.Enable) and the SEC-I
-// iam read/authz edges. Both vpc-listeners share one Service-host `vpc` → one
-// cfg.VPCMTLS / one ServerName covers both ports (M6, B-04; contrast iam SEC-I split).
+// the already-shipped vpc→compute branch (mtlsCfg.ComputeMTLS.Enable) and the iam
+// read/authz edges. Both vpc-listeners share one Service-host `vpc` → one cfg.VPCMTLS /
+// one ServerName covers both ports (contrast the iam per-listener split).
 
 // TestSECM_VPCDialCreds_Insecure_Default — both vpc edges: enable=false (default) →
 // corelib builds insecure creds (zero dev regression); the dial-opts build without
@@ -38,8 +41,8 @@ func TestSECM_VPCDialCreds_Insecure_Default(t *testing.T) {
 
 // TestSECM_VPCDialCreds_ClientCert_Enabled — both vpc edges: enable=true with a valid
 // trio → corelib builds client-cert mTLS creds; the vpc conns present the
-// kacho-compute-client-tls cert (handshake-level behaviour covered by corelib SEC-B
-// bufconn tests). ServerName = vpc dial-host (∈ vpc server-SAN, M6). B-02/B-03.
+// kacho-compute-client-tls cert (handshake-level behaviour covered by corelib
+// bufconn tests). ServerName = vpc dial-host (in the vpc server-SAN).
 func TestSECM_VPCDialCreds_ClientCert_Enabled(t *testing.T) {
 	certFile, keyFile, caFile := writeCmdTestCert(t)
 	var cfg config.Config
@@ -100,14 +103,14 @@ func TestSECM_VPCMTLS_FailClosed_BadConfig(t *testing.T) {
 	}
 }
 
-// TestSECM_CompletenessGuard_BothVPCDialsThreadClientCreds — SEC-M-07 static
-// completeness gate (per-service, factual conn set). The composition root MUST thread
-// per-edge client-cert mTLS creds (mirror of the SEC-D vpc→compute / SEC-I iam branch)
-// into BOTH vpc dials: vpcConn (NIC-spec, :9090) and vpcInternalConn (IPAM, :9091). If
-// either is left server-auth-only/plaintext, once kacho-vpc runs RequireAndVerifyClientCert
-// (SEC-H-family) the handshake fails (code 14) → Instance.Create fails (B-05). This guard
-// forbids that regression by asserting both dials branch on cfg.VPCMTLS.Enable and
-// consult the VPCClientCreds mTLS helper.
+// TestSECM_CompletenessGuard_BothVPCDialsThreadClientCreds — static completeness gate
+// (per-service, factual conn set). The composition root MUST thread per-edge
+// client-cert mTLS creds (mirror of the vpc→compute / iam branch) into BOTH vpc dials:
+// vpcConn (NIC-spec, :9090) and vpcInternalConn (IPAM, :9091). If either is left
+// server-auth-only/plaintext, once kacho-vpc runs RequireAndVerifyClientCert the
+// handshake fails (code 14) → Instance.Create fails. This guard forbids that
+// regression by asserting both dials branch on cfg.VPCMTLS.Enable and consult the
+// VPCClientCreds mTLS helper.
 func TestSECM_CompletenessGuard_BothVPCDialsThreadClientCreds(t *testing.T) {
 	src, err := os.ReadFile("main.go")
 	require.NoError(t, err)
@@ -117,10 +120,10 @@ func TestSECM_CompletenessGuard_BothVPCDialsThreadClientCreds(t *testing.T) {
 		// Both vpc conns gate on the per-edge mTLS enable flag.
 		"cfg.VPCMTLS.Enable",
 		// Both vpc conns resolve their client-cert creds from the per-edge cfg.VPCMTLS
-		// TLSClient via the corelib helper (same seam the iam edges use, OQ-2).
+		// TLSClient via the corelib helper (same seam the iam edges use).
 		"grpcclient.TLSClientTransportCreds(cfg.VPCMTLS)",
 		// Both vpc dials go through the shared creds-aware seam (dialPeerCreds), the
-		// same path that carries the SEC-I iam creds (B-06: one seam, not duplicated).
+		// same path that carries the iam creds (one seam, not duplicated).
 		"dialPeerCreds(",
 	} {
 		require.Contains(t, main, want,
@@ -142,10 +145,10 @@ func TestSECM_CompletenessGuard_BothVPCDialsThreadClientCreds(t *testing.T) {
 		strings.LastIndex(main, "return dialPeer(addr, legacyTLS, false)"),
 		"cfg.VPCMTLS.Enable mTLS branch must guard the vpc insecure/server-auth fallback")
 
-	// iam read/authz edges (SEC-I) must not be regressed by the seam refactor (B-06).
-	// compute resolves iam creds through the same TLSClientTransportCreds seam as the
-	// new vpc edge (NOT the vpc-side *ClientCreds() DialOption helpers); these anchors
-	// pin the SEC-I iam ProjectService.Get and Check/list-filter edges intact.
+	// iam read/authz edges must not be regressed by the seam refactor. compute resolves
+	// iam creds through the same TLSClientTransportCreds seam as the vpc edge (NOT the
+	// vpc-side *ClientCreds() DialOption helpers); these anchors pin the iam
+	// ProjectService.Get and Check/list-filter edges intact.
 	require.Contains(t, main, "grpcclient.TLSClientTransportCreds(cfg.IAMProjectMTLS)",
 		"SEC-M seam refactor must not regress the SEC-I iam ProjectService.Get edge")
 	require.Contains(t, main, "grpcclient.TLSClientTransportCreds(cfg.IAMAuthzMTLS)",

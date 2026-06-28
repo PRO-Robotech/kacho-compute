@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package domain
 
 import (
@@ -19,7 +22,7 @@ const (
 )
 
 // Disk — диск (zone-level ресурс). source = image|snapshot хранится в
-// SourceImageID / SourceSnapshotID (взаимоисключающие; не FK — YC семантика
+// SourceImageID / SourceSnapshotID (взаимоисключающие; не FK — семантика Kachō
 // допускает удаление source-ресурса). InstanceIDs — output-only, вычисляется
 // из attached_disks (см. repo).
 //

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: BUSL-1.1
+
 # audit-list-filter.sh — CI gate (KAC-219 / RBAC v2 W6) for kacho-compute.
 #
 # Refuses to ship a `List<Resource>` handler in `internal/handler/` that

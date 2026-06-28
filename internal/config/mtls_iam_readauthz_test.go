@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package config_test
 
 import (
@@ -9,18 +12,18 @@ import (
 	"github.com/PRO-Robotech/kacho-compute/internal/config"
 )
 
-// SEC-I (sub-phase SEC-I §C) — CLIENT mTLS on the compute→iam read/authz edges.
+// CLIENT mTLS on the compute→iam read/authz edges.
 //
-// These mirror the SEC-D register-drainer wiring tests (mtls_test.go) for the two
+// These mirror the register-drainer wiring tests (mtls_test.go) for the two
 // remaining plaintext iam-dialing conns: ProjectService.Get (:9090) and the
 // per-RPC InternalIAMService.Check + list-filter authorize conn (:9091). Both
 // were server-auth-only bool knobs (cfg.IAMTLS / cfg.AuthZIAMTLS) presenting NO
-// client-cert; under SEC-H (iam RequireAndVerifyClientCert) those dials fail the
+// client-cert; when iam enforces RequireAndVerifyClientCert those dials fail the
 // handshake, so each must present the kacho-compute-client-tls client-cert.
 
-// TestMTLS_SEC_I_C01_IAMReadAuthzDisabledDefaultInsecure — C-01: enable=false
-// (default) for both new iam read/authz edges → insecure dial-opt builds, no cert
-// files read; zero dev regression (mirror of SEC-D-16).
+// TestMTLS_SEC_I_C01_IAMReadAuthzDisabledDefaultInsecure — enable=false (default)
+// for both iam read/authz edges → insecure dial-opt builds, no cert files read;
+// zero dev regression.
 func TestMTLS_SEC_I_C01_IAMReadAuthzDisabledDefaultInsecure(t *testing.T) {
 	var cfg config.Config
 	require.NoError(t, config.LoadInto(&cfg, map[string]string{
@@ -107,10 +110,10 @@ func TestMTLS_SEC_I_C07_IAMAuthzFailClosedMissingServerName(t *testing.T) {
 	require.Error(t, err, "enabled Check/list-filter mTLS without server_name must fail-closed")
 }
 
-// TestMTLS_SEC_I_PerEdgeIndependence — I4: the two new iam read/authz edges and
-// the SEC-D register edge resolve to INDEPENDENT env blocks (one process may run
-// one edge mTLS and another insecure). Verifies per-edge prefixing (FD-3) — a
-// regression here would collapse the edges onto shared env names.
+// TestMTLS_SEC_I_PerEdgeIndependence — the two iam read/authz edges and the
+// register edge resolve to INDEPENDENT env blocks (one process may run one edge
+// mTLS and another insecure). Verifies per-edge prefixing — a regression here
+// would collapse the edges onto shared env names.
 func TestMTLS_SEC_I_PerEdgeIndependence(t *testing.T) {
 	certFile, keyFile, caFile := writeTestCert(t)
 	var cfg config.Config

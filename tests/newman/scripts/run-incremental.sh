@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: BUSL-1.1
+
 # run-incremental.sh — обёртка над run-incremental.js: прогон newman-сьюты ПО ОДНОМУ
 # кейсу за раз с зачисткой ресурсов (quota-safe, как для YC). См. шапку run-incremental.js.
 #

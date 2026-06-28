@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package service
 
 import (
@@ -132,7 +135,7 @@ func (s *SnapshotService) doCreate(ctx context.Context, snapID string, req Creat
 	if err != nil {
 		return nil, mapRepoErr(err)
 	}
-	// SEC-D: the compute_snapshot→project owner-tuple is registered transactionally
+	// the compute_snapshot→project owner-tuple is registered transactionally
 	// via the FGA register-intent written in repo.Insert's writer-tx and applied by
 	// the register-drainer through kacho-iam (no direct FGA, no dual-write).
 	return anypb.New(protoconv.Snapshot(created))
@@ -163,8 +166,8 @@ func (s *SnapshotService) Update(ctx context.Context, req UpdateSnapshotReq) (*o
 		if len(updates) == 0 {
 			updates = []string{"name", "description", "labels"}
 		}
-		// labelsInMask (#113 / T3.1, parity с InstanceService.Update): triggers an FGA
-		// register-intent refresh (mirror.upsert) so ARM_LABELS grants revoke on
+		// labelsInMask (parity с InstanceService.Update): triggers an FGA
+		// register-intent refresh (mirror.upsert) so label-scoped grants revoke on
 		// label-remove/change. Empty mask = full-PATCH includes labels.
 		labelsInMask := false
 		for _, f := range updates {

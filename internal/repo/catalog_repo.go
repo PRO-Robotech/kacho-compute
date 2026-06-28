@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package repo
 
 import (
@@ -37,7 +40,7 @@ func (r *DiskTypeRepo) Get(ctx context.Context, id string) (*domain.DiskType, er
 	return &t, nil
 }
 
-// List возвращает типы дисков с cursor-пагинацией по id (verbatim YC:
+// List возвращает типы дисков с cursor-пагинацией по id (конвенция Kachō:
 // page_size валидируется через corevalidate.PageSize, garbage page_token → InvalidArgument).
 func (r *DiskTypeRepo) List(ctx context.Context, p service.Pagination) ([]*domain.DiskType, string, error) {
 	pageSize, err := validate.PageSize("page_size", p.PageSize)
@@ -139,7 +142,7 @@ func (r *DiskTypeRepo) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// NOTE (Stage S7, эпик kacho-geo): Region/Zone serving (ZoneRepo/RegionRepo поверх
-// локальных таблиц `zones`/`regions`) удалён — Geography (Region/Zone) принадлежит
-// kacho-geo. Локальные таблицы сняты миграцией 0011_drop_geography. zone_id-валидация
-// Instance/Disk идёт в kacho-geo через clients.GeoClient (Stage S4).
+// NOTE: Region/Zone serving (ZoneRepo/RegionRepo поверх локальных таблиц
+// `zones`/`regions`) удалён — Geography (Region/Zone) принадлежит kacho-geo.
+// Локальные таблицы сняты миграцией 0011_drop_geography. zone_id-валидация
+// Instance/Disk идёт в kacho-geo через clients.GeoClient.

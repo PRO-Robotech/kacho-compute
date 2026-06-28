@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package handler
 
 import (
@@ -74,7 +77,7 @@ func TestDiskHandler_CRUD(t *testing.T) {
 }
 
 func TestCatalogHandler_ReadOnly(t *testing.T) {
-	// Region/Zone serving removed (Stage S7) — Geography is owned by kacho-geo.
+	// Region/Zone serving removed — Geography is owned by kacho-geo.
 	// DiskType remains a compute-owned read-only catalog.
 	dtSvc := service.NewDiskTypeService(portmock.NewDiskTypeRepo("network-ssd"))
 	dh := NewDiskTypeHandler(dtSvc)

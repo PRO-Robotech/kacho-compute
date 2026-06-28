@@ -1,3 +1,6 @@
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: BUSL-1.1
+
 """Case-set для SEC-D (kacho-compute): FGA owner-tuple через kacho-iam
 (transactional-outbox) + opt-in mTLS.
 

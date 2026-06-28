@@ -1,3 +1,6 @@
+-- Copyright (c) PRO-Robotech
+-- SPDX-License-Identifier: BUSL-1.1
+
 -- +goose Up
 -- Link a compute Instance NIC to the backing kacho-vpc NetworkInterface
 -- resource (vpc.NetworkInterface, epic KAC-2). On Instance.Create compute

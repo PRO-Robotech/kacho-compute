@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package service
 
 import (
@@ -30,8 +33,8 @@ func TestMapZoneRefErr_GeoNotFoundStatus_InvalidArgument(t *testing.T) {
 }
 
 // TestMapZoneRefErr_GeoDown_Unavailable — geo недоступен (transport-ошибка, не
-// NOT_FOUND) → Unavailable "zone check: ..." (fail-closed на мутации Instance;
-// data-integrity.md §cross-domain — peer недоступен → Unavailable, не «зона ок»).
+// NOT_FOUND) → Unavailable "zone check: ..." (fail-closed на мутации Instance:
+// peer недоступен → Unavailable, не «зона ок»).
 func TestMapZoneRefErr_GeoDown_Unavailable(t *testing.T) {
 	err := mapZoneRefErr(status.Error(codes.Unavailable, "connection refused"), "ru-central1-a")
 	st, ok := status.FromError(err)

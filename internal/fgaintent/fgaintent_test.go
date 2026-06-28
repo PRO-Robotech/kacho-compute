@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package fgaintent_test
 
 import (
@@ -9,9 +12,9 @@ import (
 	"github.com/PRO-Robotech/kacho-compute/internal/fgaintent"
 )
 
-// TestProjectHierarchyTuple_Shape — SEC-D-04: the project-hierarchy owner-tuple is
+// TestProjectHierarchyTuple_Shape — the project-hierarchy owner-tuple is
 // `project:<projectID> #project @compute_<kind>:<resourceID>` for every compute
-// resource kind (parity with the deleted openfga_write_client.go tuple direction).
+// resource kind.
 func TestProjectHierarchyTuple_Shape(t *testing.T) {
 	cases := []struct {
 		kind   string

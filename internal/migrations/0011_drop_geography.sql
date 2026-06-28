@@ -1,3 +1,6 @@
+-- Copyright (c) PRO-Robotech
+-- SPDX-License-Identifier: BUSL-1.1
+
 -- +goose Up
 -- Geography (Region/Zone) is now owned by kacho-geo (epic kacho-workspace#82, Stage
 -- S7). compute no longer SERVES Region/Zone: the public read RPCs, Internal* admin

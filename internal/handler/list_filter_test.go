@@ -7,7 +7,7 @@
 // Uses portmock repos + in-memory authzfilter.Filter (no real iam needed).
 // Identity source is the request Principal (operations.WithPrincipal), the SAME
 // source per-RPC Check uses — NOT the dead x-kacho-subject* headers. Covers the
-// label-scope over-show leak fix (sub-phase-compute-list-leak-fix-acceptance):
+// label-scope over-show leak fix:
 //   - CLL-01 label-scoped subject → EXACTLY the allowed subset (not all)
 //   - CLL-02 subject=="" (system / no principal) → fail-closed empty (NOT bypass)
 //   - CLL-03 cluster-admin / owner → all (iam ListObjects returns all ids)

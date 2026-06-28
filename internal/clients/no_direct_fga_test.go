@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package clients_test
 
 import (
@@ -10,10 +13,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestSEC_D_07_NoDirectFGAInClients — SEC-D-07 structural gate: there must be NO
-// "openfga" reference anywhere under internal/clients/ (the direct FGA HTTP write
-// client is gone; compute reaches FGA only through kacho-iam). Mirrors the epic
-// DoD grep `grep -rn "openfga" <repo>/internal/clients/` = 0.
+// TestSEC_D_07_NoDirectFGAInClients — structural gate: there must be NO "openfga"
+// reference anywhere under internal/clients/ (the direct FGA HTTP write client is
+// gone; compute reaches FGA only through kacho-iam).
 func TestSEC_D_07_NoDirectFGAInClients(t *testing.T) {
 	dir := "." // internal/clients
 	var offenders []string

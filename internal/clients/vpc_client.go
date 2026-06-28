@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package clients
 
 import (
@@ -34,12 +37,11 @@ const (
 // InternalAddressService — referrer-tracking адресов: привязка/отвязка
 // «кто использует адрес» (type=compute_instance, id=instance id)).
 //
-// NIC-привязка убрана из lifecycle Instance (KAC-266, no auto-NIC) — compute
-// больше не создаёт/аттачит kacho-vpc NetworkInterface-ресурсы.
+// NIC-привязка убрана из lifecycle Instance (no auto-NIC) — compute больше не
+// создаёт/аттачит kacho-vpc NetworkInterface-ресурсы.
 //
-// Geography (Region/Zone) — домен kacho-compute (эпик KAC-15): зоны больше НЕ
-// проксируются в kacho-vpc; compute читает их из своей таблицы `zones` (см.
-// internal/repo/catalog_repo.go, ZoneRepoSource).
+// Geography (Region/Zone) принадлежит kacho-geo; zone_id-валидация идёт вызовом
+// geo.v1.ZoneService.Get (clients.GeoClient), не через kacho-vpc.
 //
 // Использует ДВА gRPC-conn: публичный (:9090 — Address/Operation) и
 // internal (:9091 — InternalAddressService, не выставлен на external endpoint).

@@ -1,3 +1,6 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
 package service
 
 import (
@@ -20,7 +23,7 @@ import (
 	"github.com/PRO-Robotech/kacho-compute/internal/protoconv"
 )
 
-// imageFamilyRe — verbatim YC Image.family pattern: `|[a-z][-a-z0-9]{1,61}[a-z0-9]`
+// imageFamilyRe — паттерн Image.family: `|[a-z][-a-z0-9]{1,61}[a-z0-9]`
 // (пустая строка ИЛИ lowercase-letter + 1..61×[-a-z0-9] + letter/digit; нет underscore).
 var imageFamilyRe = regexp.MustCompile(`^([a-z][-a-z0-9]{1,61}[a-z0-9])?$`)
 
@@ -157,8 +160,8 @@ func (s *ImageService) doCreate(ctx context.Context, imageID string, req CreateI
 	if err := s.checkFolder(ctx, req.ProjectID); err != nil {
 		return nil, err
 	}
-	// minDiskSize / storageSize наследуются от источника (verbatim YC: образ,
-	// созданный из disk/snapshot/image, требует диск ≥ размера источника).
+	// minDiskSize / storageSize наследуются от источника (образ, созданный из
+	// disk/snapshot/image, требует диск ≥ размера источника).
 	minDiskSize := req.MinDiskSize
 	storageSize := int64(0)
 	switch {
@@ -203,7 +206,7 @@ func (s *ImageService) doCreate(ctx context.Context, imageID string, req CreateI
 		StorageSize:        storageSize,
 		ProductIDs:         req.ProductIDs,
 		Status:             domain.ImageStatusReady,           // control-plane only
-		OsType:             domain.OsType(computev1.Os_LINUX), // verbatim YC default
+		OsType:             domain.OsType(computev1.Os_LINUX), // default os_type
 		Pooled:             req.Pooled,
 		HardwareGeneration: req.HardwareGeneration,
 		SourceImageID:      req.ImageID,
@@ -223,7 +226,7 @@ func (s *ImageService) doCreate(ctx context.Context, imageID string, req CreateI
 	if err != nil {
 		return nil, mapRepoErr(err)
 	}
-	// SEC-D: the compute_image→project owner-tuple is registered transactionally
+	// the compute_image→project owner-tuple is registered transactionally
 	// via the FGA register-intent written in repo.Insert's writer-tx and applied
 	// by the register-drainer through kacho-iam (no direct FGA, no dual-write).
 	return anypb.New(protoconv.Image(created))
@@ -254,8 +257,8 @@ func (s *ImageService) Update(ctx context.Context, req UpdateImageReq) (*operati
 		if len(updates) == 0 {
 			updates = []string{"name", "description", "labels", "min_disk_size"}
 		}
-		// labelsInMask (#113 / T3.1, parity с InstanceService.Update): triggers an FGA
-		// register-intent refresh (mirror.upsert) so ARM_LABELS grants revoke on
+		// labelsInMask (parity с InstanceService.Update): triggers an FGA
+		// register-intent refresh (mirror.upsert) so label-scoped grants revoke on
 		// label-remove/change. Empty mask = full-PATCH includes labels.
 		labelsInMask := false
 		for _, f := range updates {
