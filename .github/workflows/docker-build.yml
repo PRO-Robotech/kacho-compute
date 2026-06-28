@@ -74,7 +74,7 @@ jobs:
           image: mirror.gcr.io/tonistiigi/binfmt:latest
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
         with:
           # buildkit from a mirror, not docker.io.
           driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
