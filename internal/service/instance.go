@@ -438,7 +438,7 @@ func (s *InstanceService) UpdateMetadata(ctx context.Context, instanceID string,
 		return nil, err
 	}
 	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		// Атомарный delete+upsert merge на DB-уровне (project-rule #10). Прежний
+		// Атомарный delete+upsert merge на DB-уровне (project-rule 10). Прежний
 		// Get→merge-in-Go→SetMetadata(full-overwrite) был read-modify-write вне TX и
 		// терял дельту конкурентного UpdateMetadata (second-writer-wins).
 		updated, err := s.repo.MergeMetadata(ctx, instanceID, del, upsert)

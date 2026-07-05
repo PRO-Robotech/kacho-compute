@@ -265,7 +265,7 @@ func (s *DiskService) doUpdate(ctx context.Context, req UpdateDiskReq) (*anypb.A
 			// InvalidArgument для single-threaded усадки. НЕ авторитетен под
 			// конкуренцией (stale-read) — монотонность гарантирует DB-level CAS в
 			// DiskRepo.Update (`WHERE size <= $new`), который отбивает конкурентную
-			// усадку как FailedPrecondition (проект-правило #10, TOCTOU-фикс).
+			// усадку как FailedPrecondition (проект-правило 10, TOCTOU-фикс).
 			if req.Size < d.Size {
 				return nil, status.Error(codes.InvalidArgument, "Disk size can only be increased")
 			}

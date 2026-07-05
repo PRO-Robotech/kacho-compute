@@ -389,7 +389,7 @@ func (r *InstanceRepo) DetachDisk(ctx context.Context, id, diskID string) (*doma
 // SQL-statement'ом + outbox UPDATED. del — ключи на удаление, upsert — ключи на
 // вставку/перезапись.
 //
-// Within-service-инвариант на DB-уровне (project-rule #10): merge выполняется
+// Within-service-инвариант на DB-уровне (project-rule 10): merge выполняется
 // одним `UPDATE … SET metadata = (metadata - $del::text[]) || $upsert::jsonb`,
 // а НЕ Go-side read-modify-write. Row-level lock Postgres сериализует конкурентные
 // merge'и на одной row → второй writer видит уже применённую дельту первого и
