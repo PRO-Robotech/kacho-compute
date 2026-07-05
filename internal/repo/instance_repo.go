@@ -245,14 +245,24 @@ func (r *InstanceRepo) Update(ctx context.Context, in *domain.Instance, emitLabe
 	if _, ok := ch["network_settings"]; ok {
 		us.add("network_settings_type", in.NetworkSettingsType)
 	}
+	// requireStopped: resize (resources_spec) и replatform (platform_id) разрешены
+	// ТОЛЬКО пока instance STOPPED (нельзя live-resize / live-replatform). Инвариант
+	// закрывается на DB-уровне атомарным CAS `AND status='STOPPED'` в самом UPDATE —
+	// НЕ software Get→check→UPDATE: между софтверной проверкой и записью конкурентный
+	// Start (SetStatusCAS STOPPED→RUNNING) закоммитил бы смену статуса, а безусловный
+	// UPDATE приземлил бы resize на уже-RUNNING машину (TOCTOU; within-service
+	// инвариант обязан жить на DB-уровне, не software check-then-act).
+	requireStopped := false
 	if _, ok := ch["resources_spec"]; ok {
 		us.add("cores", in.Cores)
 		us.add("memory", in.Memory)
 		us.add("core_fraction", in.CoreFraction)
 		us.add("gpus", in.GPUs)
+		requireStopped = true
 	}
 	if _, ok := ch["platform_id"]; ok {
 		us.add("platform_id", in.PlatformID)
+		requireStopped = true
 	}
 
 	tx, err := r.pool.Begin(ctx)
@@ -267,10 +277,29 @@ func (r *InstanceRepo) Update(ctx context.Context, in *domain.Instance, emitLabe
 		// (NotFound если её нет) и всё равно эмитим UPDATED (behaviour-preserving).
 		updated, err = scanInstance(tx.QueryRow(ctx, fmt.Sprintf(`SELECT %s FROM instances WHERE id = $1`, instanceCols), in.ID))
 	} else {
-		q := `UPDATE instances ` + us.clause() + ` WHERE id = $1 RETURNING ` + instanceCols
+		where := ` WHERE id = $1`
+		if requireStopped {
+			// $1 = id, $2..$N = SET-колонки; статус-предикат занимает следующий $.
+			us.args = append(us.args, instanceStatusName(domain.InstanceStatusStopped))
+			where += fmt.Sprintf(` AND status = $%d`, len(us.args))
+		}
+		q := `UPDATE instances ` + us.clause() + where + ` RETURNING ` + instanceCols
 		updated, err = scanInstance(tx.QueryRow(ctx, q, us.args...))
 	}
 	if err != nil {
+		if requireStopped && errors.Is(err, pgx.ErrNoRows) {
+			// 0 строк на resize/replatform-CAS: либо instance не существует
+			// (NotFound), либо он не STOPPED (FailedPrecondition). Различаем
+			// EXISTS-пробой в той же TX — как SetStatusCAS.
+			var exists bool
+			if e2 := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM instances WHERE id = $1)`, in.ID).Scan(&exists); e2 != nil {
+				return nil, wrapPgErr(e2, "Instance", in.ID)
+			}
+			if !exists {
+				return nil, fmt.Errorf("%w: Instance %s not found", ports.ErrNotFound, in.ID)
+			}
+			return nil, fmt.Errorf("%w: Instance must be stopped", ports.ErrFailedPrecondition)
+		}
 		return nil, wrapPgErr(err, "Instance", in.ID)
 	}
 	if err := r.fillChildrenTx(ctx, tx, updated); err != nil {

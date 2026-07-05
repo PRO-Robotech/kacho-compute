@@ -248,44 +248,6 @@ func TestFGAFilter_CacheTTLExpiry(t *testing.T) {
 	}
 }
 
-// Invalidate by subject removes its cached entries; other subjects keep theirs.
-func TestFGAFilter_InvalidateBySubject(t *testing.T) {
-	mock := &mockAuthClient{
-		responses: []*iamv1.ListObjectsResponse{
-			{ResourceIds: []string{"id-a"}},
-			{ResourceIds: []string{"id-b"}},
-			{ResourceIds: []string{"id-a-new"}},
-		},
-	}
-	f := NewFGAFilter(mock, DefaultConfig())
-
-	if _, err := f.ListAllowedIDs(context.Background(), "user:usr_alice", ResourceTypeInstance, ActionInstanceRead); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.ListAllowedIDs(context.Background(), "user:usr_bob", ResourceTypeInstance, ActionInstanceRead); err != nil {
-		t.Fatal(err)
-	}
-
-	f.Invalidate("user:usr_alice")
-
-	// Alice → miss again.
-	dA, err := f.ListAllowedIDs(context.Background(), "user:usr_alice", ResourceTypeInstance, ActionInstanceRead)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if dA.FromCache {
-		t.Fatalf("alice: expected cache miss after invalidate")
-	}
-	// Bob → still hit.
-	dB, err := f.ListAllowedIDs(context.Background(), "user:usr_bob", ResourceTypeInstance, ActionInstanceRead)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !dB.FromCache {
-		t.Fatalf("bob: expected cache hit (not invalidated)")
-	}
-}
-
 // Cache bound: max-entries-bounds-and-evicts.
 func TestFGAFilter_CacheBounded(t *testing.T) {
 	mock := &mockAuthClient{responses: []*iamv1.ListObjectsResponse{{}}}
@@ -308,7 +270,7 @@ func TestFGAFilter_CacheBounded(t *testing.T) {
 
 // Bypass filter trivially bypasses.
 func TestBypassFilter(t *testing.T) {
-	d, err := BypassFilter{}.ListAllowedIDs(context.Background(), "user:anyone", ResourceTypeSystem, "catalog.read")
+	d, err := BypassFilter{}.ListAllowedIDs(context.Background(), "user:anyone", "system", "catalog.read")
 	if err != nil {
 		t.Fatal(err)
 	}

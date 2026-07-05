@@ -5,7 +5,6 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -25,7 +24,6 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 
 	coredb "github.com/PRO-Robotech/kacho-corelib/db"
@@ -261,8 +259,8 @@ func runServe(cfg config.Config) error {
 		// per-RPC InternalIAMService.Check + FGA-filtered List (этот conn
 		// шарится с list-filter через buildListFilter) предъявляют client-cert mTLS
 		// через cfg.IAMAuthzMTLS (enable=false → insecure dev; enable=true без
-		// валидного cert-trio → startup error, fail-closed). Заменяет server-auth-only
-		// cfg.AuthZIAMTLS bool, который не предъявлял cert (был бы отвергнут iam с
+		// валидного cert-trio → startup error, fail-closed). Заменяет удалённый
+		// server-auth-only bool-флаг, который не предъявлял cert (был бы отвергнут iam с
 		// required client-cert).
 		authzCreds, cerr := grpcclient.TLSClientTransportCreds(cfg.IAMAuthzMTLS)
 		if cerr != nil {
@@ -469,9 +467,9 @@ func validateAuthMode(cfg config.Config, logger *slog.Logger) (productionMode bo
 	case "production-strict":
 		productionMode = true
 		// TLS-check on the actually-dialed transport edges (per-edge mTLS value-
-		// structs), NOT the legacy server-auth-only cfg.IAMTLS bool — that knob no
-		// longer wires any live dial, so gating on it gave false assurance while
-		// every cross-service edge + both listeners could still run plaintext.
+		// structs). The former server-auth-only IAM/AUTHZ bool knobs wired no live
+		// dial, so gating on them gave false assurance while every cross-service edge
+		// + both listeners could still run plaintext — they have been removed.
 		if terr := insecureEdgesInProductionStrict(cfg); terr != nil {
 			return false, terr
 		}
@@ -526,7 +524,7 @@ func insecureListenersInProduction(cfg config.Config) error {
 // insecureEdgesInProductionStrict возвращает non-nil ошибку, перечисляющую
 // КАЖДОЕ реально дозваниваемое transport-ребро, у которого per-edge mTLS
 // выключен. nil ⇒ все провода защищены. Гейт production-strict строится на этом
-// (а не на мёртвом cfg.IAMTLS): каждое перечисленное ребро несёт forwarded
+// (а не на удалённых server-auth-only bool-флагах): каждое перечисленное ребро несёт forwarded
 // x-kacho-principal-* identity и/или DB/registration-payload, поэтому plaintext
 // на любом из них компрометирует authorization-subject на проводе (CWE-319).
 //
@@ -585,8 +583,8 @@ func dialPeers(cfg config.Config, logger *slog.Logger) (service.ProjectClient, s
 	//
 	// compute→iam ProjectService.Get (:9090) предъявляет client-cert mTLS
 	// через cfg.IAMProjectMTLS (enable=false → insecure dev; enable=true без
-	// валидного cert-trio → startup error, fail-closed). Заменяет server-auth-only
-	// cfg.IAMTLS bool, который не предъявлял cert (был бы отвергнут iam с
+	// валидного cert-trio → startup error, fail-closed). Заменяет удалённый
+	// server-auth-only bool-флаг, который не предъявлял cert (был бы отвергнут iam с
 	// required client-cert).
 	iamCreds, err := grpcclient.TLSClientTransportCreds(cfg.IAMProjectMTLS)
 	if err != nil {
@@ -625,29 +623,15 @@ func peerKeepalive(idle bool) keepalive.ClientParameters {
 }
 
 // peerDialOptsCreds — seam-функция (тестируемая): собирает []grpc.DialOption из
-// готовых transport-creds + keepalive по idle. Единая точка для обоих путей:
-// legacy bool-peer (peerDialOpts) и per-edge client-cert mTLS iam-рёбер,
-// которые резолвят creds через corelib grpcclient.TLSClientTransportCreds. grpc.NewClient
-// не отдаёт опции назад — тест инспектирует именно этот набор.
+// готовых transport-creds + keepalive по idle. Единая точка для всех peer-dial'ов:
+// per-edge client-cert mTLS iam/geo-рёбер резолвят creds через corelib
+// grpcclient.TLSClientTransportCreds и подают их сюда. grpc.NewClient не отдаёт
+// опции назад — тест инспектирует именно этот набор.
 func peerDialOptsCreds(creds credentials.TransportCredentials, idle bool) []grpc.DialOption {
 	return []grpc.DialOption{
 		grpc.WithTransportCredentials(creds),
 		grpcclient.KeepaliveDialOption(idle),
 	}
-}
-
-// peerDialOpts — server-auth-only seam (bool useTLS), делегирует в
-// peerDialOptsCreds. Сохраняется как тестируемый seam bool-контракта keepalive
-// (dialpeer_test.go); live-рёбра (iam/geo) идут через client-cert mTLS-путь
-// peerDialOptsCreds/dialPeerCreds.
-func peerDialOpts(useTLS, idle bool) []grpc.DialOption {
-	var creds credentials.TransportCredentials
-	if useTLS {
-		creds = credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12})
-	} else {
-		creds = insecure.NewCredentials()
-	}
-	return peerDialOptsCreds(creds, idle)
 }
 
 // dialPeerCreds открывает gRPC-conn к peer-сервису, предъявляя готовые transport-

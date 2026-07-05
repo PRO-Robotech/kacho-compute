@@ -4,24 +4,28 @@
 package main
 
 import (
+	"crypto/tls"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 )
 
-// extractKeepalive — достаёт keepalive.ClientParameters из набора DialOption через
-// фиктивный dial (grpc.NewClient применяет опции к внутреннему dialOptions; мы
-// инспектируем через reflection-free путь: собираем conn и проверяем, что опция
-// keepalive присутствует). Поскольку grpc не отдаёт опции назад, проверяем сам
-// факт наличия keepalive-DialOption по типу через тестовую обёртку.
-//
-// peerDialOpts — seam-функция (тестируемая), возвращающая []grpc.DialOption.
-// Тест проверяет, что в наборе ровно одна keepalive-опция с нужными параметрами.
-// Мы используем то, что corelib helper KeepaliveParams — единая точка истины:
-// здесь проверяем, что peerDialOpts включает keepalive и прокидывает idle-флаг.
+// Тесты бьют по production-seam peerDialOptsCreds — единственной точке сборки
+// []grpc.DialOption для всех peer-dial'ов (dialPeerCreds делегирует ей). Поскольку
+// grpc.NewClient не отдаёт опции назад, инспектируем именно возвращаемый набор:
+// он обязан всегда включать keepalive-DialOption (grpcclient.KeepaliveDialOption),
+// иначе idle-conn становится half-open и первый RPC всплеска висит ~30с.
+
+func insecureCreds() credentials.TransportCredentials { return insecure.NewCredentials() }
+
+func tlsCreds() credentials.TransportCredentials {
+	return credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12})
+}
 
 // TestPeerDialOpts_IncludesKeepalive_Active — KA-01: active-conn (idle=false)
 // получает keepalive Time=10s, Timeout=Time/3, PermitWithoutStream=false.
@@ -31,8 +35,8 @@ func TestPeerDialOpts_IncludesKeepalive_Active(t *testing.T) {
 	require.Equal(t, 10*time.Second/3, p.Timeout)
 	require.False(t, p.PermitWithoutStream)
 
-	opts := peerDialOpts(false, false)
-	require.True(t, hasKeepaliveOpt(opts), "peerDialOpts must include a keepalive DialOption")
+	opts := peerDialOptsCreds(insecureCreds(), false)
+	require.True(t, hasKeepaliveOpt(opts), "peerDialOptsCreds must include a keepalive DialOption")
 }
 
 // TestPeerDialOpts_IncludesKeepalive_Idle — KA-01: authz-conn (idle=true) →
@@ -45,18 +49,17 @@ func TestPeerDialOpts_IncludesKeepalive_Idle(t *testing.T) {
 
 // TestPeerDialOpts_CredsBothModes — KA-01 and: keepalive не ломает выбор creds.
 func TestPeerDialOpts_CredsBothModes(t *testing.T) {
-	require.True(t, hasKeepaliveOpt(peerDialOpts(true, false)), "TLS mode keeps keepalive")
-	require.True(t, hasKeepaliveOpt(peerDialOpts(false, true)), "insecure mode keeps keepalive")
+	require.True(t, hasKeepaliveOpt(peerDialOptsCreds(tlsCreds(), false)), "TLS mode keeps keepalive")
+	require.True(t, hasKeepaliveOpt(peerDialOptsCreds(insecureCreds(), true)), "insecure mode keeps keepalive")
 	// caller всегда получает хотя бы creds + keepalive (>=2 опции)
-	require.GreaterOrEqual(t, len(peerDialOpts(true, false)), 2)
+	require.GreaterOrEqual(t, len(peerDialOptsCreds(tlsCreds(), false)), 2)
 }
 
-// hasKeepaliveOpt — проверяет наличие keepalive DialOption в наборе через
-// применение к реальному grpc.NewClient (опции валидны) + сверку peerKeepalive.
-// Простейший robust-чек: peerDialOpts всегда добавляет grpcclient.KeepaliveDialOption,
-// значит набор длиннее, чем без keepalive. Проверяем фактически через сравнение длин.
+// hasKeepaliveOpt — проверяет наличие keepalive DialOption в наборе.
+// peerDialOptsCreds всегда добавляет grpcclient.KeepaliveDialOption, значит набор
+// длиннее, чем без keepalive. Проверяем фактически через сравнение длин.
 func hasKeepaliveOpt(opts []grpc.DialOption) bool {
-	// peerDialOpts(useTLS, idle) = [creds-opt, keepalive-opt]; без keepalive было бы 1.
+	// peerDialOptsCreds(creds, idle) = [creds-opt, keepalive-opt]; без keepalive было бы 1.
 	return len(opts) >= 2
 }
 

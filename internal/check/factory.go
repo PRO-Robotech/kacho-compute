@@ -6,7 +6,6 @@ package check
 import (
 	"errors"
 	"log/slog"
-	"time"
 
 	"google.golang.org/grpc"
 
@@ -19,11 +18,6 @@ type Options struct {
 	IAMConn     grpc.ClientConnInterface
 	Breakglass  bool
 	Logger      *slog.Logger
-
-	CheckTimeout         time.Duration
-	DenyRateLimitPerSec  float64
-	CacheTTL             time.Duration
-	AllowSystemPrincipal bool
 }
 
 // ErrIAMConnNotConfigured — IAM-conn = nil И break-glass=false.
@@ -40,15 +34,12 @@ func NewInterceptor(opts Options) (*authz.Interceptor, error) {
 
 	if opts.Breakglass {
 		return authz.NewInterceptor(authz.InterceptorOptions{
-			ServiceName:          opts.ServiceName,
-			Map:                  PermissionMap(),
-			Client:               nil,
-			Cache:                authz.NewCache(opts.CacheTTL),
-			Logger:               opts.Logger,
-			Breakglass:           true,
-			DenyRateLimitPerSec:  opts.DenyRateLimitPerSec,
-			CheckTimeout:         opts.CheckTimeout,
-			AllowSystemPrincipal: opts.AllowSystemPrincipal,
+			ServiceName: opts.ServiceName,
+			Map:         PermissionMap(),
+			Client:      nil,
+			Cache:       authz.NewCache(0),
+			Logger:      opts.Logger,
+			Breakglass:  true,
 		}), nil
 	}
 
@@ -58,14 +49,11 @@ func NewInterceptor(opts Options) (*authz.Interceptor, error) {
 
 	client := NewIAMCheckClient(opts.IAMConn)
 	return authz.NewInterceptor(authz.InterceptorOptions{
-		ServiceName:          opts.ServiceName,
-		Map:                  PermissionMap(),
-		Client:               client,
-		Cache:                authz.NewCache(opts.CacheTTL),
-		Logger:               opts.Logger,
-		Breakglass:           false,
-		DenyRateLimitPerSec:  opts.DenyRateLimitPerSec,
-		CheckTimeout:         opts.CheckTimeout,
-		AllowSystemPrincipal: opts.AllowSystemPrincipal,
+		ServiceName: opts.ServiceName,
+		Map:         PermissionMap(),
+		Client:      client,
+		Cache:       authz.NewCache(0),
+		Logger:      opts.Logger,
+		Breakglass:  false,
 	}), nil
 }

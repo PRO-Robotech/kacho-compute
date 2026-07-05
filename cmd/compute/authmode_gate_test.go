@@ -37,19 +37,18 @@ func allEdgesSecured() config.Config {
 	}
 }
 
-// production-strict с legacy IAMTLS=true, но БЕЗ per-edge mTLS обязан ПАДАТЬ:
-// мёртвый knob cfg.IAMTLS не отражает реальную защищённость проводов.
-func TestValidateAuthMode_ProductionStrict_DeadIAMTLSKnobDoesNotSatisfyGate(t *testing.T) {
+// production-strict БЕЗ единого включённого per-edge mTLS обязан ПАДАТЬ: гейт
+// строится исключительно на реально дозваниваемых transport-рёбрах.
+func TestValidateAuthMode_ProductionStrict_AllPerEdgeMTLSDisabledFails(t *testing.T) {
 	cfg := config.Config{
 		AuthMode:                  "production-strict",
 		DBSSLMode:                 "verify-full",
-		IAMTLS:                    true, // legacy dead knob — must NOT satisfy the gate
 		FGARegisterDrainerEnabled: true, // register-drainer edge active
 		// all per-edge mTLS disabled (zero-value Enable:false)
 	}
 	_, err := validateAuthMode(cfg, discardLogger())
 	if err == nil {
-		t.Fatalf("expected production-strict gate to reject config with all per-edge mTLS disabled (legacy IAMTLS=true must not satisfy it)")
+		t.Fatalf("expected production-strict gate to reject config with all per-edge mTLS disabled")
 	}
 	// error must name the insecure edges, not the dead knob.
 	for _, want := range []string{
@@ -62,11 +61,9 @@ func TestValidateAuthMode_ProductionStrict_DeadIAMTLSKnobDoesNotSatisfyGate(t *t
 	}
 }
 
-// production-strict со ВСЕМИ per-edge mTLS enabled обязан ПРОХОДИТЬ, даже если
-// legacy IAMTLS=false.
+// production-strict со ВСЕМИ per-edge mTLS enabled обязан ПРОХОДИТЬ.
 func TestValidateAuthMode_ProductionStrict_AllPerEdgeMTLSPasses(t *testing.T) {
 	cfg := allEdgesSecured()
-	cfg.IAMTLS = false // legacy knob irrelevant now
 	prod, err := validateAuthMode(cfg, discardLogger())
 	if err != nil {
 		t.Fatalf("expected production-strict to pass with all per-edge mTLS enabled; got err: %v", err)

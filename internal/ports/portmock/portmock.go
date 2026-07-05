@@ -783,6 +783,51 @@ func (r *OpsRepo) Cancel(_ context.Context, id string) error {
 	return nil
 }
 
+// ---- operations.OwnedOperationRepo (ownership-scoped Get/Cancel) ----
+//
+// Зеркалит SQL-предикат pgRepo: доступ только владельцу (пара principal
+// type/id); чужой/несуществующий id → ErrNotFound (no-leak).
+
+func opsOwnerMatches(op *operations.Operation, owner operations.Owner) bool {
+	return op.Principal.Type == owner.PrincipalType && op.Principal.ID == owner.PrincipalID
+}
+
+// GetOwned возвращает операцию только если она принадлежит owner.
+func (r *OpsRepo) GetOwned(_ context.Context, id string, owner operations.Owner) (*operations.Operation, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	op, ok := r.ops[id]
+	if !ok || !opsOwnerMatches(op, owner) {
+		return nil, operations.ErrNotFound
+	}
+	cp := *op
+	return &cp, nil
+}
+
+// CancelOwned атомарно отменяет операцию owner'а; терминальное состояние в
+// возврате (без reload-Get). Идемпотентно на уже-CANCELLED.
+func (r *OpsRepo) CancelOwned(_ context.Context, id string, owner operations.Owner) (*operations.Operation, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	op, ok := r.ops[id]
+	if !ok || !opsOwnerMatches(op, owner) {
+		return nil, operations.ErrNotFound
+	}
+	if op.Done {
+		if op.Error != nil && op.Error.GetCode() == 1 {
+			cp := *op
+			return &cp, nil // идемпотентно: уже CANCELLED
+		}
+		return nil, operations.ErrAlreadyDone // terminal SUCCESS/ERROR
+	}
+	op.Done = true
+	op.Error = &status.Status{Code: 1, Message: "operation cancelled"}
+	cp := *op
+	return &cp, nil
+}
+
+var _ operations.OwnedOperationRepo = (*OpsRepo)(nil)
+
 // extractResourceID — best-effort извлечение resource_id из metadata
 // (для фильтра List). portmock хранит metadata как *anypb.Any; нам достаточно
 // сопоставить через operations.MetadataFor — но это требует знания типа. В

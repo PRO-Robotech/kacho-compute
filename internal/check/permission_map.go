@@ -390,14 +390,18 @@ func PermissionMap() authz.RPCMap {
 		// Proto-пакет — `kacho.cloud.operation` (без `.v1`); fullMethod
 		// соответственно `/kacho.cloud.operation.OperationService/*`.
 		// =========================
-		// Operation poll is NOT gated per-RPC. The FGA model has no
-		// `compute_operation` object type and no per-operation tuples are
-		// emitted, so a `viewer on compute_operation:<id>` Check has no path
-		// and every poll — including the creating client's own poll right
-		// after a successful mutation — was denied. Operation ids are opaque
-		// and unguessable; the api-gateway already marks these `<exempt>`.
-		// Public here makes the compute interceptor consistent with the
-		// gateway (a map-miss would fail-closed with ErrUnmapped).
+		// Operation poll is NOT gated by the FGA per-RPC Check: the FGA model has
+		// no `compute_operation` object type and no per-operation tuples are
+		// emitted, so a `viewer on compute_operation:<id>` Check has no path and
+		// every poll — including the creating client's own poll right after a
+		// successful mutation — would be denied. The api-gateway already marks
+		// these `<exempt>`; Public here keeps the compute interceptor consistent
+		// (a map-miss would fail-closed with ErrUnmapped).
+		//
+		// Access is instead bound to the operation's creating principal INSIDE the
+		// OperationHandler (GetOwned/CancelOwned, ownership-predicate in SQL WHERE)
+		// — a non-owner gets NotFound, no BOLA on the opaque id. See
+		// internal/handler/operation_handler.go.
 		"/kacho.cloud.operation.OperationService/Get":    {Public: true},
 		"/kacho.cloud.operation.OperationService/Cancel": {Public: true},
 	}
