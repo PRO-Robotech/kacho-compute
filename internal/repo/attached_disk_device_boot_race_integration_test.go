@@ -97,7 +97,7 @@ func TestIntegration_AttachedDisksDeviceUniq_Negative(t *testing.T) {
 // прямых INSERT-ов разных дисков в ОДИН instance с ОДНИМ device_name. Ровно
 // один winner; остальные — 23505 на attached_disks_device_uniq. Software-цикл
 // в service.AttachDisk TOCTOU-prone под гонкой — единственная race-proof
-// защита DB-уровень (workspace CLAUDE.md §Within-service refs).
+// защита на DB-уровне (within-service-инвариант).
 func TestIntegration_AttachedDisksDeviceUniq_ConcurrentRace(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
