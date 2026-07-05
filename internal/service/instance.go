@@ -251,7 +251,7 @@ func (s *InstanceService) resolveDiskSource(ctx context.Context, folderID, zoneI
 	if spec.DiskID != "" {
 		d, err := s.diskRepo.Get(ctx, spec.DiskID)
 		if err != nil {
-			return domain.AttachedDisk{}, nil, status.Errorf(codes.NotFound, "Disk %s not found", spec.DiskID)
+			return domain.AttachedDisk{}, nil, mapRefErr(err, "Disk", spec.DiskID)
 		}
 		if d.Status != domain.DiskStatusReady {
 			return domain.AttachedDisk{}, nil, status.Errorf(codes.FailedPrecondition, "Disk %s is not READY", spec.DiskID)
@@ -279,12 +279,12 @@ func (s *InstanceService) resolveDiskSource(ctx context.Context, folderID, zoneI
 	}
 	if spec.NewSourceImage != "" {
 		if _, err := s.imageRepo.Get(ctx, spec.NewSourceImage); err != nil {
-			return domain.AttachedDisk{}, nil, status.Errorf(codes.NotFound, "Image %s not found", spec.NewSourceImage)
+			return domain.AttachedDisk{}, nil, mapRefErr(err, "Image", spec.NewSourceImage)
 		}
 	}
 	if spec.NewSourceSnap != "" {
 		if _, err := s.snapshotRepo.Get(ctx, spec.NewSourceSnap); err != nil {
-			return domain.AttachedDisk{}, nil, status.Errorf(codes.NotFound, "Snapshot %s not found", spec.NewSourceSnap)
+			return domain.AttachedDisk{}, nil, mapRefErr(err, "Snapshot", spec.NewSourceSnap)
 		}
 	}
 	d := &domain.Disk{
@@ -573,7 +573,7 @@ func (s *InstanceService) AttachDisk(ctx context.Context, id string, spec DiskSo
 		}
 		d, err := s.diskRepo.Get(ctx, spec.DiskID)
 		if err != nil {
-			return nil, status.Errorf(codes.NotFound, "Disk %s not found", spec.DiskID)
+			return nil, mapRefErr(err, "Disk", spec.DiskID)
 		}
 		if d.Status != domain.DiskStatusReady {
 			return nil, status.Errorf(codes.FailedPrecondition, "Disk %s is not READY", spec.DiskID)

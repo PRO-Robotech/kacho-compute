@@ -152,7 +152,7 @@ func (s *DiskService) doCreate(ctx context.Context, diskID string, req CreateDis
 		typeID = defaultDiskType
 	}
 	if _, err := s.diskTypeRepo.Get(ctx, typeID); err != nil {
-		return nil, status.Errorf(codes.NotFound, "Disk type %s not found", typeID)
+		return nil, mapRefErr(err, "Disk type", typeID)
 	}
 	blockSize := req.BlockSize
 	if blockSize == 0 {
@@ -163,7 +163,7 @@ func (s *DiskService) doCreate(ctx context.Context, diskID string, req CreateDis
 	case req.ImageID != "":
 		img, err := s.imageRepo.Get(ctx, req.ImageID)
 		if err != nil {
-			return nil, status.Errorf(codes.NotFound, "Image %s not found", req.ImageID)
+			return nil, mapRefErr(err, "Image", req.ImageID)
 		}
 		if img.MinDiskSize > 0 && req.Size < img.MinDiskSize {
 			return nil, status.Errorf(codes.InvalidArgument, "Disk size %d is less than image min_disk_size %d", req.Size, img.MinDiskSize)
@@ -171,7 +171,7 @@ func (s *DiskService) doCreate(ctx context.Context, diskID string, req CreateDis
 	case req.SnapshotID != "":
 		snap, err := s.snapshotRepo.Get(ctx, req.SnapshotID)
 		if err != nil {
-			return nil, status.Errorf(codes.NotFound, "Snapshot %s not found", req.SnapshotID)
+			return nil, mapRefErr(err, "Snapshot", req.SnapshotID)
 		}
 		if snap.DiskSize > 0 && req.Size < snap.DiskSize {
 			return nil, status.Errorf(codes.InvalidArgument, "Disk size %d is less than snapshot disk_size %d", req.Size, snap.DiskSize)
@@ -261,6 +261,11 @@ func (s *DiskService) doUpdate(ctx context.Context, req UpdateDiskReq) (*anypb.A
 			if len(req.UpdateMask) == 0 && req.Size == 0 {
 				continue
 			}
+			// Fast-path на СТАРОМ снимке d.Size: даёт клиенту чёткий
+			// InvalidArgument для single-threaded усадки. НЕ авторитетен под
+			// конкуренцией (stale-read) — монотонность гарантирует DB-level CAS в
+			// DiskRepo.Update (`WHERE size <= $new`), который отбивает конкурентную
+			// усадку как FailedPrecondition (проект-правило #10, TOCTOU-фикс).
 			if req.Size < d.Size {
 				return nil, status.Error(codes.InvalidArgument, "Disk size can only be increased")
 			}

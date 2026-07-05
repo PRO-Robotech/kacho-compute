@@ -113,7 +113,7 @@ func (s *SnapshotService) doCreate(ctx context.Context, snapID string, req Creat
 	}
 	d, err := s.diskRepo.Get(ctx, req.DiskID)
 	if err != nil {
-		return nil, status.Errorf(codes.NotFound, "Disk %s not found", req.DiskID)
+		return nil, mapRefErr(err, "Disk", req.DiskID)
 	}
 	if d.Status != domain.DiskStatusReady {
 		return nil, status.Errorf(codes.FailedPrecondition, "Disk %s is not READY", req.DiskID)

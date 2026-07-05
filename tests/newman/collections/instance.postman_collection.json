@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "372a9b91-ebbd-4de1-90c8-368ba8c47ebc",
+    "_postman_id": "dfeea0c9-5c59-4de1-83f2-1c67c788cc7b",
     "name": "kacho-compute / newman / instance",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -3290,7 +3290,8 @@
                 "exec": [
                   "const j = pm.response.json();",
                   "pm.test('done', () => pm.expect(j.done).to.eql(true));",
-                  "pm.test('if op-error → code 9', () => { if (j.error) pm.expect(j.error.code).to.eql(9); });"
+                  "pm.test('op-error present (rejected)', () => pm.expect(Boolean(j.error), JSON.stringify(j)).to.eql(true));",
+                  "pm.test('op-error code 9 (FAILED_PRECONDITION)', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(9));"
                 ]
               }
             }
@@ -4093,7 +4094,8 @@
                 "exec": [
                   "const j = pm.response.json();",
                   "pm.test('done', () => pm.expect(j.done).to.eql(true));",
-                  "pm.test('if op-error → code 9', () => { if (j.error) pm.expect(j.error.code).to.eql(9); });"
+                  "pm.test('op-error present (rejected)', () => pm.expect(Boolean(j.error), JSON.stringify(j)).to.eql(true));",
+                  "pm.test('op-error code 9 (FAILED_PRECONDITION)', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(9));"
                 ]
               }
             }
@@ -5516,7 +5518,8 @@
                 "exec": [
                   "const j = pm.response.json();",
                   "pm.test('done', () => pm.expect(j.done).to.eql(true));",
-                  "pm.test('if op-error → code 9', () => { if (j.error) pm.expect(j.error.code).to.eql(9); });"
+                  "pm.test('op-error present (rejected)', () => pm.expect(Boolean(j.error), JSON.stringify(j)).to.eql(true));",
+                  "pm.test('op-error code 9 (FAILED_PRECONDITION)', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(9));"
                 ]
               }
             }
@@ -6386,7 +6389,8 @@
                 "exec": [
                   "const j = pm.response.json();",
                   "pm.test('done', () => pm.expect(j.done).to.eql(true));",
-                  "pm.test('if op-error → code 9', () => { if (j.error) pm.expect(j.error.code).to.eql(9); });"
+                  "pm.test('op-error present (rejected)', () => pm.expect(Boolean(j.error), JSON.stringify(j)).to.eql(true));",
+                  "pm.test('op-error code 9 (FAILED_PRECONDITION)', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(9));"
                 ]
               }
             }
@@ -7611,7 +7615,8 @@
                 "exec": [
                   "const j = pm.response.json();",
                   "pm.test('done', () => pm.expect(j.done).to.eql(true));",
-                  "pm.test('if op-error → code 3 or 9', () => { if (j.error) pm.expect(j.error.code).to.be.oneOf([3, 9]); });"
+                  "pm.test('op-error present (rejected)', () => pm.expect(Boolean(j.error), JSON.stringify(j)).to.eql(true));",
+                  "pm.test('op-error code 3 or 9', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.be.oneOf([3, 9]));"
                 ]
               }
             }
@@ -8275,7 +8280,8 @@
                 "exec": [
                   "const j = pm.response.json();",
                   "pm.test('done', () => pm.expect(j.done).to.eql(true));",
-                  "pm.test('if op-error → code 3 or 9', () => { if (j.error) pm.expect(j.error.code).to.be.oneOf([3, 9]); });"
+                  "pm.test('op-error present (rejected)', () => pm.expect(Boolean(j.error), JSON.stringify(j)).to.eql(true));",
+                  "pm.test('op-error code 3 or 9', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.be.oneOf([3, 9]));"
                 ]
               }
             }
@@ -9545,7 +9551,8 @@
                 "exec": [
                   "const j = pm.response.json();",
                   "pm.test('done', () => pm.expect(j.done).to.eql(true));",
-                  "pm.test('if op-error → code 9', () => { if (j.error) pm.expect(j.error.code).to.eql(9); });"
+                  "pm.test('op-error present (rejected)', () => pm.expect(Boolean(j.error), JSON.stringify(j)).to.eql(true));",
+                  "pm.test('op-error code 9 (FAILED_PRECONDITION)', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(9));"
                 ]
               }
             }
@@ -10032,7 +10039,8 @@
                 "exec": [
                   "const j = pm.response.json();",
                   "pm.test('done', () => pm.expect(j.done).to.eql(true));",
-                  "pm.test('if op-error → code 3 or 9', () => { if (j.error) pm.expect(j.error.code).to.be.oneOf([3, 9]); });"
+                  "pm.test('op-error present (rejected)', () => pm.expect(Boolean(j.error), JSON.stringify(j)).to.eql(true));",
+                  "pm.test('op-error code 3 or 9', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.be.oneOf([3, 9]));"
                 ]
               }
             }
@@ -10687,7 +10695,8 @@
                 "exec": [
                   "const j = pm.response.json();",
                   "pm.test('done', () => pm.expect(j.done).to.eql(true));",
-                  "pm.test('if op-error → code 9', () => { if (j.error) pm.expect(j.error.code).to.eql(9); });"
+                  "pm.test('op-error present (rejected)', () => pm.expect(Boolean(j.error), JSON.stringify(j)).to.eql(true));",
+                  "pm.test('op-error code 9 (FAILED_PRECONDITION)', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(9));"
                 ]
               }
             }
