@@ -22,10 +22,11 @@ import (
 //
 // Unimplemented RPC (наследуются из UnimplementedInstanceServiceServer →
 // codes.Unimplemented): AttachFilesystem/DetachFilesystem (blocked:kacho-filesystem),
-// AttachNetworkInterface/DetachNetworkInterface/UpdateNetworkInterface (NIC binding
-// removed from the Instance lifecycle — no auto-NIC), Relocate
-// (blocked: cross-zone disk move), ListAccessBindings/SetAccessBindings/UpdateAccessBindings
-// (AAA-скелет). См. docs/architecture/07-known-divergences.md.
+// AttachNetworkInterface/DetachNetworkInterface/UpdateNetworkInterface/AddOneToOneNat/
+// RemoveOneToOneNat (NIC binding removed from the Instance lifecycle — no auto-NIC:
+// Instance создаётся без network interface, поэтому включать/выключать NAT не над чем),
+// Relocate (blocked: cross-zone disk move), ListAccessBindings/SetAccessBindings/
+// UpdateAccessBindings (AAA-скелет). См. docs/architecture/07-known-divergences.md.
 type InstanceHandler struct {
 	computev1.UnimplementedInstanceServiceServer
 	svc        *svc.InstanceService
@@ -258,48 +259,6 @@ func (h *InstanceHandler) DetachDisk(ctx context.Context, req *computev1.DetachI
 		return nil, err
 	}
 	op, err := h.svc.DetachDisk(ctx, req.InstanceId, req.GetDiskId(), req.GetDeviceName())
-	if err != nil {
-		return nil, err
-	}
-	return operationToProto(op), nil
-}
-
-// AddOneToOneNat инициирует включение NAT на NIC.
-func (h *InstanceHandler) AddOneToOneNat(ctx context.Context, req *computev1.AddInstanceOneToOneNatRequest) (*operationpb.Operation, error) {
-	if req.InstanceId == "" {
-		return nil, status.Error(codes.InvalidArgument, "instance_id required")
-	}
-	in, err := h.svc.Get(ctx, req.InstanceId)
-	if err != nil {
-		return nil, err
-	}
-	if err := AssertFolderOwnership(ctx, in.ProjectID); err != nil {
-		return nil, err
-	}
-	var natSpec *svc.NatSpec
-	if req.OneToOneNatSpec != nil {
-		natSpec = &svc.NatSpec{Address: req.OneToOneNatSpec.Address, IPVersion: int32(req.OneToOneNatSpec.IpVersion)}
-	}
-	op, err := h.svc.AddOneToOneNat(ctx, req.InstanceId, req.NetworkInterfaceIndex, natSpec)
-	if err != nil {
-		return nil, err
-	}
-	return operationToProto(op), nil
-}
-
-// RemoveOneToOneNat инициирует выключение NAT на NIC.
-func (h *InstanceHandler) RemoveOneToOneNat(ctx context.Context, req *computev1.RemoveInstanceOneToOneNatRequest) (*operationpb.Operation, error) {
-	if req.InstanceId == "" {
-		return nil, status.Error(codes.InvalidArgument, "instance_id required")
-	}
-	in, err := h.svc.Get(ctx, req.InstanceId)
-	if err != nil {
-		return nil, err
-	}
-	if err := AssertFolderOwnership(ctx, in.ProjectID); err != nil {
-		return nil, err
-	}
-	op, err := h.svc.RemoveOneToOneNat(ctx, req.InstanceId, req.NetworkInterfaceIndex)
 	if err != nil {
 		return nil, err
 	}

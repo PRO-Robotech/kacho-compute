@@ -26,7 +26,7 @@ func newInstanceSvc(t *testing.T, folderOK bool) (*InstanceService, *portmock.In
 	instanceRepo := portmock.NewInstanceRepo().WithDiskRepo(diskRepo)
 	ops := portmock.NewOpsRepo()
 	svc := NewInstanceService(instanceRepo, diskRepo, imgRepo, snapRepo, portmock.NewZoneRegistry(),
-		&portmock.ProjectClient{OK: folderOK}, &portmock.VPCClient{AddrFound: true}, ops, false)
+		&portmock.ProjectClient{OK: folderOK}, ops)
 	return svc, instanceRepo, diskRepo, imgRepo, ops
 }
 
@@ -91,19 +91,14 @@ func TestInstance_Create_SyncValidation(t *testing.T) {
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
-// TestInstance_Create_NoNIC_Materialization — even with peer validation
-// enabled (skipIPAM=false), Create must not touch the VPC for NIC/address
-// allocation. No ephemeral Address resources are created.
-func TestInstance_Create_NoNIC_Materialization(t *testing.T) {
-	vpc := &portmock.VPCClient{AddrFound: true, ExternalIP: "198.51.100.42"}
-	svc, repo, _, ops := newInstanceSvcVPC(t, vpc)
+// TestInstance_Create_NoNIC — Instance создаётся без network interface
+// (no auto-NIC): NIC-привязка вынесена из lifecycle Instance целиком.
+func TestInstance_Create_NoNIC(t *testing.T) {
+	svc, repo, _, _, ops := newInstanceSvc(t, true)
 	op, err := svc.Create(context.Background(), baseCreateReq())
 	require.NoError(t, err)
 	in := instanceFromOp(t, portmock.AwaitOpDone(t, ops, op.ID))
 	require.Empty(t, in.NetworkInterfaces)
-	require.Empty(t, vpc.CreatedAddrIDs)
-	require.Empty(t, vpc.MarkedEphemeral)
-	require.Empty(t, vpc.SetRefs)
 	stored, err := repo.Get(context.Background(), in.Id)
 	require.NoError(t, err)
 	require.Empty(t, stored.NetworkInterfaces)
@@ -113,8 +108,7 @@ func seedRunningInstance(repo *portmock.InstanceRepo, status domain.InstanceStat
 	in := &domain.Instance{
 		ID: "epdvm1", ProjectID: "f", Name: "vm", ZoneID: "ru-central1-a", PlatformID: "standard-v3",
 		Cores: 2, Memory: 2 << 30, CoreFraction: 100, Status: status,
-		NetworkInterfaces: []domain.NetworkInterface{{Index: "0", SubnetID: "e9bsubnet", PrimaryV4Address: "10.0.0.10"}},
-		AttachedDisks:     []domain.AttachedDisk{{DiskID: "epdboot", IsBoot: true}},
+		AttachedDisks: []domain.AttachedDisk{{DiskID: "epdboot", IsBoot: true}},
 	}
 	repo.Seed(in)
 	return in
@@ -242,31 +236,6 @@ func TestInstance_AttachDetachDisk(t *testing.T) {
 	require.Empty(t, in.SecondaryDisks)
 }
 
-// TestInstance_AddRemoveNAT — one-to-one NAT operates on a NIC already present on
-// the Instance row (NIC binding itself is out of the Instance Create lifecycle;
-// here a NIC is seeded directly into the row).
-func TestInstance_AddRemoveNAT(t *testing.T) {
-	svc, repo, _, _, ops := newInstanceSvc(t, true)
-	seedRunningInstance(repo, domain.InstanceStatusRunning)
-
-	op, err := svc.AddOneToOneNat(context.Background(), "epdvm1", "0", nil)
-	require.NoError(t, err)
-	in := instanceFromOp(t, portmock.AwaitOpDone(t, ops, op.ID))
-	require.NotNil(t, in.NetworkInterfaces[0].PrimaryV4Address.OneToOneNat)
-
-	// add again → FailedPrecondition.
-	op, err = svc.AddOneToOneNat(context.Background(), "epdvm1", "0", nil)
-	require.NoError(t, err)
-	done := portmock.AwaitOpDone(t, ops, op.ID)
-	require.NotNil(t, done.Error)
-	require.Equal(t, int32(codes.FailedPrecondition), done.Error.Code)
-
-	op, err = svc.RemoveOneToOneNat(context.Background(), "epdvm1", "0")
-	require.NoError(t, err)
-	in = instanceFromOp(t, portmock.AwaitOpDone(t, ops, op.ID))
-	require.Nil(t, in.NetworkInterfaces[0].PrimaryV4Address.OneToOneNat)
-}
-
 func TestInstance_UpdateMetadata(t *testing.T) {
 	svc, repo, _, _, ops := newInstanceSvc(t, true)
 	in0 := seedRunningInstance(repo, domain.InstanceStatusRunning)
@@ -303,81 +272,6 @@ func TestInstance_GetSerialPortOutput(t *testing.T) {
 	require.Contains(t, out, "epdvm1")
 }
 
-// --- one-to-one NAT IPAM (kacho-vpc Address allocation) ---
-
-func newInstanceSvcVPC(t *testing.T, vpc *portmock.VPCClient) (*InstanceService, *portmock.InstanceRepo, *portmock.DiskRepo, *portmock.OpsRepo) {
-	t.Helper()
-	diskRepo := portmock.NewDiskRepo()
-	instanceRepo := portmock.NewInstanceRepo().WithDiskRepo(diskRepo)
-	ops := portmock.NewOpsRepo()
-	svc := NewInstanceService(instanceRepo, diskRepo, portmock.NewImageRepo(), portmock.NewSnapshotRepo(), portmock.NewZoneRegistry(),
-		&portmock.ProjectClient{OK: true}, vpc, ops, false)
-	return svc, instanceRepo, diskRepo, ops
-}
-
-// TestInstance_AddRemoveNAT_RealIP — AddOneToOneNat allocates an ephemeral
-// external Address via kacho-vpc; RemoveOneToOneNat releases it.
-func TestInstance_AddRemoveNAT_RealIP(t *testing.T) {
-	vpc := &portmock.VPCClient{ExternalIP: "198.51.100.77"}
-	svc, repo, _, ops := newInstanceSvcVPC(t, vpc)
-	seedRunningInstance(repo, domain.InstanceStatusRunning)
-
-	op, err := svc.AddOneToOneNat(context.Background(), "epdvm1", "0", nil)
-	require.NoError(t, err)
-	in := instanceFromOp(t, portmock.AwaitOpDone(t, ops, op.ID))
-	require.NotNil(t, in.NetworkInterfaces[0].PrimaryV4Address.OneToOneNat)
-	require.Equal(t, "198.51.100.77", in.NetworkInterfaces[0].PrimaryV4Address.OneToOneNat.Address)
-	require.Len(t, vpc.CreatedAddrIDs, 1)
-
-	op, err = svc.RemoveOneToOneNat(context.Background(), "epdvm1", "0")
-	require.NoError(t, err)
-	in = instanceFromOp(t, portmock.AwaitOpDone(t, ops, op.ID))
-	require.Nil(t, in.NetworkInterfaces[0].PrimaryV4Address.OneToOneNat)
-	require.ElementsMatch(t, vpc.CreatedAddrIDs, vpc.DeletedAddrIDs) // ephemeral external Address released
-}
-
-func TestInstance_AddRemoveNAT_MarksEphemeralInUseAndDeletes(t *testing.T) {
-	vpc := &portmock.VPCClient{ExternalIP: "198.51.100.77"}
-	svc, repo, _, ops := newInstanceSvcVPC(t, vpc)
-	seedRunningInstance(repo, domain.InstanceStatusRunning)
-
-	op, err := svc.AddOneToOneNat(context.Background(), "epdvm1", "0", nil)
-	require.NoError(t, err)
-	require.Nil(t, portmock.AwaitOpDone(t, ops, op.ID).Error)
-	require.Len(t, vpc.CreatedAddrIDs, 1)
-	ephAddrID := vpc.CreatedAddrIDs[0]
-	// Newly-created ephemeral NAT Address → MarkAddressEphemeralInUse (not SetRefs).
-	require.Equal(t, "epdvm1", vpc.MarkedEphemeral[ephAddrID])
-	require.NotContains(t, vpc.SetRefs, ephAddrID)
-
-	op, err = svc.RemoveOneToOneNat(context.Background(), "epdvm1", "0")
-	require.NoError(t, err)
-	require.Nil(t, portmock.AwaitOpDone(t, ops, op.ID).Error)
-	require.Contains(t, vpc.DeletedAddrIDs, ephAddrID) // ephemeral → deleted (referrer via CASCADE)
-}
-
-func TestInstance_AddNAT_ReservedAddress_SetsReferenceOnly(t *testing.T) {
-	const reservedAddrID = "e9breservedaddr02"
-	vpc := &portmock.VPCClient{AddrFound: true, ExternalIP: "198.51.100.88"}
-	svc, repo, _, ops := newInstanceSvcVPC(t, vpc)
-	seedRunningInstance(repo, domain.InstanceStatusRunning)
-
-	op, err := svc.AddOneToOneNat(context.Background(), "epdvm1", "0", &NatSpec{AddressID: reservedAddrID})
-	require.NoError(t, err)
-	require.Nil(t, portmock.AwaitOpDone(t, ops, op.ID).Error)
-	// Reserved user address → SetAddressReference (referrer only, reserved intact),
-	// NOT MarkAddressEphemeralInUse.
-	require.Equal(t, "epdvm1", vpc.SetRefs[reservedAddrID])
-	require.NotContains(t, vpc.MarkedEphemeral, reservedAddrID)
-	require.Empty(t, vpc.CreatedAddrIDs) // didn't create a new Address — used reserved one
-
-	op, err = svc.RemoveOneToOneNat(context.Background(), "epdvm1", "0")
-	require.NoError(t, err)
-	require.Nil(t, portmock.AwaitOpDone(t, ops, op.ID).Error)
-	require.NotContains(t, vpc.DeletedAddrIDs, reservedAddrID) // reserved → not deleted
-	require.Contains(t, vpc.ClearedRefs, reservedAddrID)       // referrer cleared
-}
-
 // TestInstance_Create_ZoneFromSource — zone_id валидируется через ZoneRegistry
 // port. В продакшене этот порт реализует clients.GeoClient (kacho-geo
 // geo.v1.ZoneService.Get), а не локальная таблица `zones`; здесь use-case
@@ -388,12 +282,9 @@ func TestInstance_Create_ZoneFromSource(t *testing.T) {
 	diskRepo := portmock.NewDiskRepo()
 	instanceRepo := portmock.NewInstanceRepo().WithDiskRepo(diskRepo)
 	ops := portmock.NewOpsRepo()
-	zoneSrc := &portmock.VPCClient{
-		AddrFound: true,
-		Zones:     map[string]string{"ru-central1-a": "ru-central1"},
-	}
+	zoneSrc := portmock.NewZoneRegistry("ru-central1-a")
 	svc := NewInstanceService(instanceRepo, diskRepo, portmock.NewImageRepo(), portmock.NewSnapshotRepo(),
-		zoneSrc, &portmock.ProjectClient{OK: true}, zoneSrc, ops, false)
+		zoneSrc, &portmock.ProjectClient{OK: true}, ops)
 
 	// known zone → success.
 	op, err := svc.Create(context.Background(), baseCreateReq())

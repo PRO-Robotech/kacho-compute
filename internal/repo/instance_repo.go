@@ -5,7 +5,6 @@ package repo
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -36,7 +35,7 @@ const instanceCols = `id, project_id, created_at, name, description, labels, zon
 	`placement_policy, serial_port_ssh_authorization, gpu_cluster_id, hardware_generation, maintenance_policy, ` +
 	`maintenance_grace_period_seconds, reserved_instance_pool_id, host_group_id, host_id, application`
 
-// Get возвращает ВМ по id (+ NIC-и + attached_disks).
+// Get возвращает ВМ по id (+ attached_disks).
 func (r *InstanceRepo) Get(ctx context.Context, id string) (*domain.Instance, error) {
 	q := fmt.Sprintf(`SELECT %s FROM instances WHERE id = $1`, instanceCols)
 	in, err := scanInstance(r.pool.QueryRow(ctx, q, id))
@@ -129,7 +128,7 @@ func (r *InstanceRepo) List(ctx context.Context, f service.InstanceFilter, p ser
 	return result, nextToken, nil
 }
 
-// Insert вставляет ВМ + NIC-и + attached_disks + inline-диски в одной TX.
+// Insert вставляет ВМ + attached_disks + inline-диски в одной TX.
 func (r *InstanceRepo) Insert(ctx context.Context, in *domain.Instance, inlineDisks []*domain.Disk) (*domain.Instance, error) {
 	insertArgs, err := instanceInsertArgs(in)
 	if err != nil {
@@ -153,11 +152,6 @@ func (r *InstanceRepo) Insert(ctx context.Context, in *domain.Instance, inlineDi
 	created, err := scanInstance(tx.QueryRow(ctx, qIns, insertArgs...))
 	if err != nil {
 		return nil, wrapPgErr(err, "Instance", in.Name)
-	}
-	for _, nic := range in.NetworkInterfaces {
-		if err := insertNICTx(ctx, tx, in.ID, nic); err != nil {
-			return nil, err
-		}
 	}
 	for _, ad := range in.AttachedDisks {
 		if err := insertAttachedDiskTx(ctx, tx, in.ID, ad); err != nil {
@@ -309,16 +303,6 @@ func (r *InstanceRepo) DetachDisk(ctx context.Context, id, diskID string) (*doma
 	})
 }
 
-// ReplaceNIC заменяет одну строку instance_network_interfaces + outbox UPDATED.
-func (r *InstanceRepo) ReplaceNIC(ctx context.Context, id string, nic domain.NetworkInterface) (*domain.Instance, error) {
-	return r.mutateAndReload(ctx, id, "UPDATED", func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `DELETE FROM instance_network_interfaces WHERE instance_id = $1 AND idx = $2`, id, nic.Index); err != nil {
-			return err
-		}
-		return insertNICTx(ctx, tx, id, nic)
-	})
-}
-
 // SetMetadata заменяет map metadata + outbox UPDATED.
 func (r *InstanceRepo) SetMetadata(ctx context.Context, id string, metadata map[string]string) (*domain.Instance, error) {
 	mdJSON, err := marshalJSONB(orEmptyMap(metadata), "Instance.metadata")
@@ -332,7 +316,7 @@ func (r *InstanceRepo) SetMetadata(ctx context.Context, id string, metadata map[
 }
 
 // Delete удаляет ВМ; autoDeleteDiskIDs — диски с auto_delete=true (удаляются до
-// DELETE instance; остальные строки attached_disks/NIC чистит FK CASCADE).
+// DELETE instance; остальные строки attached_disks чистит FK CASCADE).
 func (r *InstanceRepo) Delete(ctx context.Context, id string, autoDeleteDiskIDs []string) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -452,38 +436,6 @@ func (r *InstanceRepo) fillChildrenTx(ctx context.Context, tx pgx.Tx, in *domain
 }
 
 func (r *InstanceRepo) fillChildrenGeneric(ctx context.Context, q querier, in *domain.Instance) error {
-	// NIC-и.
-	nicRows, err := q.Query(ctx, `SELECT idx, nic_id, mac_address, subnet_id, primary_v4_address, primary_v4_address_id, primary_v4_nat, primary_v6_address, primary_v6_nat, security_group_ids
-		FROM instance_network_interfaces WHERE instance_id = $1 ORDER BY idx`, in.ID)
-	if err != nil {
-		return wrapPgErr(err, "Instance", in.ID)
-	}
-	for nicRows.Next() {
-		var nic domain.NetworkInterface
-		var v4NatJSON, v6NatJSON, sgJSON []byte
-		if err := nicRows.Scan(&nic.Index, &nic.NICID, &nic.MACAddress, &nic.SubnetID, &nic.PrimaryV4Address, &nic.PrimaryV4AddressID, &v4NatJSON, &nic.PrimaryV6Address, &v6NatJSON, &sgJSON); err != nil {
-			nicRows.Close()
-			return wrapPgErr(err, "Instance", in.ID)
-		}
-		if len(v4NatJSON) > 0 {
-			nic.PrimaryV4Nat = &domain.OneToOneNat{}
-			if err := json.Unmarshal(v4NatJSON, nic.PrimaryV4Nat); err != nil {
-				nic.PrimaryV4Nat = nil
-			}
-		}
-		if len(v6NatJSON) > 0 {
-			nic.PrimaryV6Nat = &domain.OneToOneNat{}
-			if err := json.Unmarshal(v6NatJSON, nic.PrimaryV6Nat); err != nil {
-				nic.PrimaryV6Nat = nil
-			}
-		}
-		_ = json.Unmarshal(sgJSON, &nic.SecurityGroupIDs)
-		in.NetworkInterfaces = append(in.NetworkInterfaces, nic)
-	}
-	nicRows.Close()
-	if err := nicRows.Err(); err != nil {
-		return wrapPgErr(err, "Instance", in.ID)
-	}
 	// attached_disks.
 	adRows, err := q.Query(ctx, `SELECT disk_id, is_boot, mode, device_name, auto_delete, attached_at FROM attached_disks WHERE instance_id = $1 ORDER BY is_boot DESC, attached_at`, in.ID)
 	if err != nil {
@@ -504,26 +456,6 @@ func (r *InstanceRepo) fillChildrenGeneric(ctx context.Context, q querier, in *d
 		return wrapPgErr(err, "Instance", in.ID)
 	}
 	return nil
-}
-
-func insertNICTx(ctx context.Context, tx pgx.Tx, instanceID string, nic domain.NetworkInterface) error {
-	v4NatJSON, err := marshalNilable(nic.PrimaryV4Nat, "NIC.primary_v4_nat")
-	if err != nil {
-		return err
-	}
-	v6NatJSON, err := marshalNilable(nic.PrimaryV6Nat, "NIC.primary_v6_nat")
-	if err != nil {
-		return err
-	}
-	sgJSON, err := marshalJSONB(orEmptySlice(nic.SecurityGroupIDs), "NIC.security_group_ids")
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec(ctx, `INSERT INTO instance_network_interfaces
-		(instance_id, idx, nic_id, mac_address, subnet_id, primary_v4_address, primary_v4_address_id, primary_v4_nat, primary_v4_dns_records, primary_v6_address, primary_v6_nat, primary_v6_dns_records, security_group_ids)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'[]'::jsonb,$9,$10,'[]'::jsonb,$11)`,
-		instanceID, nic.Index, nic.NICID, nic.MACAddress, nic.SubnetID, nic.PrimaryV4Address, nic.PrimaryV4AddressID, v4NatJSON, nic.PrimaryV6Address, v6NatJSON, sgJSON)
-	return err
 }
 
 func insertAttachedDiskTx(ctx context.Context, tx pgx.Tx, instanceID string, ad domain.AttachedDisk) error {
@@ -667,13 +599,6 @@ func attachedDiskModeFromName(s string) domain.AttachedDiskMode {
 	default:
 		return domain.AttachedDiskModeUnspecified
 	}
-}
-
-func marshalNilable(v *domain.OneToOneNat, field string) ([]byte, error) {
-	if v == nil {
-		return nil, nil
-	}
-	return marshalJSONB(v, field)
 }
 
 func orEmptyMap(m map[string]string) map[string]string {

@@ -156,6 +156,16 @@ workspace `CLAUDE.md` §«Кросс-доменные ссылки на ресу
 
 ### 6.2. `Instance` NIC бэкуется ресурсом kacho-vpc `NetworkInterface` (эпик KAC-9)
 
+> **Снято (no auto-NIC).** `Instance` создаётся **без** network interface:
+> NIC-привязка вынесена из lifecycle Instance целиком. `Instance.Create`
+> игнорирует `network_interface_specs`, NIC-строки в `instance_network_interfaces`
+> не пишутся и не читаются, а RPC `AttachNetworkInterface` /
+> `DetachNetworkInterface` / `UpdateNetworkInterface` / `AddOneToOneNat` /
+> `RemoveOneToOneNat` — `Unimplemented`. Соответственно снято и ребро
+> `kacho-compute → kacho-vpc` (NIC-spec/IPAM): `internal/clients/vpc_client.go` и
+> порт `VPCClient` удалены как мёртвый код. Описание ниже сохранено как история
+> прежнего дизайна.
+
 **Намеренное решение** (clean-API дизайн; verbatim-parity отложена): compute-NIC
 бэкуется first-class ресурсом kacho-vpc `NetworkInterface` (вариант А, эпик
 `KAC-2`/`KAC-9`). `compute.v1.Instance.NetworkInterface += nic_id` (proto field 7;
@@ -196,6 +206,12 @@ create/attach/detach + эфемерный Address IPAM).
 > трекинг работы.
 
 ## 8. Instance NIC IPv4 — реальные адреса через эфемерные VPC `Address`-ресурсы
+
+> **Снято (no auto-NIC).** Instance больше не выделяет IPv4 через kacho-vpc IPAM:
+> раз NIC не создаётся (см. §6.2), эфемерные `Address`-ресурсы, referrer-tracking
+> и teardown не выполняются. `internal/clients/vpc_client.go` (IPAM + referrer)
+> удалён как мёртвый код, `KACHO_COMPUTE_VPC_*` конфиг снят. Раздел ниже сохранён
+> как история прежнего дизайна.
 
 `Instance.Create` (и `AddOneToOneNat`) выделяют **реальные** IPv4 для NIC-ей
 через kacho-vpc IPAM, создавая в kacho-vpc эфемерные `Address`-ресурсы:

@@ -529,23 +529,6 @@ func (r *InstanceRepo) DetachDisk(_ context.Context, id, diskID string) (*domain
 	return in, nil
 }
 
-// ReplaceNIC заменяет NIC по index.
-func (r *InstanceRepo) ReplaceNIC(_ context.Context, id string, nic domain.NetworkInterface) (*domain.Instance, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	in, ok := r.data[id]
-	if !ok {
-		return nil, ports.ErrNotFound
-	}
-	for i := range in.NetworkInterfaces {
-		if in.NetworkInterfaces[i].Index == nic.Index {
-			in.NetworkInterfaces[i] = nic
-			return in, nil
-		}
-	}
-	return nil, ports.ErrNotFound
-}
-
 // SetMetadata заменяет metadata.
 func (r *InstanceRepo) SetMetadata(_ context.Context, id string, metadata map[string]string) (*domain.Instance, error) {
 	r.mu.Lock()
@@ -687,123 +670,13 @@ func (r *ZoneRegistry) GetZone(_ context.Context, zoneID string) (ports.ZoneInfo
 	return ports.ZoneInfo{ID: zoneID, RegionID: region}, nil
 }
 
-// ---- ProjectClient / VPCClient ----
+// ---- ProjectClient ----
 
 // ProjectClient — fake ProjectClient. OK задаёт результат Exists().
 type ProjectClient struct{ OK bool }
 
 // Exists возвращает ProjectClient.OK.
 func (c *ProjectClient) Exists(_ context.Context, _ string) (bool, error) { return c.OK, nil }
-
-// VPCClient — fake VPCClient. AddrFound — ответ GetExternalAddress;
-// CreateExternalAddress возвращает детерминированный «выделенный» external IP
-// (ExternalIP) + последовательные id; CreatedAddrIDs и DeletedAddrIDs
-// протоколируют вызовы для проверки teardown-логики one-to-one NAT в тестах.
-type VPCClient struct {
-	AddrFound bool
-	// ExternalIP — IP, который вернёт CreateExternalAddress/GetExternalAddress
-	// (если "" — используются дефолты ниже).
-	ExternalIP string
-	// Zones — справочник зон, проксируемый GetZone/ListZones (имитация
-	// owner-таблицы зон compute). Если nil — используется стандартный
-	// набор ru-central1-{a,b,d}. Ключ — zone id, значение — region id.
-	Zones map[string]string
-
-	mu             sync.Mutex
-	addrSeq        int
-	CreatedAddrIDs []string
-	DeletedAddrIDs []string
-	// SetRefs — addressID → referrerID, протоколирует SetAddressReference.
-	// MarkedEphemeral — addressID → referrerID, протоколирует
-	// MarkAddressEphemeralInUse (reserved=false, used=true + referrer).
-	// ClearedRefs — addressID'ы, переданные в ClearAddressReference.
-	SetRefs         map[string]string
-	MarkedEphemeral map[string]string
-	ClearedRefs     []string
-}
-
-// zonesOrDefault — Zones либо стандартный набор ru-central1-{a,b,d}.
-func (c *VPCClient) zonesOrDefault() map[string]string {
-	if c.Zones != nil {
-		return c.Zones
-	}
-	return map[string]string{
-		"ru-central1-a": "ru-central1",
-		"ru-central1-b": "ru-central1",
-		"ru-central1-d": "ru-central1",
-	}
-}
-
-// GetZone — реализация ports.ZoneRegistry: зона по id (ErrNotFound при отсутствии).
-func (c *VPCClient) GetZone(_ context.Context, zoneID string) (ports.ZoneInfo, error) {
-	region, ok := c.zonesOrDefault()[zoneID]
-	if !ok {
-		return ports.ZoneInfo{}, ports.ErrNotFound
-	}
-	return ports.ZoneInfo{ID: zoneID, RegionID: region}, nil
-}
-
-// CreateExternalAddress возвращает «выделенный» external IP + новый id.
-func (c *VPCClient) CreateExternalAddress(_ context.Context, _, _, _ string) (ports.VPCAddress, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.addrSeq++
-	id := fmt.Sprintf("e9bfakeaddr%08d", c.addrSeq)
-	c.CreatedAddrIDs = append(c.CreatedAddrIDs, id)
-	ip := c.ExternalIP
-	if ip == "" {
-		ip = fmt.Sprintf("198.51.100.%d", 100+c.addrSeq)
-	}
-	return ports.VPCAddress{IP: ip, AddressID: id}, nil
-}
-
-// GetExternalAddress возвращает ({ExternalIP, addressID}, AddrFound, nil).
-func (c *VPCClient) GetExternalAddress(_ context.Context, addressID string) (ports.VPCAddress, bool, error) {
-	ip := c.ExternalIP
-	if ip == "" {
-		ip = "198.51.100.50"
-	}
-	return ports.VPCAddress{IP: ip, AddressID: addressID}, c.AddrFound, nil
-}
-
-// DeleteAddress протоколирует id и возвращает nil.
-func (c *VPCClient) DeleteAddress(_ context.Context, addressID string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.DeletedAddrIDs = append(c.DeletedAddrIDs, addressID)
-	return nil
-}
-
-// SetAddressReference протоколирует (addressID → referrerID) и возвращает nil.
-func (c *VPCClient) SetAddressReference(_ context.Context, addressID, _, referrerID, _ string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.SetRefs == nil {
-		c.SetRefs = make(map[string]string)
-	}
-	c.SetRefs[addressID] = referrerID
-	return nil
-}
-
-// MarkAddressEphemeralInUse протоколирует (addressID → referrerID) в
-// MarkedEphemeral и возвращает nil (имитирует reserved=false + used=true + referrer).
-func (c *VPCClient) MarkAddressEphemeralInUse(_ context.Context, addressID, _, referrerID, _ string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.MarkedEphemeral == nil {
-		c.MarkedEphemeral = make(map[string]string)
-	}
-	c.MarkedEphemeral[addressID] = referrerID
-	return nil
-}
-
-// ClearAddressReference протоколирует addressID и возвращает nil.
-func (c *VPCClient) ClearAddressReference(_ context.Context, addressID string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.ClearedRefs = append(c.ClearedRefs, addressID)
-	return nil
-}
 
 // ---- operations.Repo ----
 
@@ -965,8 +838,6 @@ var (
 	_ ports.InstanceRepo  = (*InstanceRepo)(nil)
 	_ ports.DiskTypeRepo  = (*DiskTypeRepo)(nil)
 	_ ports.ZoneRegistry  = (*ZoneRegistry)(nil)
-	_ ports.ZoneRegistry  = (*VPCClient)(nil)
 	_ ports.ProjectClient = (*ProjectClient)(nil)
-	_ ports.VPCClient     = (*VPCClient)(nil)
 	_ operations.Repo     = (*OpsRepo)(nil)
 )

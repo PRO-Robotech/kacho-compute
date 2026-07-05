@@ -97,9 +97,9 @@ type SnapshotRepo interface {
 type InstanceRepo interface {
 	Get(ctx context.Context, id string) (*domain.Instance, error)
 	List(ctx context.Context, f InstanceFilter, p Pagination) ([]*domain.Instance, string, error)
-	// Insert вставляет ВМ + NIC-и + attached_disks в одной TX. inlineDisks —
-	// диски, созданные из disk_spec (вставляются в этой же TX). Возвращает
-	// созданную ВМ (с заполненными NICs/AttachedDisks).
+	// Insert вставляет ВМ + attached_disks в одной TX. inlineDisks — диски,
+	// созданные из disk_spec (вставляются в этой же TX). Возвращает созданную
+	// ВМ (с заполненными AttachedDisks).
 	Insert(ctx context.Context, in *domain.Instance, inlineDisks []*domain.Disk) (*domain.Instance, error)
 	// Update обновляет mutable поля + status (для lifecycle-операций).
 	// emitLabelsRegister: true когда "labels" присутствует в update-mask (или
@@ -118,12 +118,10 @@ type InstanceRepo interface {
 	AttachDisk(ctx context.Context, id string, ad domain.AttachedDisk) (*domain.Instance, error)
 	// DetachDisk удаляет строку attached_disks по disk_id. Возвращает обновлённую ВМ.
 	DetachDisk(ctx context.Context, id, diskID string) (*domain.Instance, error)
-	// ReplaceNIC заменяет одну строку instance_network_interfaces (для NAT/SG-операций).
-	ReplaceNIC(ctx context.Context, id string, nic domain.NetworkInterface) (*domain.Instance, error)
 	// SetMetadata заменяет map metadata. Возвращает обновлённую ВМ.
 	SetMetadata(ctx context.Context, id string, metadata map[string]string) (*domain.Instance, error)
 	// Delete удаляет ВМ; autoDeleteDiskIDs — диски с auto_delete=true (удаляются
-	// в той же TX до DELETE instance; остальные строки attached_disks/NIC чистит CASCADE).
+	// в той же TX до DELETE instance; остальные строки attached_disks чистит CASCADE).
 	Delete(ctx context.Context, id string, autoDeleteDiskIDs []string) error
 }
 
@@ -155,45 +153,4 @@ type ZoneInfo struct {
 // возвращает ErrNotFound, если зона неизвестна.
 type ZoneRegistry interface {
 	GetZone(ctx context.Context, zoneID string) (ZoneInfo, error)
-}
-
-// VPCAddress — выделенный IP-адрес VPC (результат CreateExternalAddress или
-// GetExternalAddress): сам IP + id Address-ресурса в kacho-vpc.
-type VPCAddress struct {
-	IP        string
-	AddressID string
-}
-
-// VPCClient — port для cross-service взаимодействия с kacho-vpc: IPAM-аллокация
-// эфемерных external Address-ресурсов под one-to-one NAT (AddOneToOneNat),
-// teardown этих ресурсов и referrer-tracking адресов. NIC-привязка убрана из
-// lifecycle Instance (no auto-NIC) — методов управления NIC здесь нет.
-type VPCClient interface {
-	// CreateExternalAddress создаёт эфемерный external Address в указанном
-	// folder/zone; kacho-vpc inline выделяет публичный IPv4 из AddressPool
-	// (cascade resolve). Поллит Operation до завершения и возвращает IP + id.
-	CreateExternalAddress(ctx context.Context, folderID, name, zoneID string) (VPCAddress, error)
-	// GetExternalAddress возвращает (addr, found, error) для уже существующего
-	// (reserved) Address-ресурса: его id и выделенный external IPv4.
-	GetExternalAddress(ctx context.Context, addressID string) (addr VPCAddress, found bool, err error)
-	// DeleteAddress удаляет Address-ресурс (best-effort: поллит Operation;
-	// NotFound трактуется как успех — ресурс уже удалён).
-	DeleteAddress(ctx context.Context, addressID string) error
-	// SetAddressReference привязывает referrer к Address-ресурсу (кто его
-	// использует — type=compute_instance, id=instance id, name=instance name).
-	// Идемпотентно. НЕ меняет reserved-флаг адреса — используется для reserved
-	// пользовательских адресов (one-to-one NAT по address_id). Вызывается
-	// best-effort из instance.go (ошибка не валит операцию — IP уже выделен).
-	SetAddressReference(ctx context.Context, addressID, referrerType, referrerID, referrerName string) error
-	// MarkAddressEphemeralInUse атомарно помечает Address как «эфемерный, в
-	// работе»: reserved=false, used=true + upsert referrer (type=compute_instance,
-	// id/name инстанса). Используется для эфемерных NAT-адресов, которые compute
-	// создаёт сам через CreateExternalAddress (а не для reserved пользовательских
-	// — у тех reserved не трогаем). Best-effort, как и SetAddressReference.
-	MarkAddressEphemeralInUse(ctx context.Context, addressID, referrerType, referrerID, referrerName string) error
-	// ClearAddressReference снимает referrer с Address-ресурса (best-effort;
-	// NotFound = адрес уже удалён → успех). Вызывается при отвязке
-	// reserved-адреса от ВМ (для эфемерных адресов referrer уходит через FK
-	// CASCADE при DeleteAddress).
-	ClearAddressReference(ctx context.Context, addressID string) error
 }

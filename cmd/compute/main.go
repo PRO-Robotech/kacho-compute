@@ -109,7 +109,7 @@ func runServe(cfg config.Config) error {
 
 	opsRepo := operations.NewRepo(pool, "public")
 
-	projectClient, vpcClient, geoZones, closers, err := dialPeers(cfg, logger)
+	projectClient, geoZones, closers, err := dialPeers(cfg, logger)
 	if err != nil {
 		return err
 	}
@@ -119,7 +119,7 @@ func runServe(cfg config.Config) error {
 		}
 	}()
 
-	svcs := buildServices(pool, projectClient, vpcClient, geoZones, opsRepo, cfg.SkipPeerValidation)
+	svcs := buildServices(pool, projectClient, geoZones, opsRepo)
 
 	// Fail-closed boot-gate: when KACHO_COMPUTE_REQUIRE_IAM=true, mutating Create is
 	// refused and readiness is NotReady until the register-drainer is IAM-connected.
@@ -452,9 +452,9 @@ func validateAuthMode(cfg config.Config, logger *slog.Logger) (productionMode bo
 		logger.Warn("AuthMode=production: anonymous callers will be rejected")
 	case "production-strict":
 		productionMode = true
-		// TLS-check on the IAM and VPC peers.
-		if !cfg.IAMTLS || !cfg.VPCTLS {
-			return false, fmt.Errorf("production-strict mode: KACHO_COMPUTE_IAM_TLS=true and KACHO_COMPUTE_VPC_TLS=true required")
+		// TLS-check on the IAM peer (project-existence-check edge).
+		if !cfg.IAMTLS {
+			return false, fmt.Errorf("production-strict mode: KACHO_COMPUTE_IAM_TLS=true required")
 		}
 		switch cfg.DBSSLMode {
 		case "require", "verify-ca", "verify-full":
@@ -476,24 +476,23 @@ func validateAuthMode(cfg config.Config, logger *slog.Logger) (productionMode bo
 	return productionMode, nil
 }
 
-// dialPeers открывает gRPC-клиенты к peer-сервисам (kacho-iam, vpc — два
-// conn'а: публичный :9090 и internal :9091; kacho-geo — public :9090 для
-// zone_id-валидации Instance) либо возвращает no-op-заглушки при
-// KACHO_COMPUTE_SKIP_PEER_VALIDATION=true.
+// dialPeers открывает gRPC-клиенты к peer-сервисам (kacho-iam — public :9090 для
+// project-existence-check; kacho-geo — public :9090 для zone_id-валидации Instance)
+// либо возвращает no-op-заглушки при KACHO_COMPUTE_SKIP_PEER_VALIDATION=true.
 //
 // project-existence-check идёт в kacho-iam.ProjectService.Get.
 //
 // zone_id-валидация Instance идёт через geo.v1.ZoneService.Get (clients.GeoClient);
 // Geography (Region/Zone) принадлежит kacho-geo — compute их больше не обслуживает,
 // а лишь валидирует свой zone_id как consumer.
-func dialPeers(cfg config.Config, logger *slog.Logger) (service.ProjectClient, service.VPCClient, service.ZoneRegistry, []*grpc.ClientConn, error) {
+func dialPeers(cfg config.Config, logger *slog.Logger) (service.ProjectClient, service.ZoneRegistry, []*grpc.ClientConn, error) {
 	if cfg.SkipPeerValidation {
 		logger.Warn("KACHO_COMPUTE_SKIP_PEER_VALIDATION=true — cross-service existence-check disabled (dev/test only)")
-		return clients.NoopProjectClient{}, clients.NoopVPCClient{}, clients.NoopGeoClient{}, nil, nil
+		return clients.NoopProjectClient{}, clients.NoopGeoClient{}, nil, nil
 	}
-	// iam (public ProjectService.Get) + vpc conn'ы — активно используются на
-	// request-path каждой мутации → idle=false (трафик есть, idle-пинги не нужны;
-	// keepalive всё равно ставится для half-open-detection при паузах).
+	// iam (public ProjectService.Get) — активно используется на request-path каждой
+	// мутации → idle=false (трафик есть, idle-пинги не нужны; keepalive всё равно
+	// ставится для half-open-detection при паузах).
 	//
 	// compute→iam ProjectService.Get (:9090) предъявляет client-cert mTLS
 	// через cfg.IAMProjectMTLS (enable=false → insecure dev; enable=true без
@@ -502,76 +501,31 @@ func dialPeers(cfg config.Config, logger *slog.Logger) (service.ProjectClient, s
 	// required client-cert).
 	iamCreds, err := grpcclient.TLSClientTransportCreds(cfg.IAMProjectMTLS)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("compute→iam ProjectService.Get mTLS creds: %w", err)
+		return nil, nil, nil, fmt.Errorf("compute→iam ProjectService.Get mTLS creds: %w", err)
 	}
 	iamConn, err := dialPeerCreds(cfg.IAMGRPCAddr, iamCreds, false)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("dial iam: %w", err)
-	}
-	// compute→vpc resource-creation edge (Subnet/SecurityGroup/Address.Get NIC-spec
-	// validation on :9090 + one-to-one-NAT IPAM on :9091) presents a client-cert via
-	// cfg.VPCMTLS (enable=false → insecure dev; enable=true without a valid cert-trio →
-	// startup error, fail-closed). Mirror of the already-shipped vpc→compute branch
-	// (mtlsCfg.ComputeMTLS.Enable) and the iam edges; replaces the server-auth-only
-	// bools cfg.VPCTLS / cfg.VPCInternalTLS, which presented no client-cert (both dials
-	// would fail once kacho-vpc runs RequireAndVerifyClientCert). BOTH vpc-listeners
-	// share one Service-host `vpc` → one cfg.VPCMTLS / one ServerName covers both ports
-	// (contrast the iam per-listener split).
-	vpcConn, err := dialVPCPeer(cfg, cfg.VPCGRPCAddr, cfg.VPCTLS)
-	if err != nil {
-		_ = iamConn.Close()
-		return nil, nil, nil, nil, fmt.Errorf("dial vpc: %w", err)
-	}
-	vpcInternalConn, err := dialVPCPeer(cfg, cfg.VPCInternalGRPCAddr, cfg.VPCInternalTLS)
-	if err != nil {
-		_ = vpcConn.Close()
-		_ = iamConn.Close()
-		return nil, nil, nil, nil, fmt.Errorf("dial vpc internal: %w", err)
+		return nil, nil, nil, fmt.Errorf("dial iam: %w", err)
 	}
 	// compute→geo zone_id-валидация Instance (geo.v1.ZoneService.Get,
 	// public :9090). Per-edge client-cert mTLS через cfg.GeoMTLS (enable=false →
 	// insecure dev; enable=true без валидного cert-trio → startup error,
-	// fail-closed) — паритет с compute→vpc/iam рёбрами.
+	// fail-closed) — паритет с compute→iam ребром.
 	geoCreds, err := grpcclient.TLSClientTransportCreds(cfg.GeoMTLS)
 	if err != nil {
-		_ = vpcInternalConn.Close()
-		_ = vpcConn.Close()
 		_ = iamConn.Close()
-		return nil, nil, nil, nil, fmt.Errorf("compute→geo ZoneService.Get mTLS creds: %w", err)
+		return nil, nil, nil, fmt.Errorf("compute→geo ZoneService.Get mTLS creds: %w", err)
 	}
 	geoConn, err := dialPeerCreds(cfg.GeoGRPCAddr, geoCreds, false)
 	if err != nil {
-		_ = vpcInternalConn.Close()
-		_ = vpcConn.Close()
 		_ = iamConn.Close()
-		return nil, nil, nil, nil, fmt.Errorf("dial geo: %w", err)
+		return nil, nil, nil, fmt.Errorf("dial geo: %w", err)
 	}
-	logger.Info("compute→vpc/geo resource-validation mTLS state",
-		"nic_spec_ipam_mtls", cfg.VPCMTLS.Enable,
+	logger.Info("compute→geo resource-validation mTLS state",
 		"geo_zone_validate_mtls", cfg.GeoMTLS.Enable,
 	)
-	return clients.NewProjectClient(iamConn), clients.NewVPCClient(vpcConn, vpcInternalConn),
-		clients.NewGeoClient(geoConn),
-		[]*grpc.ClientConn{iamConn, vpcConn, vpcInternalConn, geoConn}, nil
-}
-
-// dialVPCPeer dials a kacho-vpc listener (public :9090 NIC-spec or internal :9091
-// IPAM) for the compute→vpc resource-creation edge. When cfg.VPCMTLS.Enable it
-// presents the kacho-compute-client-tls client-cert via the per-edge cfg.VPCMTLS
-// helper (fail-closed on a bad trio); otherwise it keeps the legacy
-// server-auth-only bool path (dev backward-compat, zero regression). Both listeners
-// share one cfg.VPCMTLS (one cert-trio, one ServerName=vpc.* dial-host).
-// vpc-conns are request-path-active (idle=false; keepalive still set for
-// half-open-detection on pauses).
-func dialVPCPeer(cfg config.Config, addr string, legacyTLS bool) (*grpc.ClientConn, error) {
-	if cfg.VPCMTLS.Enable {
-		creds, err := grpcclient.TLSClientTransportCreds(cfg.VPCMTLS)
-		if err != nil {
-			return nil, fmt.Errorf("compute→vpc NIC-spec/IPAM mTLS creds: %w", err)
-		}
-		return dialPeerCreds(addr, creds, false)
-	}
-	return dialPeer(addr, legacyTLS, false)
+	return clients.NewProjectClient(iamConn), clients.NewGeoClient(geoConn),
+		[]*grpc.ClientConn{iamConn, geoConn}, nil
 }
 
 // peerKeepalive — keepalive-параметры для peer-conn. idle=true для
@@ -593,9 +547,10 @@ func peerDialOptsCreds(creds credentials.TransportCredentials, idle bool) []grpc
 	}
 }
 
-// peerDialOpts — legacy server-auth-only seam (bool useTLS) для НЕ-iam пиров.
-// Делегирует в peerDialOptsCreds, сохраняя bool-контракт существующего
-// dialpeer_test.go.
+// peerDialOpts — server-auth-only seam (bool useTLS), делегирует в
+// peerDialOptsCreds. Сохраняется как тестируемый seam bool-контракта keepalive
+// (dialpeer_test.go); live-рёбра (iam/geo) идут через client-cert mTLS-путь
+// peerDialOptsCreds/dialPeerCreds.
 func peerDialOpts(useTLS, idle bool) []grpc.DialOption {
 	var creds credentials.TransportCredentials
 	if useTLS {
@@ -604,13 +559,6 @@ func peerDialOpts(useTLS, idle bool) []grpc.DialOption {
 		creds = insecure.NewCredentials()
 	}
 	return peerDialOptsCreds(creds, idle)
-}
-
-// dialPeer открывает gRPC-conn к peer-сервису с keepalive (legacy bool useTLS).
-// idle=true → idle-prone conn (authz/internal): пинги без стрима держат его
-// тёплым.
-func dialPeer(addr string, useTLS, idle bool) (*grpc.ClientConn, error) {
-	return grpc.NewClient(addr, peerDialOpts(useTLS, idle)...)
 }
 
 // dialPeerCreds открывает gRPC-conn к peer-сервису, предъявляя готовые transport-
@@ -627,10 +575,9 @@ func dialPeerCreds(addr string, creds credentials.TransportCredentials, idle boo
 // через geoZones (service.ZoneRegistry, реализован clients.GeoClient). compute
 // больше НЕ обслуживает Region/Zone — Geography (Region/Zone) принадлежит
 // kacho-geo; локальные таблицы `zones`/`regions` сняты миграцией
-// 0011_drop_geography.
-// skipPeer (== cfg.SkipPeerValidation) влияет на VPC NIC-IPAM/SG existence-check
-// и на geo (NoopGeoClient — любая зона «существует»).
-func buildServices(pool *pgxpool.Pool, projectClient service.ProjectClient, vpcClient service.VPCClient, geoZones service.ZoneRegistry, opsRepo operations.Repo, skipPeer bool) *services {
+// 0011_drop_geography. Режим KACHO_COMPUTE_SKIP_PEER_VALIDATION учтён на уровне
+// dialPeers (NoopProjectClient/NoopGeoClient — любой project/зона «существует»).
+func buildServices(pool *pgxpool.Pool, projectClient service.ProjectClient, geoZones service.ZoneRegistry, opsRepo operations.Repo) *services {
 	diskRepo := repo.NewDiskRepo(pool)
 	imageRepo := repo.NewImageRepo(pool)
 	snapshotRepo := repo.NewSnapshotRepo(pool)
@@ -643,7 +590,7 @@ func buildServices(pool *pgxpool.Pool, projectClient service.ProjectClient, vpcC
 		image:    service.NewImageService(imageRepo, diskRepo, snapshotRepo, projectClient, opsRepo),
 		snapshot: service.NewSnapshotService(snapshotRepo, diskRepo, projectClient, opsRepo),
 		diskType: diskTypeSvc,
-		instance: service.NewInstanceService(instanceRepo, diskRepo, imageRepo, snapshotRepo, geoZones, projectClient, vpcClient, opsRepo, skipPeer),
+		instance: service.NewInstanceService(instanceRepo, diskRepo, imageRepo, snapshotRepo, geoZones, projectClient, opsRepo),
 	}
 }
 

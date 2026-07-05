@@ -180,20 +180,20 @@ func TestDisk_Operations_Always_HasComputePrefix(t *testing.T) {
 // TestDisk_Create_ZoneFromRegistry — zone_id валидируется через ZoneRegistry,
 // который в проде — kacho-geo geo.v1.ZoneService.Get (здесь — mock с ограниченным
 // набором зон). Известная зона → ok; неизвестная → InvalidArgument.
-func TestDisk_Create_ZoneFromVPCSource(t *testing.T) {
+func TestDisk_Create_ZoneFromRegistry(t *testing.T) {
 	diskRepo := portmock.NewDiskRepo()
 	ops := portmock.NewOpsRepo()
-	vpcSource := &portmock.VPCClient{Zones: map[string]string{"ru-central1-a": "ru-central1"}}
+	zoneReg := portmock.NewZoneRegistry("ru-central1-a")
 	svc := NewDiskService(diskRepo, portmock.NewImageRepo(), portmock.NewSnapshotRepo(),
-		portmock.NewDiskTypeRepo(), vpcSource, &portmock.ProjectClient{OK: true}, ops)
+		portmock.NewDiskTypeRepo(), zoneReg, &portmock.ProjectClient{OK: true}, ops)
 
-	// known vpc zone → success.
+	// known zone → success.
 	op, err := svc.Create(context.Background(), CreateDiskReq{ProjectID: "f", Name: "ok", ZoneID: "ru-central1-a", Size: diskSizeMin})
 	require.NoError(t, err)
 	done := portmock.AwaitOpDone(t, ops, op.ID)
-	require.Nil(t, done.Error, "create with known vpc zone must succeed")
+	require.Nil(t, done.Error, "create with known zone must succeed")
 
-	// zone vpc does not know → InvalidArgument "Zone ... not found".
+	// zone registry does not know → InvalidArgument "Zone ... not found".
 	op2, err := svc.Create(context.Background(), CreateDiskReq{ProjectID: "f", Name: "bad", ZoneID: "no-such-zone", Size: diskSizeMin})
 	require.NoError(t, err)
 	done2 := portmock.AwaitOpDone(t, ops, op2.ID)
