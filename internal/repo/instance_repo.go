@@ -19,10 +19,10 @@ import (
 
 	"github.com/PRO-Robotech/kacho-compute/internal/domain"
 	"github.com/PRO-Robotech/kacho-compute/internal/fgaintent"
-	"github.com/PRO-Robotech/kacho-compute/internal/service"
+	"github.com/PRO-Robotech/kacho-compute/internal/ports"
 )
 
-// InstanceRepo — реализация service.InstanceRepo поверх pgxpool (multi-table).
+// InstanceRepo — реализация ports.InstanceRepo поверх pgxpool (multi-table).
 type InstanceRepo struct {
 	pool *pgxpool.Pool
 }
@@ -49,7 +49,7 @@ func (r *InstanceRepo) Get(ctx context.Context, id string) (*domain.Instance, er
 }
 
 // List возвращает ВМ по folder с cursor-pagination.
-func (r *InstanceRepo) List(ctx context.Context, f service.InstanceFilter, p service.Pagination) ([]*domain.Instance, string, error) {
+func (r *InstanceRepo) List(ctx context.Context, f ports.InstanceFilter, p ports.Pagination) ([]*domain.Instance, string, error) {
 	pageSize, err := validate.PageSize("page_size", p.PageSize)
 	if err != nil {
 		return nil, "", err
@@ -136,7 +136,7 @@ func (r *InstanceRepo) Insert(ctx context.Context, in *domain.Instance, inlineDi
 	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return nil, service.ErrInternal
+		return nil, ports.ErrInternal
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -157,31 +157,43 @@ func (r *InstanceRepo) Insert(ctx context.Context, in *domain.Instance, inlineDi
 		if err := insertAttachedDiskTx(ctx, tx, in.ID, ad); err != nil {
 			// UNIQUE на attached_disks.disk_id — диск уже attached другой Instance.
 			if isAttachedDisksDiskIDUniqViolation(err) {
-				return nil, fmt.Errorf("%w: disk already attached to another instance", service.ErrFailedPrecondition)
+				return nil, fmt.Errorf("%w: disk already attached to another instance", ports.ErrFailedPrecondition)
+			}
+			// per-instance device_name / boot uniqueness — тот же класс инварианта, что
+			// и concurrent AttachDisk-путь (mutateAndReload). Держим error-контракт
+			// согласованным: обе → FailedPrecondition, не codes.Internal (mapRepoErr не
+			// имел бы sentinel для raw 23505 attached_disks_device_uniq/boot_uniq).
+			if isAttachedDisksDeviceOrBootUniqViolation(err) {
+				return nil, fmt.Errorf("%w: device_name or boot-disk already in use on this instance", ports.ErrFailedPrecondition)
+			}
+			// любой другой UNIQUE — generic AlreadyExists sentinel, не raw pgx-error
+			// (иначе mapRepoErr отдал бы codes.Internal "internal database error").
+			if isUniqueViolation(err) {
+				return nil, ports.ErrAlreadyExists
 			}
 			return nil, err
 		}
 	}
 	for _, d := range inlineDisks {
 		if err := emitCompute(ctx, tx, "Disk", d.ID, "CREATED", diskPayload(d)); err != nil {
-			return nil, service.ErrInternal
+			return nil, ports.ErrInternal
 		}
 		// inline boot/secondary disks are created resources → register their
 		// owner-tuple too, in the same writer-tx, carrying the disk labels.
 		if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Disk", d.ID, d.ProjectID, d.Labels); err != nil {
-			return nil, service.ErrInternal
+			return nil, ports.ErrInternal
 		}
 	}
 	if err := r.fillChildrenTx(ctx, tx, created); err != nil {
 		return nil, err
 	}
 	if err := emitCompute(ctx, tx, "Instance", created.ID, "CREATED", instancePayload(created)); err != nil {
-		return nil, service.ErrInternal
+		return nil, ports.ErrInternal
 	}
 	// FGA owner-tuple register-intent for the Instance in the SAME writer-tx,
 	// carrying the instance labels + parent-scope to feed IAM resource_mirror.
 	if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Instance", created.ID, created.ProjectID, created.Labels); err != nil {
-		return nil, service.ErrInternal
+		return nil, ports.ErrInternal
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, wrapPgErr(err, "Instance", in.Name)
@@ -245,7 +257,7 @@ func (r *InstanceRepo) Update(ctx context.Context, in *domain.Instance, emitLabe
 
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return nil, service.ErrInternal
+		return nil, ports.ErrInternal
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -265,13 +277,13 @@ func (r *InstanceRepo) Update(ctx context.Context, in *domain.Instance, emitLabe
 		return nil, err
 	}
 	if err := emitCompute(ctx, tx, "Instance", updated.ID, "UPDATED", instancePayload(updated)); err != nil {
-		return nil, service.ErrInternal
+		return nil, ports.ErrInternal
 	}
 	// refresh the IAM resource_mirror only when labels were in the update-mask.
 	// Emitted in the SAME writer-tx as the UPDATE (atomic).
 	if emitLabelsRegister {
 		if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Instance", updated.ID, updated.ProjectID, updated.Labels); err != nil {
-			return nil, service.ErrInternal
+			return nil, ports.ErrInternal
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -292,7 +304,7 @@ func (r *InstanceRepo) Update(ctx context.Context, in *domain.Instance, emitLabe
 func (r *InstanceRepo) SetStatusCAS(ctx context.Context, id string, expected, next domain.InstanceStatus) (*domain.Instance, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return nil, service.ErrInternal
+		return nil, ports.ErrInternal
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -308,9 +320,9 @@ func (r *InstanceRepo) SetStatusCAS(ctx context.Context, id string, expected, ne
 			return nil, wrapPgErr(err, "Instance", id)
 		}
 		if !exists {
-			return nil, fmt.Errorf("%w: Instance %s not found", service.ErrNotFound, id)
+			return nil, fmt.Errorf("%w: Instance %s not found", ports.ErrNotFound, id)
 		}
-		return nil, fmt.Errorf("%w: state transition not allowed from current status", service.ErrFailedPrecondition)
+		return nil, fmt.Errorf("%w: state transition not allowed from current status", ports.ErrFailedPrecondition)
 	}
 	q := fmt.Sprintf(`SELECT %s FROM instances WHERE id = $1`, instanceCols)
 	in, err := scanInstance(tx.QueryRow(ctx, q, id))
@@ -321,7 +333,7 @@ func (r *InstanceRepo) SetStatusCAS(ctx context.Context, id string, expected, ne
 		return nil, err
 	}
 	if err := emitCompute(ctx, tx, "Instance", in.ID, "UPDATED", instancePayload(in)); err != nil {
-		return nil, service.ErrInternal
+		return nil, ports.ErrInternal
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, wrapPgErr(err, "Instance", id)
@@ -344,14 +356,32 @@ func (r *InstanceRepo) DetachDisk(ctx context.Context, id, diskID string) (*doma
 	})
 }
 
-// SetMetadata заменяет map metadata + outbox UPDATED.
-func (r *InstanceRepo) SetMetadata(ctx context.Context, id string, metadata map[string]string) (*domain.Instance, error) {
-	mdJSON, err := marshalJSONB(orEmptyMap(metadata), "Instance.metadata")
+// MergeMetadata атомарно применяет delete+upsert дельту к map metadata одним
+// SQL-statement'ом + outbox UPDATED. del — ключи на удаление, upsert — ключи на
+// вставку/перезапись.
+//
+// Within-service-инвариант на DB-уровне (project-rule #10): merge выполняется
+// одним `UPDATE … SET metadata = (metadata - $del::text[]) || $upsert::jsonb`,
+// а НЕ Go-side read-modify-write. Row-level lock Postgres сериализует конкурентные
+// merge'и на одной row → второй writer видит уже применённую дельту первого и
+// накладывает свою поверх (no lost update). Прежний
+// Get→merge-in-Go→unconditional-overwrite давал second-writer-wins.
+func (r *InstanceRepo) MergeMetadata(ctx context.Context, id string, del []string, upsert map[string]string) (*domain.Instance, error) {
+	upsertJSON, err := marshalJSONB(orEmptyMap(upsert), "Instance.metadata.upsert")
 	if err != nil {
 		return nil, err
 	}
+	// nil-slice → пустой text[]; удаление отсутствующих ключей — no-op.
+	delKeys := del
+	if delKeys == nil {
+		delKeys = []string{}
+	}
 	return r.mutateAndReload(ctx, id, "UPDATED", func(ctx context.Context, tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE instances SET metadata = $2 WHERE id = $1`, id, mdJSON)
+		_, err := tx.Exec(ctx,
+			`UPDATE instances
+			    SET metadata = (COALESCE(metadata, '{}'::jsonb) - $2::text[]) || $3::jsonb
+			  WHERE id = $1`,
+			id, delKeys, upsertJSON)
 		return err
 	})
 }
@@ -361,7 +391,7 @@ func (r *InstanceRepo) SetMetadata(ctx context.Context, id string, metadata map[
 func (r *InstanceRepo) Delete(ctx context.Context, id string, autoDeleteDiskIDs []string) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return service.ErrInternal
+		return ports.ErrInternal
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	// detach all disks first (чтобы FK attached_disks.disk_id RESTRICT не блокировал
@@ -382,34 +412,34 @@ func (r *InstanceRepo) Delete(ctx context.Context, id string, autoDeleteDiskIDs 
 				continue
 			}
 			if isFKViolation(err) {
-				return fmt.Errorf("%w: The disk %s is being used", service.ErrFailedPrecondition, did)
+				return fmt.Errorf("%w: The disk %s is being used", ports.ErrFailedPrecondition, did)
 			}
 			return wrapPgErr(err, "Disk", did)
 		}
 		if err := emitCompute(ctx, tx, "Disk", did, "DELETED", map[string]any{"id": did}); err != nil {
-			return service.ErrInternal
+			return ports.ErrInternal
 		}
 		// symmetric FGA unregister-intent for the auto-deleted disk.
 		// Unregister removes the mirror row by object → labels are irrelevant (nil).
 		if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventUnregister, "Disk", did, diskProject, nil); err != nil {
-			return service.ErrInternal
+			return ports.ErrInternal
 		}
 	}
 	var projectID string
 	err = tx.QueryRow(ctx, `DELETE FROM instances WHERE id = $1 RETURNING project_id`, id).Scan(&projectID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("%w: Instance %s not found", service.ErrNotFound, id)
+			return fmt.Errorf("%w: Instance %s not found", ports.ErrNotFound, id)
 		}
 		return wrapPgErr(err, "Instance", id)
 	}
 	if err := emitCompute(ctx, tx, "Instance", id, "DELETED", map[string]any{"id": id}); err != nil {
-		return service.ErrInternal
+		return ports.ErrInternal
 	}
 	// symmetric FGA unregister-intent for the instance in the SAME writer-tx.
 	// Unregister removes the mirror row by object → labels are irrelevant (nil).
 	if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventUnregister, "Instance", id, projectID, nil); err != nil {
-		return service.ErrInternal
+		return ports.ErrInternal
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return wrapPgErr(err, "Instance", id)
@@ -422,7 +452,7 @@ func (r *InstanceRepo) Delete(ctx context.Context, id string, autoDeleteDiskIDs 
 func (r *InstanceRepo) mutateAndReload(ctx context.Context, id, eventType string, mutate func(context.Context, pgx.Tx) error) (*domain.Instance, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return nil, service.ErrInternal
+		return nil, ports.ErrInternal
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	// ensure instance exists.
@@ -431,25 +461,25 @@ func (r *InstanceRepo) mutateAndReload(ctx context.Context, id, eventType string
 		return nil, wrapPgErr(err, "Instance", id)
 	}
 	if !exists {
-		return nil, fmt.Errorf("%w: Instance %s not found", service.ErrNotFound, id)
+		return nil, fmt.Errorf("%w: Instance %s not found", ports.ErrNotFound, id)
 	}
 	if err := mutate(ctx, tx); err != nil {
 		if isFKViolation(err) {
-			return nil, fmt.Errorf("%w: Instance %s has dependent resources", service.ErrFailedPrecondition, id)
+			return nil, fmt.Errorf("%w: Instance %s has dependent resources", ports.ErrFailedPrecondition, id)
 		}
 		// UNIQUE на attached_disks.disk_id — диск уже attached другой Instance.
 		// Отделяем от generic AlreadyExists (мапит в FailedPrecondition, не AlreadyExists).
 		if isAttachedDisksDiskIDUniqViolation(err) {
-			return nil, fmt.Errorf("%w: disk already attached to another instance", service.ErrFailedPrecondition)
+			return nil, fmt.Errorf("%w: disk already attached to another instance", ports.ErrFailedPrecondition)
 		}
 		// per-instance device_name / boot uniqueness — тот же класс инварианта, что
 		// sequential software-check в service.AttachDisk (FailedPrecondition). Держим
 		// error-контракт согласованным между sequential и concurrent путями.
 		if isAttachedDisksDeviceOrBootUniqViolation(err) {
-			return nil, fmt.Errorf("%w: device_name or boot-disk already in use on this instance", service.ErrFailedPrecondition)
+			return nil, fmt.Errorf("%w: device_name or boot-disk already in use on this instance", ports.ErrFailedPrecondition)
 		}
 		if isUniqueViolation(err) {
-			return nil, service.ErrAlreadyExists
+			return nil, ports.ErrAlreadyExists
 		}
 		return nil, wrapPgErr(err, "Instance", id)
 	}
@@ -462,7 +492,7 @@ func (r *InstanceRepo) mutateAndReload(ctx context.Context, id, eventType string
 		return nil, err
 	}
 	if err := emitCompute(ctx, tx, "Instance", in.ID, eventType, instancePayload(in)); err != nil {
-		return nil, service.ErrInternal
+		return nil, ports.ErrInternal
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, wrapPgErr(err, "Instance", id)

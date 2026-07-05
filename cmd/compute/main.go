@@ -450,7 +450,22 @@ func validateAuthMode(cfg config.Config, logger *slog.Logger) (productionMode bo
 		productionMode = false
 	case "production":
 		productionMode = true
-		logger.Warn("AuthMode=production: anonymous callers will be rejected")
+		// Fail-closed listener gate: оба server-листенера (public :9090 / internal
+		// :9091) принимают forwarded x-kacho-principal-* и доверяют ему на
+		// plaintext-транспорте (principalIsTrusted: "insecure listener → principal
+		// accepted"). Без server-mTLS любой, кто дозвонился на порт в обход
+		// api-gateway, форжит x-kacho-principal-id: usr_<victim> и проходит FGA-Check
+		// как жертва (CWE-290 subject spoofing → tenant crossing). Поэтому production
+		// ОТКАЗЫВАЕТСЯ стартовать с plaintext-листенерами (раньше это гейтилось только
+		// в production-strict). Peer-рёбра (iam/geo/authz) остаются послаблением plain
+		// production (mesh-encrypted) — их строгий mTLS требует production-strict.
+		if terr := insecureListenersInProduction(cfg); terr != nil {
+			return false, terr
+		}
+		if terr := requireDBSSLMode(cfg); terr != nil {
+			return false, terr
+		}
+		logger.Warn("AuthMode=production: anonymous rejected + server-mTLS listeners + SSL DB required")
 	case "production-strict":
 		productionMode = true
 		// TLS-check on the actually-dialed transport edges (per-edge mTLS value-
@@ -460,10 +475,8 @@ func validateAuthMode(cfg config.Config, logger *slog.Logger) (productionMode bo
 		if terr := insecureEdgesInProductionStrict(cfg); terr != nil {
 			return false, terr
 		}
-		switch cfg.DBSSLMode {
-		case "require", "verify-ca", "verify-full":
-		default:
-			return false, fmt.Errorf("production-strict mode: KACHO_COMPUTE_DB_SSLMODE must be one of require|verify-ca|verify-full (got %q)", cfg.DBSSLMode)
+		if terr := requireDBSSLMode(cfg); terr != nil {
+			return false, terr
 		}
 		logger.Warn("AuthMode=production-strict: anonymous rejected + per-edge mTLS+SSL strictly validated")
 	default:
@@ -478,6 +491,36 @@ func validateAuthMode(cfg config.Config, logger *slog.Logger) (productionMode bo
 		}
 	}
 	return productionMode, nil
+}
+
+// requireDBSSLMode — DB-канал в любом production-режиме обязан быть TLS
+// (require|verify-ca|verify-full). sslmode=disable гонит KACHO_COMPUTE_DB_PASSWORD
+// и все данные строк открытым текстом по сети (CWE-319) — допустимо только в dev.
+func requireDBSSLMode(cfg config.Config) error {
+	switch cfg.DBSSLMode {
+	case "require", "verify-ca", "verify-full":
+		return nil
+	default:
+		return fmt.Errorf("production mode: KACHO_COMPUTE_DB_SSLMODE must be one of require|verify-ca|verify-full (got %q)", cfg.DBSSLMode)
+	}
+}
+
+// insecureListenersInProduction — non-nil ошибка, если хотя бы один из двух
+// server-листенеров запущен без mTLS. Оба принимают forwarded principal-identity;
+// plaintext на любом даёт subject-spoofing (см. вызов в case "production"). Это
+// подмножество insecureEdgesInProductionStrict (только листенеры, без peer-рёбер).
+func insecureListenersInProduction(cfg config.Config) error {
+	var insecure []string
+	if !cfg.PublicServerMTLS.Enable {
+		insecure = append(insecure, "PUBLIC_SERVER_MTLS_ENABLE")
+	}
+	if !cfg.InternalServerMTLS.Enable {
+		insecure = append(insecure, "INTERNAL_SERVER_MTLS_ENABLE")
+	}
+	if len(insecure) == 0 {
+		return nil
+	}
+	return fmt.Errorf("production mode requires server-mTLS on both listeners (forwarded principal is trusted on plaintext → subject spoofing); insecure (Enable=false): %s", strings.Join(insecure, ", "))
 }
 
 // insecureEdgesInProductionStrict возвращает non-nil ошибку, перечисляющую

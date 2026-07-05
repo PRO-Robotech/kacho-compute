@@ -123,8 +123,11 @@ type InstanceRepo interface {
 	AttachDisk(ctx context.Context, id string, ad domain.AttachedDisk) (*domain.Instance, error)
 	// DetachDisk удаляет строку attached_disks по disk_id. Возвращает обновлённую ВМ.
 	DetachDisk(ctx context.Context, id, diskID string) (*domain.Instance, error)
-	// SetMetadata заменяет map metadata. Возвращает обновлённую ВМ.
-	SetMetadata(ctx context.Context, id string, metadata map[string]string) (*domain.Instance, error)
+	// MergeMetadata атомарно применяет delete+upsert дельту к map metadata одним
+	// SQL-statement'ом (within-service-инвариант на DB-уровне, project-rule #10 —
+	// не Go-side read-modify-write, иначе second-writer-wins под concurrency).
+	// Возвращает обновлённую ВМ.
+	MergeMetadata(ctx context.Context, id string, del []string, upsert map[string]string) (*domain.Instance, error)
 	// Delete удаляет ВМ; autoDeleteDiskIDs — диски с auto_delete=true (удаляются
 	// в той же TX до DELETE instance; остальные строки attached_disks чистит CASCADE).
 	Delete(ctx context.Context, id string, autoDeleteDiskIDs []string) error

@@ -143,18 +143,92 @@ func TestValidateAuthMode_ProductionStrict_DBSSLModeStillEnforced(t *testing.T) 
 	}
 }
 
-// dev / production (не strict) не требуют per-edge mTLS.
-func TestValidateAuthMode_DevAndProductionNoTLSGate(t *testing.T) {
-	for _, mode := range []string{"dev", "production"} {
-		prod, err := validateAuthMode(config.Config{AuthMode: mode}, discardLogger())
-		if err != nil {
-			t.Fatalf("mode %q must not enforce per-edge mTLS gate; got err: %v", mode, err)
+// dev не требует ни mTLS, ни SSL (insecure dev-defaults только логируются).
+func TestValidateAuthMode_DevNoGate(t *testing.T) {
+	prod, err := validateAuthMode(config.Config{AuthMode: "dev"}, discardLogger())
+	if err != nil {
+		t.Fatalf("dev must not enforce any transport gate; got err: %v", err)
+	}
+	if prod {
+		t.Errorf("dev must report productionMode=false")
+	}
+}
+
+// securedProduction — минимально-валидный "production": оба server-листенера под
+// mTLS + TLS-DB. Peer-рёбра (iam/geo/authz/register) — plaintext (послабление
+// plain production относительно production-strict: они mesh-encrypted).
+func securedProduction() config.Config {
+	return config.Config{
+		AuthMode:           "production",
+		DBSSLMode:          "require",
+		PublicServerMTLS:   grpcsrv.TLSServer{Enable: true},
+		InternalServerMTLS: grpcsrv.TLSServer{Enable: true},
+	}
+}
+
+// production ОБЯЗАН отказать в старте с plaintext-листенерами: forwarded
+// principal доверяется на plaintext → subject spoofing / tenant crossing
+// (CWE-290). Раньше это гейтилось только в production-strict. Finding «Non-strict
+// production AuthMode leaves listeners plaintext … subject spoofing».
+func TestValidateAuthMode_Production_RequiresListenerMTLS(t *testing.T) {
+	// оба листенера plaintext (+ валидный DBSSL, чтобы изолировать listener-гейт).
+	cfg := config.Config{AuthMode: "production", DBSSLMode: "require"}
+	_, err := validateAuthMode(cfg, discardLogger())
+	if err == nil {
+		t.Fatalf("production must reject plaintext listeners (forwarded principal spoofing)")
+	}
+	for _, want := range []string{"PUBLIC_SERVER_MTLS_ENABLE", "INTERNAL_SERVER_MTLS_ENABLE"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("gate error must name insecure listener %q; got: %v", want, err)
 		}
-		if mode == "production" && !prod {
-			t.Errorf("production must report productionMode=true")
+	}
+
+	// по одному листенеру — тоже отказ.
+	for _, disable := range []func(*config.Config){
+		func(c *config.Config) { c.PublicServerMTLS.Enable = false },
+		func(c *config.Config) { c.InternalServerMTLS.Enable = false },
+	} {
+		c := securedProduction()
+		disable(&c)
+		if _, err := validateAuthMode(c, discardLogger()); err == nil {
+			t.Errorf("production must reject a single plaintext listener")
 		}
-		if mode == "dev" && prod {
-			t.Errorf("dev must report productionMode=false")
+	}
+}
+
+// production ОБЯЗАН отказать при sslmode=disable — DB-креды/строки идут открытым
+// текстом (CWE-319). Раньше SSL-проверка была только в production-strict. Finding
+// «DB connection allows sslmode=disable outside production-strict».
+func TestValidateAuthMode_Production_RequiresDBSSL(t *testing.T) {
+	for _, bad := range []string{"", "disable"} {
+		cfg := securedProduction()
+		cfg.DBSSLMode = bad
+		if _, err := validateAuthMode(cfg, discardLogger()); err == nil {
+			t.Errorf("production must reject KACHO_COMPUTE_DB_SSLMODE=%q", bad)
 		}
+	}
+	// require/verify-ca/verify-full — принимаются.
+	for _, ok := range []string{"require", "verify-ca", "verify-full"} {
+		cfg := securedProduction()
+		cfg.DBSSLMode = ok
+		if _, err := validateAuthMode(cfg, discardLogger()); err != nil {
+			t.Errorf("production must accept DBSSLMode=%q; got err: %v", ok, err)
+		}
+	}
+}
+
+// production с mTLS-листенерами + TLS-DB, но plaintext peer-рёбрами — ПРОХОДИТ:
+// это осознанная разница ladder'а plain production vs production-strict (peer
+// строгий mTLS требует именно strict).
+func TestValidateAuthMode_Production_PeerEdgesNotRequired(t *testing.T) {
+	cfg := securedProduction()
+	// peer-рёбра явно plaintext + активны.
+	cfg.FGARegisterDrainerEnabled = true
+	prod, err := validateAuthMode(cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("plain production must not require peer-edge mTLS; got err: %v", err)
+	}
+	if !prod {
+		t.Errorf("production must report productionMode=true")
 	}
 }

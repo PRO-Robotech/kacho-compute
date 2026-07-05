@@ -18,10 +18,10 @@ import (
 
 	"github.com/PRO-Robotech/kacho-compute/internal/domain"
 	"github.com/PRO-Robotech/kacho-compute/internal/fgaintent"
-	"github.com/PRO-Robotech/kacho-compute/internal/service"
+	"github.com/PRO-Robotech/kacho-compute/internal/ports"
 )
 
-// DiskRepo — реализация service.DiskRepo поверх pgxpool.
+// DiskRepo — реализация ports.DiskRepo поверх pgxpool.
 type DiskRepo struct {
 	pool *pgxpool.Pool
 }
@@ -46,7 +46,7 @@ func (r *DiskRepo) Get(ctx context.Context, id string) (*domain.Disk, error) {
 }
 
 // List возвращает диски по folder с cursor-pagination.
-func (r *DiskRepo) List(ctx context.Context, f service.DiskFilter, p service.Pagination) ([]*domain.Disk, string, error) {
+func (r *DiskRepo) List(ctx context.Context, f ports.DiskFilter, p ports.Pagination) ([]*domain.Disk, string, error) {
 	pageSize, err := validate.PageSize("page_size", p.PageSize)
 	if err != nil {
 		return nil, "", err
@@ -135,7 +135,7 @@ func (r *DiskRepo) Insert(ctx context.Context, d *domain.Disk) (*domain.Disk, er
 	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return nil, service.ErrInternal
+		return nil, ports.ErrInternal
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -147,11 +147,11 @@ func (r *DiskRepo) Insert(ctx context.Context, d *domain.Disk) (*domain.Disk, er
 		return nil, wrapPgErr(err, "Disk", d.Name)
 	}
 	if err := emitCompute(ctx, tx, "Disk", result.ID, "CREATED", diskPayload(result)); err != nil {
-		return nil, service.ErrInternal
+		return nil, ports.ErrInternal
 	}
 	// FGA owner-tuple register-intent in the SAME writer-tx (no dual-write).
 	if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Disk", result.ID, result.ProjectID, result.Labels); err != nil {
-		return nil, service.ErrInternal
+		return nil, ports.ErrInternal
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, wrapPgErr(err, "Disk", d.Name)
@@ -199,7 +199,7 @@ func (r *DiskRepo) Update(ctx context.Context, d *domain.Disk, emitLabelsRegiste
 
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return nil, service.ErrInternal
+		return nil, ports.ErrInternal
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -214,14 +214,14 @@ func (r *DiskRepo) Update(ctx context.Context, d *domain.Disk, emitLabelsRegiste
 		return nil, wrapPgErr(err, "Disk", d.ID)
 	}
 	if err := emitCompute(ctx, tx, "Disk", result.ID, "UPDATED", diskPayload(result)); err != nil {
-		return nil, service.ErrInternal
+		return nil, ports.ErrInternal
 	}
 	// refresh the IAM resource_mirror only when labels were in the update-mask.
 	// mirror.upsert (EventRegister) with the CURRENT labels in the SAME writer-tx
 	// (atomic); empty labels → upsert {}, NOT unregister.
 	if emitLabelsRegister {
 		if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Disk", result.ID, result.ProjectID, result.Labels); err != nil {
-			return nil, service.ErrInternal
+			return nil, ports.ErrInternal
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -248,7 +248,7 @@ func (r *DiskRepo) Update(ctx context.Context, d *domain.Disk, emitLabelsRegiste
 func (r *DiskRepo) SetZoneIfDetached(ctx context.Context, id, zoneID string) (*domain.Disk, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return nil, service.ErrInternal
+		return nil, ports.ErrInternal
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -262,7 +262,7 @@ func (r *DiskRepo) SetZoneIfDetached(ctx context.Context, id, zoneID string) (*d
 		return nil, wrapPgErr(err, "Disk", id)
 	}
 	if attached {
-		return nil, fmt.Errorf("%w: Disk is in use", service.ErrFailedPrecondition)
+		return nil, fmt.Errorf("%w: Disk is in use", ports.ErrFailedPrecondition)
 	}
 	result, err := scanDisk(tx.QueryRow(ctx,
 		`UPDATE disks SET zone_id = $2 WHERE id = $1 RETURNING `+diskCols, id, zoneID))
@@ -270,7 +270,7 @@ func (r *DiskRepo) SetZoneIfDetached(ctx context.Context, id, zoneID string) (*d
 		return nil, wrapPgErr(err, "Disk", id)
 	}
 	if err := emitCompute(ctx, tx, "Disk", result.ID, "UPDATED", diskPayload(result)); err != nil {
-		return nil, service.ErrInternal
+		return nil, ports.ErrInternal
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, wrapPgErr(err, "Disk", id)
@@ -282,7 +282,7 @@ func (r *DiskRepo) SetZoneIfDetached(ctx context.Context, id, zoneID string) (*d
 func (r *DiskRepo) Delete(ctx context.Context, id string) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return service.ErrInternal
+		return ports.ErrInternal
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	// DELETE … RETURNING project_id so the FGA unregister-intent (below) can build
@@ -291,19 +291,19 @@ func (r *DiskRepo) Delete(ctx context.Context, id string) error {
 	err = tx.QueryRow(ctx, `DELETE FROM disks WHERE id = $1 RETURNING project_id`, id).Scan(&projectID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("%w: Disk %s not found", service.ErrNotFound, id)
+			return fmt.Errorf("%w: Disk %s not found", ports.ErrNotFound, id)
 		}
 		if isFKViolation(err) {
-			return fmt.Errorf("%w: The disk %s is being used", service.ErrFailedPrecondition, id)
+			return fmt.Errorf("%w: The disk %s is being used", ports.ErrFailedPrecondition, id)
 		}
 		return wrapPgErr(err, "Disk", id)
 	}
 	if err := emitCompute(ctx, tx, "Disk", id, "DELETED", map[string]any{"id": id}); err != nil {
-		return service.ErrInternal
+		return ports.ErrInternal
 	}
 	// symmetric FGA unregister-intent in the SAME writer-tx.
 	if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventUnregister, "Disk", id, projectID, nil); err != nil {
-		return service.ErrInternal
+		return ports.ErrInternal
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return wrapPgErr(err, "Disk", id)

@@ -18,10 +18,10 @@ import (
 
 	"github.com/PRO-Robotech/kacho-compute/internal/domain"
 	"github.com/PRO-Robotech/kacho-compute/internal/fgaintent"
-	"github.com/PRO-Robotech/kacho-compute/internal/service"
+	"github.com/PRO-Robotech/kacho-compute/internal/ports"
 )
 
-// SnapshotRepo — реализация service.SnapshotRepo поверх pgxpool.
+// SnapshotRepo — реализация ports.SnapshotRepo поверх pgxpool.
 type SnapshotRepo struct {
 	pool *pgxpool.Pool
 }
@@ -43,7 +43,7 @@ func (r *SnapshotRepo) Get(ctx context.Context, id string) (*domain.Snapshot, er
 }
 
 // List возвращает снапшоты по folder с cursor-pagination.
-func (r *SnapshotRepo) List(ctx context.Context, f service.SnapshotFilter, p service.Pagination) ([]*domain.Snapshot, string, error) {
+func (r *SnapshotRepo) List(ctx context.Context, f ports.SnapshotFilter, p ports.Pagination) ([]*domain.Snapshot, string, error) {
 	pageSize, err := validate.PageSize("page_size", p.PageSize)
 	if err != nil {
 		return nil, "", err
@@ -125,7 +125,7 @@ func (r *SnapshotRepo) Insert(ctx context.Context, s *domain.Snapshot) (*domain.
 	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return nil, service.ErrInternal
+		return nil, ports.ErrInternal
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	const q = `INSERT INTO snapshots (id, project_id, created_at, name, description, labels, storage_size, disk_size, product_ids,
@@ -135,11 +135,11 @@ func (r *SnapshotRepo) Insert(ctx context.Context, s *domain.Snapshot) (*domain.
 		return nil, wrapPgErr(err, "Snapshot", s.Name)
 	}
 	if err := emitCompute(ctx, tx, "Snapshot", result.ID, "CREATED", snapshotPayload(result)); err != nil {
-		return nil, service.ErrInternal
+		return nil, ports.ErrInternal
 	}
 	// FGA owner-tuple register-intent in the SAME writer-tx (no dual-write).
 	if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Snapshot", result.ID, result.ProjectID, result.Labels); err != nil {
-		return nil, service.ErrInternal
+		return nil, ports.ErrInternal
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, wrapPgErr(err, "Snapshot", s.Name)
@@ -176,7 +176,7 @@ func (r *SnapshotRepo) Update(ctx context.Context, s *domain.Snapshot, emitLabel
 
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return nil, service.ErrInternal
+		return nil, ports.ErrInternal
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -191,13 +191,13 @@ func (r *SnapshotRepo) Update(ctx context.Context, s *domain.Snapshot, emitLabel
 		return nil, wrapPgErr(err, "Snapshot", s.ID)
 	}
 	if err := emitCompute(ctx, tx, "Snapshot", result.ID, "UPDATED", snapshotPayload(result)); err != nil {
-		return nil, service.ErrInternal
+		return nil, ports.ErrInternal
 	}
 	// refresh the IAM resource_mirror only when labels were in the mask
 	// (mirror.upsert, EventRegister) in the SAME writer-tx; empty labels → upsert {}.
 	if emitLabelsRegister {
 		if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Snapshot", result.ID, result.ProjectID, result.Labels); err != nil {
-			return nil, service.ErrInternal
+			return nil, ports.ErrInternal
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -210,7 +210,7 @@ func (r *SnapshotRepo) Update(ctx context.Context, s *domain.Snapshot, emitLabel
 func (r *SnapshotRepo) Delete(ctx context.Context, id string) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return service.ErrInternal
+		return ports.ErrInternal
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	// DELETE … RETURNING project_id so the FGA unregister-intent can build the
@@ -219,16 +219,16 @@ func (r *SnapshotRepo) Delete(ctx context.Context, id string) error {
 	err = tx.QueryRow(ctx, `DELETE FROM snapshots WHERE id = $1 RETURNING project_id`, id).Scan(&projectID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("%w: Snapshot %s not found", service.ErrNotFound, id)
+			return fmt.Errorf("%w: Snapshot %s not found", ports.ErrNotFound, id)
 		}
 		return wrapPgErr(err, "Snapshot", id)
 	}
 	if err := emitCompute(ctx, tx, "Snapshot", id, "DELETED", map[string]any{"id": id}); err != nil {
-		return service.ErrInternal
+		return ports.ErrInternal
 	}
 	// symmetric FGA unregister-intent in the SAME writer-tx.
 	if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventUnregister, "Snapshot", id, projectID, nil); err != nil {
-		return service.ErrInternal
+		return ports.ErrInternal
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return wrapPgErr(err, "Snapshot", id)
