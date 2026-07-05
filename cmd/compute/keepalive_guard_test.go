@@ -18,7 +18,7 @@ import (
 // висит ~30с на переустановке. Новый bare-dial
 // без keepalive должен ронять этот тест ДО мержа.
 //
-// RED-демонстрация: убрать grpcclient.KeepaliveDialOption из peerDialOpts → тест падает.
+// RED-демонстрация: убрать grpcclient.KeepaliveDialOption из peerDialOptsCreds → тест падает.
 func TestKAH1_NoBareGRPCDialWithoutKeepalive(t *testing.T) {
 	const keepaliveMarker = "grpcclient.Keepalive" // KeepaliveDialOption | KeepaliveParams
 	dialRe := regexp.MustCompile(`grpc\.(NewClient|Dial)\(`)

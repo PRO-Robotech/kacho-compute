@@ -49,8 +49,6 @@ type Config struct {
 
 	// IAMGRPCAddr — адрес kacho-iam (ProjectService.Get — project-existence-check).
 	IAMGRPCAddr string `envconfig:"KACHO_COMPUTE_IAM_GRPC_ADDR" default:"kacho-iam.kacho.svc.cluster.local:9090"`
-	// IAMTLS — TLS для cross-service gRPC к kacho-iam.
-	IAMTLS bool `envconfig:"KACHO_COMPUTE_IAM_TLS" default:"false"`
 
 	// GeoGRPCAddr — адрес kacho-geo (geo.v1.ZoneService.Get, public :9090) для
 	// валидации Instance/Disk.zone_id. Geography (Region/Zone) — leaf-сервис
@@ -72,8 +70,6 @@ type Config struct {
 	// с IAMGRPCAddr (тот же сервис), но porт другой: 9091 (internal) vs
 	// 9090 (публичный ProjectService.Get).
 	AuthZIAMGRPCAddr string `envconfig:"KACHO_COMPUTE_AUTHZ_IAM_GRPC_ADDR" default:""`
-	// AuthZIAMTLS — TLS для AuthZ-вызовов к kacho-iam.
-	AuthZIAMTLS bool `envconfig:"KACHO_COMPUTE_AUTHZ_IAM_TLS" default:"false"`
 	// AuthZBreakglass — emergency-режим: пропускать все RPC без Check + WARN.
 	// Dev / break-glass only.
 	AuthZBreakglass bool `envconfig:"KACHO_COMPUTE_AUTHZ_BREAKGLASS" default:"false"`
@@ -93,8 +89,8 @@ type Config struct {
 	// ===== FGA-filtered List =====
 	//
 	// Все ListFilter* — production-edition: configurable, no hardcoded.
-	// Reuses AuthZIAMGRPCAddr/AuthZIAMTLS as the iam-authorize endpoint
-	// (kacho-iam internal :9091 — AuthorizeService.ListObjects).
+	// Reuses AuthZIAMGRPCAddr (+ per-edge IAMAuthzMTLS creds) as the iam-authorize
+	// endpoint (kacho-iam internal :9091 — AuthorizeService.ListObjects).
 
 	// ListFilterEnabled — master-switch. true → handler вызывает iam.ListObjects
 	// и фильтрует List по allow-list id. false → no filter (handler bypass).
@@ -148,8 +144,8 @@ type Config struct {
 	// ===== CLIENT mTLS на read/authz рёбрах compute→iam =====
 	//
 	// register-drainer ребро закрыто отдельно (IAMRegisterMTLS). Это — зеркало того
-	// же паттерна на ОСТАВШИХСЯ read/authz iam-conn'ах, которые до сих пор диалились
-	// server-auth-only bool'ами (IAMTLS / AuthZIAMTLS) БЕЗ client-cert. Когда iam
+	// же паттерна на ОСТАВШИХСЯ read/authz iam-conn'ах, которые ранее диалились
+	// server-auth-only bool-флагами БЕЗ client-cert (флаги удалены). Когда iam
 	// требует RequireAndVerifyClientCert на обоих listener'ах, такой dial падает на
 	// TLS-handshake — оба ребра ОБЯЗАНЫ предъявлять kacho-compute-client-tls cert
 	// (completeness-инвариант). Два отдельных поля, т.к. ServerName различается

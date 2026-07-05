@@ -10,9 +10,6 @@ const (
 	ResourceTypeDisk     = "compute_disk"
 	ResourceTypeImage    = "compute_image"
 	ResourceTypeSnapshot = "compute_snapshot"
-	// ResourceTypeSystem — catalog (DiskType / Zone / Region); bypassed via
-	// BypassFilter, but we keep the constant for explicit documentation.
-	ResourceTypeSystem = "system"
 )
 
 // Compute-domain action strings — server-side resolves to FGA relation.
@@ -35,7 +32,4 @@ const (
 	ActionDiskRead     = "compute.disks.list"
 	ActionImageRead    = "compute.images.list"
 	ActionSnapshotRead = "compute.snapshots.list"
-	// ActionOperationRead — used to filter ListOperations result by op-id
-	// when scope is per-resource. Verb "list" → viewer (read==enforce).
-	ActionOperationRead = "compute.operations.list"
 )

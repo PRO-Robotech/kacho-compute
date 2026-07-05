@@ -248,15 +248,3 @@ func (f *FGAFilter) Size() int {
 	defer f.mu.Unlock()
 	return len(f.cache)
 }
-
-// Invalidate — удаляет запись из cache (для LISTEN/NOTIFY-driven inval).
-func (f *FGAFilter) Invalidate(subject string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	prefix := subject + "|"
-	for k := range f.cache {
-		if len(k) >= len(prefix) && k[:len(prefix)] == prefix {
-			delete(f.cache, k)
-		}
-	}
-}

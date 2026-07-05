@@ -17,7 +17,7 @@ import (
 // These mirror the register-drainer wiring tests (mtls_test.go) for the two
 // remaining plaintext iam-dialing conns: ProjectService.Get (:9090) and the
 // per-RPC InternalIAMService.Check + list-filter authorize conn (:9091). Both
-// were server-auth-only bool knobs (cfg.IAMTLS / cfg.AuthZIAMTLS) presenting NO
+// were formerly server-auth-only bool knobs (since removed) presenting NO
 // client-cert; when iam enforces RequireAndVerifyClientCert those dials fail the
 // handshake, so each must present the kacho-compute-client-tls client-cert.
 
