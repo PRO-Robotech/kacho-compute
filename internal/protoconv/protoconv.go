@@ -131,8 +131,6 @@ func Instance(in *domain.Instance) *computev1.Instance {
 		PlacementPolicy:        in.PlacementPolicy,
 		HardwareGeneration:     in.HardwareGeneration,
 		ReservedInstancePoolId: in.ReservedInstancePoolID,
-		HostGroupId:            in.HostGroupID,
-		HostId:                 in.HostID,
 		Application:            in.Application,
 	}
 	if in.NetworkSettingsType != "" {
