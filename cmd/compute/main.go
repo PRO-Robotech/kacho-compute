@@ -809,4 +809,3 @@ func registerInternalServices(srv *grpc.Server, svcs *services, pool *pgxpool.Po
 	computev1.RegisterInternalWatchServiceServer(srv, handler.NewInternalWatchHandler(pool, dsn, logger.With("component", "internal-watch"), watchMaxStreams))
 	computev1.RegisterInternalDiskTypeServiceServer(srv, handler.NewInternalDiskTypeHandler(svcs.diskType))
 }
-
