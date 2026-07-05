@@ -217,7 +217,7 @@ func (r *DiskRepo) Update(ctx context.Context, d *domain.Disk, emitLabelsRegiste
 		// Single-statement UPDATE на одной строке защищён row-lock'ом Postgres —
 		// конкурентный writer ждёт commit'а первого и видит уже увеличенный size,
 		// поэтому усадка (size > $new) не проходит (0 строк). Заменяет запрещённый
-		// software stale-read + безусловный UPDATE (проект-правило #10, KAC TOCTOU).
+		// software stale-read + безусловный UPDATE (проект-правило 10, KAC TOCTOU).
 		q := fmt.Sprintf(`UPDATE disks %s WHERE id = $1 AND size <= $%d RETURNING %s`, us.clause(), sizeParam, diskCols)
 		result, err = scanDisk(tx.QueryRow(ctx, q, us.args...))
 		if errors.Is(err, pgx.ErrNoRows) {

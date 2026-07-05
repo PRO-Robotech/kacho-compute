@@ -59,7 +59,7 @@ func TestIntegration_MergeMetadata_DeleteUpsert(t *testing.T) {
 // TestIntegration_MergeMetadata_ConcurrentNoLostUpdate — N конкурентных
 // MergeMetadata с непересекающимися upsert-ключами: каждый ключ обязан выжить.
 //
-// Регрессия до фикса (project-rule #10): service читал metadata через Get,
+// Регрессия до фикса (project-rule 10): service читал metadata через Get,
 // мёржил дельту в Go и звал SetMetadata с безусловным full-map overwrite — два
 // конкурентных UpdateMetadata читали одну базовую map, второй коммит затирал
 // дельту первого (second-writer-wins / lost update). Атомарный single-statement
