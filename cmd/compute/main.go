@@ -5,7 +5,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"log"
@@ -20,7 +19,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/pressly/goose/v3"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -45,7 +43,6 @@ import (
 	"github.com/PRO-Robotech/kacho-compute/internal/fgaboot"
 	"github.com/PRO-Robotech/kacho-compute/internal/fgaintent"
 	"github.com/PRO-Robotech/kacho-compute/internal/handler"
-	"github.com/PRO-Robotech/kacho-compute/internal/migrations"
 	"github.com/PRO-Robotech/kacho-compute/internal/observability/health"
 	computemetrics "github.com/PRO-Robotech/kacho-compute/internal/observability/metrics"
 	"github.com/PRO-Robotech/kacho-compute/internal/operationresolver"
@@ -55,7 +52,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		log.Fatal("usage: compute {serve|migrate up|migrate down|migrate status}")
+		log.Fatal("usage: compute serve")
 	}
 	cmd := os.Args[1]
 
@@ -65,17 +62,16 @@ func main() {
 	}
 
 	switch cmd {
-	case "migrate":
-		if len(os.Args) < 3 {
-			log.Fatal("usage: compute migrate {up|down|status}")
-		}
-		runMigrate(cfg, os.Args[2])
 	case "serve":
 		if err := runServe(cfg); err != nil {
 			log.Fatal(err)
 		}
+	case "migrate":
+		// Миграции вынесены в отдельный least-privilege binary kacho-migrator —
+		// runtime serve-образ не несёт embed-миграции и деструктивный `migrate down`.
+		log.Fatal("migrations are not handled by this binary — use the kacho-migrator CLI ({up|down|status})")
 	default:
-		log.Fatalf("unknown command: %s", cmd)
+		log.Fatalf("unknown command %q (this binary only serves the API; migrations live in `kacho-migrator`)", cmd)
 	}
 }
 
@@ -463,7 +459,10 @@ func validateAuthMode(cfg config.Config, logger *slog.Logger) (productionMode bo
 		if terr := requireDBSSLMode(cfg); terr != nil {
 			return false, terr
 		}
-		logger.Warn("AuthMode=production: anonymous rejected + server-mTLS listeners + SSL DB required")
+		if terr := requireTrustedForwarders(cfg); terr != nil {
+			return false, terr
+		}
+		logger.Warn("AuthMode=production: anonymous rejected + server-mTLS listeners + SSL DB + forwarder allow-list required")
 	case "production-strict":
 		productionMode = true
 		// TLS-check on the actually-dialed transport edges (per-edge mTLS value-
@@ -476,7 +475,10 @@ func validateAuthMode(cfg config.Config, logger *slog.Logger) (productionMode bo
 		if terr := requireDBSSLMode(cfg); terr != nil {
 			return false, terr
 		}
-		logger.Warn("AuthMode=production-strict: anonymous rejected + per-edge mTLS+SSL strictly validated")
+		if terr := requireTrustedForwarders(cfg); terr != nil {
+			return false, terr
+		}
+		logger.Warn("AuthMode=production-strict: anonymous rejected + per-edge mTLS+SSL + forwarder allow-list strictly validated")
 	default:
 		return false, fmt.Errorf("unknown KACHO_COMPUTE_AUTH_MODE=%q (allowed: dev, production, production-strict)", cfg.AuthMode)
 	}
@@ -501,6 +503,22 @@ func requireDBSSLMode(cfg config.Config) error {
 	default:
 		return fmt.Errorf("production mode: KACHO_COMPUTE_DB_SSLMODE must be one of require|verify-ca|verify-full (got %q)", cfg.DBSSLMode)
 	}
+}
+
+// requireTrustedForwarders — в любом production-режиме allow-list доверенных
+// forwarder-SAN'ов (обычно единственный — api-gateway SA) обязан быть непустым.
+// Пустой список → principalIsTrusted (corelib grpcsrv) доверяет forwarded
+// x-kacho-principal-* ЛЮБОМУ mTLS-verified peer'у: любой sibling с валидным
+// mesh-cert'ом форжит end-user principal и проходит FGA-Check как жертва
+// (confused deputy → tenant crossing, CWE-441/CWE-290). Fail-closed зеркалит
+// insecureListenersInProduction / requireDBSSLMode. В dev допустимо пусто
+// (принимаем любой principal — back-compat локальных фикстур).
+func requireTrustedForwarders(cfg config.Config) error {
+	if len(cfg.AuthZTrustedForwarderSANs) == 0 {
+		return fmt.Errorf("production mode requires a non-empty KACHO_COMPUTE_AUTHZ_TRUSTED_FORWARDER_SANS allow-list " +
+			"(empty → any mTLS peer is trusted to forward the end-user principal → subject spoofing / tenant crossing)")
+	}
+	return nil
 }
 
 // insecureListenersInProduction — non-nil ошибка, если хотя бы один из двух
@@ -790,31 +808,4 @@ func startRegisterDrainer(cfg config.Config, pool *pgxpool.Pool, rec metrics.Rec
 func registerInternalServices(srv *grpc.Server, svcs *services, pool *pgxpool.Pool, dsn string, logger *slog.Logger, watchMaxStreams int) {
 	computev1.RegisterInternalWatchServiceServer(srv, handler.NewInternalWatchHandler(pool, dsn, logger.With("component", "internal-watch"), watchMaxStreams))
 	computev1.RegisterInternalDiskTypeServiceServer(srv, handler.NewInternalDiskTypeHandler(svcs.diskType))
-}
-
-func runMigrate(cfg config.Config, direction string) {
-	goose.SetBaseFS(migrations.FS)
-	if err := goose.SetDialect("postgres"); err != nil {
-		log.Fatalf("goose dialect: %v", err)
-	}
-	db, err := sql.Open("pgx", cfg.MigrateDSN())
-	if err != nil {
-		log.Fatalf("open db: %v", err)
-	}
-	defer db.Close()
-
-	var gooseErr error
-	switch direction {
-	case "up":
-		gooseErr = goose.Up(db, ".")
-	case "down":
-		gooseErr = goose.Down(db, ".")
-	case "status":
-		gooseErr = goose.Status(db, ".")
-	default:
-		log.Fatalf("unknown migrate direction: %s", direction)
-	}
-	if gooseErr != nil {
-		log.Fatalf("migrate %s: %v", direction, gooseErr)
-	}
 }

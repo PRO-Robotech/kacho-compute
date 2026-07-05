@@ -71,11 +71,11 @@ func (h *ImageHandler) List(ctx context.Context, req *computev1.ListImagesReques
 		return nil, err
 	}
 	filter := svc.ImageFilter{ProjectID: req.ProjectId, Filter: req.Filter}
-	if !dec.bypass {
-		if len(dec.allowedIDs) == 0 {
+	if !dec.IsBypass() {
+		if len(dec.IDs()) == 0 {
 			return &computev1.ListImagesResponse{}, nil
 		}
-		filter.AllowedIDs = dec.allowedIDs
+		filter.AllowedIDs = dec.IDs()
 	}
 	imgs, nextToken, err := h.svc.List(ctx, filter,
 		svc.Pagination{PageToken: req.PageToken, PageSize: req.PageSize})

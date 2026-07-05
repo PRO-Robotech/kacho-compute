@@ -106,7 +106,7 @@ func (s *SnapshotService) Create(ctx context.Context, req CreateSnapshotReq) (*o
 func (s *SnapshotService) doCreate(ctx context.Context, snapID string, req CreateSnapshotReq) (*anypb.Any, error) {
 	exists, err := s.projectClient.Exists(ctx, req.ProjectID)
 	if err != nil {
-		return nil, status.Errorf(codes.Unavailable, "folder check: %v", err)
+		return nil, status.Error(codes.Unavailable, "folder check: upstream project service unavailable")
 	}
 	if !exists {
 		return nil, status.Errorf(codes.NotFound, "Folder with id %s not found", req.ProjectID)

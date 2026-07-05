@@ -30,23 +30,17 @@ import (
 	"github.com/PRO-Robotech/kacho-compute/internal/authzfilter"
 )
 
-// listFilterDecision — convenience wrapper around authzfilter.Decision.
-type listFilterDecision struct {
-	bypass     bool
-	allowedIDs []string
-}
-
 // resolveListFilter — извлекает subject из request Principal, вызывает FGA filter,
-// возвращает (bypass, allowedIDs, error).
+// возвращает authzfilter.Decision (handler ветвится по IsBypass/IsEmpty/IDs).
 //
 // Decision rules:
-//   - filter nil → bypass (FGA disabled in dev / breakglass).
-//   - subject == "" (system principal / no identity) → fail-closed: empty
+//   - filter nil → BypassAll (FGA disabled in dev / breakglass).
+//   - subject == "" (system principal / no identity) → fail-closed: Empty
 //     allow-list (handler возвращает []), НЕ bypass-all.
-//   - normal flow → call filter; respect bypass / empty / allowedIDs.
-func resolveListFilter(ctx context.Context, f authzfilter.Filter, resourceType, action string) (listFilterDecision, error) {
+//   - normal flow → возвращаем Decision фильтра как есть (bypass / empty / ids).
+func resolveListFilter(ctx context.Context, f authzfilter.Filter, resourceType, action string) (authzfilter.Decision, error) {
 	if f == nil {
-		return listFilterDecision{bypass: true}, nil
+		return authzfilter.Decision{BypassAll: true}, nil
 	}
 	subject := authzfilter.SubjectFromPrincipal(ctx)
 	if subject == "" {
@@ -54,17 +48,7 @@ func resolveListFilter(ctx context.Context, f authzfilter.Filter, resourceType, 
 		// missing subject must never bypass the filter — that is exactly the
 		// over-show leak. Return an empty allow-list so the handler responds
 		// with an empty page (existence of other resources stays unknowable).
-		return listFilterDecision{allowedIDs: []string{}}, nil
+		return authzfilter.Decision{Empty: true}, nil
 	}
-	d, err := f.ListAllowedIDs(ctx, subject, resourceType, action)
-	if err != nil {
-		return listFilterDecision{}, err
-	}
-	if d.IsBypass() {
-		return listFilterDecision{bypass: true}, nil
-	}
-	if d.IsEmpty() {
-		return listFilterDecision{allowedIDs: []string{}}, nil
-	}
-	return listFilterDecision{allowedIDs: d.IDs()}, nil
+	return f.ListAllowedIDs(ctx, subject, resourceType, action)
 }

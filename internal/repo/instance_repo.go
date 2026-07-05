@@ -510,6 +510,12 @@ func (r *InstanceRepo) mutateAndReload(ctx context.Context, id, eventType string
 		if isUniqueViolation(err) {
 			return nil, ports.ErrAlreadyExists
 		}
+		// Уже классифицированный sentinel из mutate (напр. zone/status-consistent
+		// attach вернул FailedPrecondition) — пробрасываем как есть, иначе wrapPgErr
+		// схлопнул бы его в generic Internal.
+		if errors.Is(err, ports.ErrFailedPrecondition) {
+			return nil, err
+		}
 		return nil, wrapPgErr(err, "Instance", id)
 	}
 	q := fmt.Sprintf(`SELECT %s FROM instances WHERE id = $1`, instanceCols)
@@ -569,9 +575,34 @@ func insertAttachedDiskTx(ctx context.Context, tx pgx.Tx, instanceID string, ad 
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	_, err := tx.Exec(ctx, `INSERT INTO attached_disks (instance_id, disk_id, is_boot, mode, device_name, auto_delete, attached_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+	// Атомарный zone/status-consistent attach (within-service DB-invariant): диск лочится
+	// FOR UPDATE в CTE — это сериализует против Disk.Relocate (SetZoneIfDetached
+	// берёт тот же FOR UPDATE на disks(id)). Zone- и READY-предикаты вычисляются
+	// ПОД локом, поэтому прежняя TOCTOU-гонка (service-слой читал zone unlocked,
+	// затем безусловный INSERT) закрыта: если relocate закоммитил новую зону
+	// раньше, EvalPlanQual перечитывает её в CTE → предикат `ld.zone_id = i.zone_id`
+	// не сматчит → 0 rows → FailedPrecondition вместо cross-zone attach.
+	tag, err := tx.Exec(ctx, `
+		WITH locked_disk AS (
+			SELECT d.zone_id, d.status
+			  FROM disks d
+			 WHERE d.id = $2
+			 FOR UPDATE
+		)
+		INSERT INTO attached_disks (instance_id, disk_id, is_boot, mode, device_name, auto_delete, attached_at)
+		SELECT $1, $2, $3, $4, $5, $6, $7
+		  FROM locked_disk ld
+		  JOIN instances i ON i.id = $1
+		 WHERE ld.zone_id = i.zone_id
+		   AND ld.status = 'READY'`,
 		instanceID, ad.DiskID, ad.IsBoot, attachedDiskModeName(ad.Mode), ad.DeviceName, ad.AutoDelete, at)
-	return err
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%w: Disk %s is not READY or not in the instance zone", ports.ErrFailedPrecondition, ad.DiskID)
+	}
+	return nil
 }
 
 // insertDiskTx вставляет диск внутри переданной TX (для inline-дисков Instance.Create).

@@ -89,29 +89,20 @@ func TestIntegration_Disk_Relocate_ConcurrentAttachRace(t *testing.T) {
 		return true, nil
 	}
 
-	// attach: кооперативный peer. Берёт row-lock на disks(id) и прикрепляет диск к
-	// инстансу только если диск всё ещё в зоне инстанса (zone-a). true = attached;
-	// false = диск ушёл из zone-a (relocate выиграл).
+	// attach: РЕАЛЬНЫЙ production-путь InstanceRepo.AttachDisk. true = attached;
+	// false = FailedPrecondition (relocate выиграл — диск ушёл из zone-a, атомарный
+	// zone-consistent insert вернул 0 rows). Любая другая ошибка — фатальна. Это
+	// закрывает finding «contested path untested»: тест бьёт по реальному коду,
+	// а не по кооперативному peer'у с ручным FOR UPDATE + zone-recheck.
 	attach := func() (bool, error) {
-		tx, terr := pool.Begin(ctx)
-		if terr != nil {
-			return false, terr
-		}
-		defer func() { _ = tx.Rollback(ctx) }()
-		var zone string
-		if serr := tx.QueryRow(ctx, `SELECT zone_id FROM disks WHERE id = $1 FOR UPDATE`, diskID).Scan(&zone); serr != nil {
-			return false, serr
-		}
-		if zone != zoneA {
-			return false, nil
-		}
-		if _, eerr := tx.Exec(ctx, `INSERT INTO attached_disks
-			(instance_id, disk_id, is_boot, mode, device_name, auto_delete, attached_at)
-			VALUES ($1, $2, false, 'READ_WRITE', '', false, now())`, instID, diskID); eerr != nil {
-			return false, eerr
-		}
-		if cerr := tx.Commit(ctx); cerr != nil {
-			return false, cerr
+		_, aerr := instRepo.AttachDisk(ctx, instID, domain.AttachedDisk{
+			DiskID: diskID, Mode: domain.AttachedDiskModeReadWrite,
+		})
+		if aerr != nil {
+			if errors.Is(aerr, service.ErrFailedPrecondition) {
+				return false, nil
+			}
+			return false, aerr
 		}
 		return true, nil
 	}

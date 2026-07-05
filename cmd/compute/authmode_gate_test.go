@@ -34,6 +34,7 @@ func allEdgesSecured() config.Config {
 		GeoMTLS:                   grpcclient.TLSClient{Enable: true},
 		IAMAuthzMTLS:              grpcclient.TLSClient{Enable: true},
 		IAMRegisterMTLS:           grpcclient.TLSClient{Enable: true},
+		AuthZTrustedForwarderSANs: []string{"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-api-gateway"},
 	}
 }
 
@@ -140,6 +141,42 @@ func TestValidateAuthMode_ProductionStrict_DBSSLModeStillEnforced(t *testing.T) 
 	}
 }
 
+// production ОБЯЗАН отказать в старте, если allow-list доверенных forwarder'ов
+// (KACHO_COMPUTE_AUTHZ_TRUSTED_FORWARDER_SANS) пуст: с пустым списком
+// principalIsTrusted доверяет forwarded x-kacho-principal-* ЛЮБОМУ mTLS-verified
+// peer'у — любой sibling с валидным mesh-cert'ом форжит end-user principal и
+// авторизуется как жертва (CWE-441/CWE-290 confused deputy → tenant crossing).
+// Finding: «Production mode does not require a trusted-forwarder allow-list».
+func TestValidateAuthMode_Production_RequiresTrustedForwarders(t *testing.T) {
+	cfg := securedProduction()
+	cfg.AuthZTrustedForwarderSANs = nil
+	_, err := validateAuthMode(cfg, discardLogger())
+	if err == nil {
+		t.Fatalf("production must reject empty AuthZTrustedForwarderSANs (any mTLS peer trusted as forwarder → subject spoofing)")
+	}
+	if !strings.Contains(err.Error(), "AUTHZ_TRUSTED_FORWARDER_SANS") {
+		t.Errorf("gate error must name the empty forwarder allow-list; got: %v", err)
+	}
+	// с непустым allow-list — стартует.
+	cfg.AuthZTrustedForwarderSANs = []string{"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-api-gateway"}
+	if _, err := validateAuthMode(cfg, discardLogger()); err != nil {
+		t.Fatalf("production with a non-empty forwarder allow-list must pass; got: %v", err)
+	}
+}
+
+// production-strict — тот же fail-closed forwarder-гейт.
+func TestValidateAuthMode_ProductionStrict_RequiresTrustedForwarders(t *testing.T) {
+	cfg := allEdgesSecured()
+	cfg.AuthZTrustedForwarderSANs = nil
+	_, err := validateAuthMode(cfg, discardLogger())
+	if err == nil {
+		t.Fatalf("production-strict must reject empty AuthZTrustedForwarderSANs")
+	}
+	if !strings.Contains(err.Error(), "AUTHZ_TRUSTED_FORWARDER_SANS") {
+		t.Errorf("gate error must name the empty forwarder allow-list; got: %v", err)
+	}
+}
+
 // dev не требует ни mTLS, ни SSL (insecure dev-defaults только логируются).
 func TestValidateAuthMode_DevNoGate(t *testing.T) {
 	prod, err := validateAuthMode(config.Config{AuthMode: "dev"}, discardLogger())
@@ -156,10 +193,11 @@ func TestValidateAuthMode_DevNoGate(t *testing.T) {
 // plain production относительно production-strict: они mesh-encrypted).
 func securedProduction() config.Config {
 	return config.Config{
-		AuthMode:           "production",
-		DBSSLMode:          "require",
-		PublicServerMTLS:   grpcsrv.TLSServer{Enable: true},
-		InternalServerMTLS: grpcsrv.TLSServer{Enable: true},
+		AuthMode:                  "production",
+		DBSSLMode:                 "require",
+		PublicServerMTLS:          grpcsrv.TLSServer{Enable: true},
+		InternalServerMTLS:        grpcsrv.TLSServer{Enable: true},
+		AuthZTrustedForwarderSANs: []string{"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-api-gateway"},
 	}
 }
 

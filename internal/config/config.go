@@ -78,7 +78,9 @@ type Config struct {
 	// форвардить end-user principal в x-kacho-principal-* metadata (обычно
 	// единственный — api-gateway SA, SAN spiffe://kacho.cloud/ns/<ns>/sa/kacho-api-gateway).
 	// Принимает comma-separated список. Пусто (default) → любой mTLS-verified peer
-	// доверен как форвардер (паритет с insecure dev back-compat и kacho-iam). Задаётся
+	// доверен как форвардер (паритет с insecure dev back-compat и kacho-iam) — допустимо
+	// ТОЛЬКО в dev: validateAuthMode() fail-closed отвергает пустой список в любом
+	// production-режиме (requireTrustedForwarders). Задаётся
 	// в production для defense-in-depth против confused-deputy: внутренний сервис со
 	// своим валидным client-cert'ом не сможет выдать себя за пользователя. На обоих
 	// листенерах principal trust-gated через grpcsrv.UnaryCertIdentityExtract +

@@ -36,9 +36,13 @@ func TestMapZoneRefErr_GeoNotFoundStatus_InvalidArgument(t *testing.T) {
 // NOT_FOUND) → Unavailable "zone check: ..." (fail-closed на мутации Instance:
 // peer недоступен → Unavailable, не «зона ок»).
 func TestMapZoneRefErr_GeoDown_Unavailable(t *testing.T) {
-	err := mapZoneRefErr(status.Error(codes.Unavailable, "connection refused"), "ru-central1-a")
+	err := mapZoneRefErr(status.Error(codes.Unavailable, "connection refused to 10.4.2.7:9091"), "ru-central1-a")
 	st, ok := status.FromError(err)
 	require.True(t, ok)
 	require.Equal(t, codes.Unavailable, st.Code())
 	require.Contains(t, st.Message(), "zone check")
+	// Raw peer transport detail (endpoint / dial error) must NOT be echoed to the
+	// tenant — opaque message only (CWE-209), mirroring mapRepoErr discipline.
+	require.NotContains(t, st.Message(), "connection refused")
+	require.NotContains(t, st.Message(), "10.4.2.7")
 }

@@ -83,13 +83,15 @@ download (uri-source) мгновенный (см. [07-known-divergences.md](arch
 
 ## Часть II. Контейнерный уровень
 
-Один Go-бинарь `compute` с двумя командами:
-- **`run`** (default) — поднимает pgxpool, repo'ы, clients, services, handlers,
+Два независимых бинаря в одном образе:
+- **`kacho-compute serve`** — поднимает pgxpool, repo'ы, clients, services, handlers,
   два gRPC-сервера: `:9090` public (`KACHO_COMPUTE_GRPC_PORT`) и `:9091`
-  internal (`KACHO_COMPUTE_INTERNAL_PORT`); graceful shutdown.
-- **`migrate up`** — прокатывает миграции (`internal/migrations/*.sql` через
-  embed.FS, goose dialect `postgres`, `cfg.MigrateDSN()` без `pool_max_conns`).
-  В кластере — init-container перед основным процессом.
+  internal (`KACHO_COMPUTE_INTERNAL_PORT`); graceful shutdown. Миграции не несёт.
+- **`kacho-migrator {up|down|status}`** — отдельный least-privilege binary,
+  прокатывает миграции (`internal/migrations/*.sql` через embed.FS, goose dialect
+  `postgres`, `cfg.MigrateDSN()` без `pool_max_conns`). В кластере —
+  init-container перед основным процессом. serve-образ `kacho-compute` не может
+  менять схему (нет embed-миграций и деструктивного `down`).
 
 **Порты.**
 
@@ -315,7 +317,7 @@ release); outbox + LISTEN/NOTIFY + InternalWatchService (catchup + WaitForNotifi
 - **Запуск** (kacho-deploy): `make dev-up` (kind + helm + Postgres + все
   сервисы), `make reload-svc SVC=compute`, `make logs-svc SVC=compute`,
   `make psql SVC=compute`. Миграции вне kind: `KACHO_COMPUTE_DB_PASSWORD=secret
-  bin/kacho-compute migrate up`.
+  bin/kacho-migrator up`.
 - **Graceful shutdown** — `cmd/compute/main.go` ловит сигнал → закрывает gRPC-
   серверы → `operations.Wait(30s)` (drain in-flight worker'ов) → закрывает
   pgxpool. При краше pod'а операция остаётся `done=false` навсегда (известное
@@ -401,7 +403,7 @@ Unavailable), `shutdown` (graceful), `migrations/common` (`0001_operations.sql`,
    `/compute/v1/regions`, `/compute/v1/zones`
    — только cluster-internal listener, НЕ на external TLS endpoint).
 5. **`kacho-deploy`** — helm chart для `pg-compute` + `kacho-compute` deployment
-   (init-container `migrate up`, env-vars).
+   (init-container `kacho-migrator up`, env-vars).
 6. **`kacho-ui`** — compute-views (`src/pages/compute/{instances,disks,images,
    snapshots}/`) на generic CRUD-механизме; polling Operation; см.
    [08-ui.md](architecture/08-ui.md).
