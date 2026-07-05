@@ -186,8 +186,13 @@ func (r *DiskRepo) Update(ctx context.Context, d *domain.Disk, emitLabelsRegiste
 		}
 		us.add("labels", labelsJSON)
 	}
+	// sizeParam — placeholder-индекс колонки size, если она в update-mask. > 0
+	// включает атомарный монотонный CAS-предикат `AND size <= $sizeParam` в WHERE
+	// (см. ниже): усадка размера отбивается на DB-уровне, а не software check-then-act.
+	sizeParam := 0
 	if _, ok := ch["size"]; ok {
 		us.add("size", d.Size)
+		sizeParam = len(us.args)
 	}
 	if _, ok := ch["disk_placement_policy"]; ok {
 		dppJSON, err := marshalProtoJSONB(d.DiskPlacementPolicy, "Disk.disk_placement_policy")
@@ -204,9 +209,30 @@ func (r *DiskRepo) Update(ctx context.Context, d *domain.Disk, emitLabelsRegiste
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	var result *domain.Disk
-	if us.empty() {
+	switch {
+	case us.empty():
 		result, err = scanDisk(tx.QueryRow(ctx, `SELECT `+diskCols+` FROM disks WHERE id = $1`, d.ID))
-	} else {
+	case sizeParam > 0:
+		// Монотонный размер — DB-level CAS: SET … WHERE id = $1 AND size <= $sizeParam.
+		// Single-statement UPDATE на одной строке защищён row-lock'ом Postgres —
+		// конкурентный writer ждёт commit'а первого и видит уже увеличенный size,
+		// поэтому усадка (size > $new) не проходит (0 строк). Заменяет запрещённый
+		// software stale-read + безусловный UPDATE (проект-правило #10, KAC TOCTOU).
+		q := fmt.Sprintf(`UPDATE disks %s WHERE id = $1 AND size <= $%d RETURNING %s`, us.clause(), sizeParam, diskCols)
+		result, err = scanDisk(tx.QueryRow(ctx, q, us.args...))
+		if errors.Is(err, pgx.ErrNoRows) {
+			// 0 строк: либо диска нет (NotFound), либо CAS отбил усадку
+			// (FailedPrecondition). Различаем EXISTS-пробой в той же tx.
+			var exists bool
+			if e := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM disks WHERE id = $1)`, d.ID).Scan(&exists); e != nil {
+				return nil, wrapPgErr(e, "Disk", d.ID)
+			}
+			if exists {
+				return nil, fmt.Errorf("%w: Disk size can only be increased", ports.ErrFailedPrecondition)
+			}
+			return nil, fmt.Errorf("%w: Disk %s not found", ports.ErrNotFound, d.ID)
+		}
+	default:
 		q := `UPDATE disks ` + us.clause() + ` WHERE id = $1 RETURNING ` + diskCols
 		result, err = scanDisk(tx.QueryRow(ctx, q, us.args...))
 	}

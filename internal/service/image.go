@@ -168,21 +168,21 @@ func (s *ImageService) doCreate(ctx context.Context, imageID string, req CreateI
 	case req.ImageID != "":
 		src, err := s.repo.Get(ctx, req.ImageID)
 		if err != nil {
-			return nil, status.Errorf(codes.NotFound, "Image %s not found", req.ImageID)
+			return nil, mapRefErr(err, "Image", req.ImageID)
 		}
 		minDiskSize = maxInt64(minDiskSize, src.MinDiskSize)
 		storageSize = src.StorageSize
 	case req.SnapshotID != "":
 		src, err := s.snapshotRepo.Get(ctx, req.SnapshotID)
 		if err != nil {
-			return nil, status.Errorf(codes.NotFound, "Snapshot %s not found", req.SnapshotID)
+			return nil, mapRefErr(err, "Snapshot", req.SnapshotID)
 		}
 		minDiskSize = maxInt64(minDiskSize, src.DiskSize)
 		storageSize = src.DiskSize
 	case req.DiskID != "":
 		d, err := s.diskRepo.Get(ctx, req.DiskID)
 		if err != nil {
-			return nil, status.Errorf(codes.NotFound, "Disk %s not found", req.DiskID)
+			return nil, mapRefErr(err, "Disk", req.DiskID)
 		}
 		if d.Status != domain.DiskStatusReady {
 			return nil, status.Errorf(codes.FailedPrecondition, "Disk %s is not READY", req.DiskID)

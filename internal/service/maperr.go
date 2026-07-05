@@ -43,6 +43,27 @@ func mapRepoErr(err error) error {
 	return status.Error(codes.Internal, "internal database error")
 }
 
+// mapRefErr транслирует ошибку existence-check ссылочного ресурса ИЗ ТОЙ ЖЕ БД
+// (Image/Snapshot/Disk/DiskType lookup на request-path). Раньше эти call-site'ы
+// слепо маппили ЛЮБУЮ non-nil ошибку в codes.NotFound "<Resource> <id> not found",
+// из-за чего транзиентный сбой БД (обрыв соединения, deadline, query-error) во
+// время lookup маскировался под перманентный NotFound — клиент не ретраил и вводился
+// в заблуждение о несуществовании реально существующего ресурса (CWE-388).
+//
+// Теперь: настоящий not-found (repo вернул ErrNotFound) → codes.NotFound с
+// детерминированным текстом "<Resource> <id> not found"; всё остальное
+// (ErrInternal / raw pgx / транспорт) → делегируется mapRepoErr → codes.Internal
+// (без leak'а текста) вместо ложного NotFound. Зеркалит дисциплину primary-Get.
+func mapRefErr(err error, resource, id string) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, ErrNotFound) {
+		return status.Errorf(codes.NotFound, "%s %s not found", resource, id)
+	}
+	return mapRepoErr(err)
+}
+
 // mapZoneRefErr транслирует ошибку existence-check zone_id (через ZoneRegistry —
 // kacho-geo geo.v1.ZoneService.Get; Geography принадлежит kacho-geo) в
 // gRPC-status, сохраняя контракт compute: неизвестная зона → InvalidArgument
