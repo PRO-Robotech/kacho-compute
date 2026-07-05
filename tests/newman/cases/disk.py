@@ -125,13 +125,18 @@ CASES.append(Case(
 
 CASES.append(Case(
     id="DISK-CR-NEG-ZONE-UNKNOWN",
-    title="Create с unknown zoneId → InvalidArgument (compute: zone existence — sync, паритет VPC)",
+    title="Create с unknown zoneId → async op-error InvalidArgument (zone existence в doCreate-worker)",
     classes=["NEG", "VAL"], priority="P1",
+    # zone-existence проверяется в doCreate (async worker, mapZoneRefErr) — как и
+    # folder в DISK-CR-NEG-FOLDER: мутация всегда 200+Operation, отказ — в op.error.
+    # Безусловный assert_op_error_oneof даёт RED, если zone-валидация регрессирует
+    # (op успешно создаёт диск в несуществующей зоне — orphan). code 3 (наш
+    # InvalidArgument) или 5 (если бы стал NotFound-паритет YC).
     steps=[Step(name="cr-bad-zone", method="POST", path=DISKS,
                 body=_disk_body("bz", zoneId="ru-central1-zzz"),
-                # probe-needed: реальный YC может давать NotFound "Zone ... not found"; у нас InvalidArgument
-                test_script=["pm.test('rejected (400 sync or 200+op-error)', () => pm.expect(pm.response.code).to.be.oneOf([200, 400]));",
-                             "if (pm.response.code === 400) { const j = pm.response.json(); pm.test('code 3 или 5', () => pm.expect(j.code).to.be.oneOf([3, 5])); }"])],
+                test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
+           poll_operation_until_done(),
+           assert_op_error_oneof([3, 5], "INVALID_ARGUMENT/NOT_FOUND", msg_substr="zone")],
 ))
 
 CASES.append(Case(
@@ -411,7 +416,8 @@ CASES.append(Case(
         Step(name="assert", method="GET", path="/operations/{{opId}}",
              test_script=["const j = pm.response.json();",
                           "pm.test('done', () => pm.expect(j.done).to.eql(true));",
-                          "pm.test('if op-error → code 3', () => { if (j.error) pm.expect(j.error.code).to.eql(3); });"]),
+                          "pm.test('op-error present (rejected)', () => pm.expect(Boolean(j.error), JSON.stringify(j)).to.eql(true));",
+                          "pm.test('op-error code 3 (INVALID_ARGUMENT)', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(3));"]),
         Step(name="cleanup", method="DELETE", path=f"{DISKS}/{{{{diskId}}}}", test_script=[*save_from_response("j.id", "opId")]),
         poll_operation_until_done(),
     ],
@@ -571,7 +577,8 @@ CASES.append(Case(
         Step(name="assert", method="GET", path="/operations/{{opId}}",
              test_script=["const j = pm.response.json();",
                           "pm.test('done', () => pm.expect(j.done).to.eql(true));",
-                          "pm.test('if op-error → code 3 or 5', () => { if (j.error) pm.expect(j.error.code).to.be.oneOf([3, 5]); });"]),
+                          "pm.test('op-error present (rejected)', () => pm.expect(Boolean(j.error), JSON.stringify(j)).to.eql(true));",
+                          "pm.test('op-error code 3 or 5', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.be.oneOf([3, 5]));"]),
         Step(name="cleanup", method="DELETE", path=f"{DISKS}/{{{{diskId}}}}", test_script=[*save_from_response("j.id", "opId")]),
         poll_operation_until_done(),
     ],

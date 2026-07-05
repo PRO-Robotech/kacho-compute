@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "4c7440d1-bccb-4137-884a-5d08d0fabdc0",
+    "_postman_id": "e8ecfb89-3036-4787-a145-58352fcedfa0",
     "name": "kacho-compute / newman / disk",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -785,7 +785,7 @@
       ]
     },
     {
-      "name": "DISK-CR-NEG-ZONE-UNKNOWN — Create с unknown zoneId → InvalidArgument (compute: zone existence — sync, паритет VPC)",
+      "name": "DISK-CR-NEG-ZONE-UNKNOWN — Create с unknown zoneId → async op-error InvalidArgument (zone existence в doCreate-worker)",
       "description": "class:NEG | class:VAL | priority:P1",
       "item": [
         {
@@ -825,8 +825,94 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('rejected (400 sync or 200+op-error)', () => pm.expect(pm.response.code).to.be.oneOf([200, 400]));",
-                  "if (pm.response.code === 400) { const j = pm.response.json(); pm.test('code 3 или 5', () => pm.expect(j.code).to.be.oneOf([3, 5])); }"
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "poll-op",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 8) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "assert-op-error",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "pm.test('operation rejected (op-error present, not success)', () => pm.expect(Boolean(j.error), JSON.stringify(j)).to.eql(true));",
+                  "pm.test('error code in [3, 5] (INVALID_ARGUMENT/NOT_FOUND)', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.be.oneOf([3, 5]));",
+                  "pm.test('error text includes \"zone\"', () => pm.expect((j.error && j.error.message || '').toLowerCase()).to.include('zone'));"
                 ]
               }
             }
@@ -4066,7 +4152,8 @@
                 "exec": [
                   "const j = pm.response.json();",
                   "pm.test('done', () => pm.expect(j.done).to.eql(true));",
-                  "pm.test('if op-error → code 3', () => { if (j.error) pm.expect(j.error.code).to.eql(3); });"
+                  "pm.test('op-error present (rejected)', () => pm.expect(Boolean(j.error), JSON.stringify(j)).to.eql(true));",
+                  "pm.test('op-error code 3 (INVALID_ARGUMENT)', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(3));"
                 ]
               }
             }
@@ -5831,7 +5918,8 @@
                 "exec": [
                   "const j = pm.response.json();",
                   "pm.test('done', () => pm.expect(j.done).to.eql(true));",
-                  "pm.test('if op-error → code 3 or 5', () => { if (j.error) pm.expect(j.error.code).to.be.oneOf([3, 5]); });"
+                  "pm.test('op-error present (rejected)', () => pm.expect(Boolean(j.error), JSON.stringify(j)).to.eql(true));",
+                  "pm.test('op-error code 3 or 5', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.be.oneOf([3, 5]));"
                 ]
               }
             }

@@ -183,6 +183,25 @@ def assert_op_error(code: int, code_name: str, msg_substr: Optional[str] = None,
     return Step(name="assert-op-error", method="GET", path="/operations/{{opId}}", test_script=body)
 
 
+def assert_op_error_oneof(codes: List[int], code_names: str,
+                          msg_substr: Optional[str] = None) -> Step:
+    """Как assert_op_error, но допускает НАБОР gRPC-кодов (когда точный код —
+    3 vs 5 / 3 vs 9 — не зафиксирован контрактом). Проверка БЕЗУСЛОВНА: операция
+    обязана завершиться с error (не response) — regression, при которой нелегальная
+    операция начинает УСПЕШНО проходить, даёт RED (project-rule #12/#13; закрывает
+    false-green `if (j.error)`-паттерн 3-го аудита)."""
+    codes_js = "[" + ", ".join(str(c) for c in codes) + "]"
+    body = [
+        "const j = pm.response.json();",
+        "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+        "pm.test('operation rejected (op-error present, not success)', () => pm.expect(Boolean(j.error), JSON.stringify(j)).to.eql(true));",
+        f"pm.test('error code in {codes_js} ({code_names})', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.be.oneOf({codes_js}));",
+    ]
+    if msg_substr is not None:
+        body.append(f"pm.test('error text includes \"{msg_substr}\"', () => pm.expect((j.error && j.error.message || '').toLowerCase()).to.include('{msg_substr.lower()}'));")
+    return Step(name="assert-op-error", method="GET", path="/operations/{{opId}}", test_script=body)
+
+
 def assert_op_success() -> Step:
     return Step(name="assert-op-success", method="GET", path="/operations/{{opId}}",
                 test_script=[
@@ -542,6 +561,7 @@ def load_cases_module(path: Path):
     mod.assert_created_at_seconds = assert_created_at_seconds
     mod.poll_operation_until_done = poll_operation_until_done
     mod.assert_op_error = assert_op_error
+    mod.assert_op_error_oneof = assert_op_error_oneof
     mod.assert_op_success = assert_op_success
     mod.list_page_block = list_page_block
     mod.name_validation_block = name_validation_block
