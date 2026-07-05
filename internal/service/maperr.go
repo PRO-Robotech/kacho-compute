@@ -68,8 +68,8 @@ func mapRefErr(err error, resource, id string) error {
 // kacho-geo geo.v1.ZoneService.Get; Geography принадлежит kacho-geo) в
 // gRPC-status, сохраняя контракт compute: неизвестная зона → InvalidArgument
 // "Zone <id> not found". Транспортная ошибка к kacho-geo (Unavailable)
-// пробрасывается как Unavailable "zone check: <err>" (зеркалит
-// folder/subnet-check).
+// пробрасывается как Unavailable с opaque-текстом (без leak'а raw peer-ошибки,
+// зеркалит folder-check + mapRepoErr-дисциплину).
 func mapZoneRefErr(err error, zoneID string) error {
 	if err == nil {
 		return nil
@@ -80,7 +80,10 @@ func mapZoneRefErr(err error, zoneID string) error {
 	if st, ok := status.FromError(err); ok && st.Code() == codes.NotFound {
 		return status.Errorf(codes.InvalidArgument, "Zone %s not found", zoneID)
 	}
-	return status.Errorf(codes.Unavailable, "zone check: %v", err)
+	// Opaque message: не эхоим raw peer transport-текст наружу (endpoint / dial
+	// error → info-leak, CWE-209). Зеркалит mapRepoErr-дисциплину (фиксированный
+	// текст, без leak'а). Детали остаются в server-side логах peer-клиента.
+	return status.Error(codes.Unavailable, "zone check: upstream geo service unavailable")
 }
 
 // stripSentinel — извлекает «полезную» часть сообщения (после «sentinel: »),

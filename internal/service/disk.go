@@ -386,7 +386,7 @@ func (s *DiskService) ListOperations(ctx context.Context, id string, p Paginatio
 func (s *DiskService) checkFolder(ctx context.Context, folderID string) error {
 	exists, err := s.projectClient.Exists(ctx, folderID)
 	if err != nil {
-		return status.Errorf(codes.Unavailable, "folder check: %v", err)
+		return status.Error(codes.Unavailable, "folder check: upstream project service unavailable")
 	}
 	if !exists {
 		return status.Errorf(codes.NotFound, "Folder with id %s not found", folderID)
