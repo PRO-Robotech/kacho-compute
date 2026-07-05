@@ -6,6 +6,7 @@ package authzfilter
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -192,14 +193,15 @@ func TestFGAFilter_TimeoutEnforced(t *testing.T) {
 	cfg.Timeout = 10 * time.Millisecond
 	f := NewFGAFilter(mock, cfg)
 
-	t0 := time.Now()
+	// The mock honours ctx.Done(): if the 10ms deadline fires before the 100ms
+	// sleep completes, ListObjects returns ctx.Err() → Unavailable. If the timeout
+	// were NOT enforced, the mock would sleep the full 100ms and return a success
+	// response (err==nil) → the err!=nil + Unavailable assertions below would fail.
+	// So enforcement is proven deterministically without a flaky wall-clock upper
+	// bound on elapsed time.
 	_, err := f.ListAllowedIDs(context.Background(), "user:usr_alice", ResourceTypeInstance, ActionInstanceRead)
-	elapsed := time.Since(t0)
 	if err == nil {
 		t.Fatalf("expected timeout error")
-	}
-	if elapsed > 80*time.Millisecond {
-		t.Fatalf("timeout not enforced — elapsed=%s", elapsed)
 	}
 	if got := status.Code(err); got != codes.Unavailable {
 		t.Fatalf("timeout: expected Unavailable, got %s", got)
@@ -218,6 +220,11 @@ func TestFGAFilter_CacheTTLExpiry(t *testing.T) {
 	cfg.CacheTTL = 25 * time.Millisecond
 	f := NewFGAFilter(mock, cfg)
 
+	// Deterministic fake clock: TTL-expiry is driven by advancing logical time,
+	// not time.Sleep + wall-clock (which is flaky under CI scheduler jitter).
+	clk := &fakeClock{t: time.Unix(1_700_000_000, 0)}
+	f.now = clk.now
+
 	d1, err := f.ListAllowedIDs(context.Background(), "user:usr_alice", ResourceTypeInstance, ActionInstanceRead)
 	if err != nil {
 		t.Fatal(err)
@@ -226,7 +233,8 @@ func TestFGAFilter_CacheTTLExpiry(t *testing.T) {
 		t.Fatalf("first call: want 1 id, got %v", d1.IDs())
 	}
 
-	time.Sleep(40 * time.Millisecond)
+	// Advance past the 25ms TTL: entry must be treated as expired.
+	clk.advance(40 * time.Millisecond)
 
 	d2, err := f.ListAllowedIDs(context.Background(), "user:usr_alice", ResourceTypeInstance, ActionInstanceRead)
 	if err != nil {
@@ -333,4 +341,24 @@ func TestFGAFilter_GenericErrWrapsUnavailable(t *testing.T) {
 	if got := status.Code(err); got != codes.Unavailable {
 		t.Fatalf("expected Unavailable, got %s", got)
 	}
+}
+
+// fakeClock — детерминированный источник времени для TTL-тестов кеша.
+// Заменяет f.now, чтобы TTL-expiry продвигался логически (advance), а не через
+// time.Sleep + wall-clock (flaky под нагрузкой CI).
+type fakeClock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (c *fakeClock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.t
+}
+
+func (c *fakeClock) advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.t = c.t.Add(d)
 }

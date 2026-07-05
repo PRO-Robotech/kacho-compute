@@ -107,6 +107,11 @@ type FGAFilter struct {
 	cli AuthorizeClient
 	cfg Config
 
+	// now — источник времени для TTL-логики кеша. Инъектируется (default
+	// time.Now) чтобы TTL-expiry можно было проверять детерминированно, продвигая
+	// фейковые часы, а не через time.Sleep + wall-clock (flaky под нагрузкой CI).
+	now func() time.Time
+
 	mu    sync.Mutex
 	cache map[string]cacheEntry
 }
@@ -131,6 +136,7 @@ func NewFGAFilter(cli AuthorizeClient, cfg Config) *FGAFilter {
 	return &FGAFilter{
 		cli:   cli,
 		cfg:   cfg,
+		now:   time.Now,
 		cache: make(map[string]cacheEntry, cfg.CacheMaxEntries),
 	}
 }
@@ -205,7 +211,7 @@ func (f *FGAFilter) getCache(key string) (Decision, bool) {
 	if !ok {
 		return Decision{}, false
 	}
-	if time.Now().After(e.expires) {
+	if f.now().After(e.expires) {
 		delete(f.cache, key)
 		return Decision{}, false
 	}
@@ -232,7 +238,7 @@ func (f *FGAFilter) putCache(key string, d Decision) {
 	}
 	f.cache[key] = cacheEntry{
 		decision: d,
-		expires:  time.Now().Add(f.cfg.CacheTTL),
+		expires:  f.now().Add(f.cfg.CacheTTL),
 	}
 }
 
