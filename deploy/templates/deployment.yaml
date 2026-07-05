@@ -20,7 +20,7 @@ spec:
         - name: migrate
           image: "{{ .Values.image }}"
           imagePullPolicy: {{ .Values.imagePullPolicy }}
-          command: ["/usr/local/bin/kacho-compute", "migrate", "up"]
+          command: ["/usr/local/bin/kacho-migrator", "up"]
           env:
             - name: KACHO_COMPUTE_DB_HOST
               value: "{{ .Values.db.host }}"

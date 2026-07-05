@@ -388,8 +388,8 @@ INSERT INTO zones (id, region_id, status, name) VALUES
 
 - `kacho-corelib/db.NewPool(cfg)` — pgxpool с retry + lifecycle, DSN из `cfg.DSN()`
   (с `pool_max_conns` если `KACHO_COMPUTE_DB_MAX_CONNS > 0`).
-- `migrate up` / dedicated Watch-conn — `cfg.MigrateDSN()` (без `pool_max_conns`).
-- Init container `migrate up` прокатывает миграции до старта основного процесса.
+- `kacho-migrator up` / dedicated Watch-conn — `cfg.MigrateDSN()` (без `pool_max_conns`).
+- Init container `kacho-migrator up` (отдельный least-privilege binary, serve-образ миграций не несёт) прокатывает миграции до старта основного процесса.
 - `KACHO_COMPUTE_DB_SSLMODE` — `disable` для dev-стенда; production обязан
   `verify-full`.
 
@@ -397,7 +397,7 @@ INSERT INTO zones (id, region_id, status, name) VALUES
 
 ```bash
 cd ../kacho-deploy && make psql SVC=compute       # psql kacho_compute
-KACHO_COMPUTE_DB_PASSWORD=secret bin/kacho-compute migrate up   # миграции вне kind
+KACHO_COMPUTE_DB_PASSWORD=secret bin/kacho-migrator up   # миграции вне kind
 ```
 
 Полезные команды:

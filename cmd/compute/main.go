@@ -5,7 +5,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"log"
@@ -20,7 +19,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/pressly/goose/v3"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -45,7 +43,6 @@ import (
 	"github.com/PRO-Robotech/kacho-compute/internal/fgaboot"
 	"github.com/PRO-Robotech/kacho-compute/internal/fgaintent"
 	"github.com/PRO-Robotech/kacho-compute/internal/handler"
-	"github.com/PRO-Robotech/kacho-compute/internal/migrations"
 	"github.com/PRO-Robotech/kacho-compute/internal/observability/health"
 	computemetrics "github.com/PRO-Robotech/kacho-compute/internal/observability/metrics"
 	"github.com/PRO-Robotech/kacho-compute/internal/operationresolver"
@@ -55,7 +52,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		log.Fatal("usage: compute {serve|migrate up|migrate down|migrate status}")
+		log.Fatal("usage: compute serve")
 	}
 	cmd := os.Args[1]
 
@@ -65,17 +62,16 @@ func main() {
 	}
 
 	switch cmd {
-	case "migrate":
-		if len(os.Args) < 3 {
-			log.Fatal("usage: compute migrate {up|down|status}")
-		}
-		runMigrate(cfg, os.Args[2])
 	case "serve":
 		if err := runServe(cfg); err != nil {
 			log.Fatal(err)
 		}
+	case "migrate":
+		// Миграции вынесены в отдельный least-privilege binary kacho-migrator —
+		// runtime serve-образ не несёт embed-миграции и деструктивный `migrate down`.
+		log.Fatal("migrations are not handled by this binary — use the kacho-migrator CLI ({up|down|status})")
 	default:
-		log.Fatalf("unknown command: %s", cmd)
+		log.Fatalf("unknown command %q (this binary only serves the API; migrations live in `kacho-migrator`)", cmd)
 	}
 }
 
@@ -814,29 +810,3 @@ func registerInternalServices(srv *grpc.Server, svcs *services, pool *pgxpool.Po
 	computev1.RegisterInternalDiskTypeServiceServer(srv, handler.NewInternalDiskTypeHandler(svcs.diskType))
 }
 
-func runMigrate(cfg config.Config, direction string) {
-	goose.SetBaseFS(migrations.FS)
-	if err := goose.SetDialect("postgres"); err != nil {
-		log.Fatalf("goose dialect: %v", err)
-	}
-	db, err := sql.Open("pgx", cfg.MigrateDSN())
-	if err != nil {
-		log.Fatalf("open db: %v", err)
-	}
-	defer db.Close()
-
-	var gooseErr error
-	switch direction {
-	case "up":
-		gooseErr = goose.Up(db, ".")
-	case "down":
-		gooseErr = goose.Down(db, ".")
-	case "status":
-		gooseErr = goose.Status(db, ".")
-	default:
-		log.Fatalf("unknown migrate direction: %s", direction)
-	}
-	if gooseErr != nil {
-		log.Fatalf("migrate %s: %v", direction, gooseErr)
-	}
-}

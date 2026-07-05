@@ -9,6 +9,7 @@ IMAGE          := kacho-compute:dev
 
 build:
 	CGO_ENABLED=0 go build -o bin/$(BINARY) $(CMD)
+	CGO_ENABLED=0 go build -o bin/kacho-migrator ./cmd/migrator
 
 test:
 	go test ./... -race -cover -timeout 300s
@@ -70,10 +71,10 @@ proto-gen: proto-vendor
 
 .PHONY: migrate-up migrate-down migrate-status
 migrate-up:
-	KACHO_COMPUTE_DB_PASSWORD=secret bin/$(BINARY) migrate up
+	KACHO_COMPUTE_DB_PASSWORD=secret bin/kacho-migrator up
 
 migrate-down:
-	KACHO_COMPUTE_DB_PASSWORD=secret bin/$(BINARY) migrate down
+	KACHO_COMPUTE_DB_PASSWORD=secret bin/kacho-migrator down
 
 migrate-status:
-	KACHO_COMPUTE_DB_PASSWORD=secret bin/$(BINARY) migrate status
+	KACHO_COMPUTE_DB_PASSWORD=secret bin/kacho-migrator status
