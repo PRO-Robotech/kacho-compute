@@ -71,7 +71,7 @@ func TestDiskRepo_T31Revoke03Disk_LabelRemoveEmitsMirrorUpsert(t *testing.T) {
 
 	// Remove the label on Update (labels in mask → emitLabelsRegister = true).
 	created.Labels = map[string]string{}
-	_, err = diskRepo.Update(ctx, created, true)
+	_, err = diskRepo.Update(ctx, created, true, []string{"labels"})
 	require.NoError(t, err)
 
 	regs := registerIntents(queryFGARegisterRows(ctx, t, pool, dID))
@@ -115,7 +115,7 @@ func TestDiskRepo_T31Idm03Disk_NonLabelUpdateNoEmit(t *testing.T) {
 	require.NoError(t, err)
 
 	created.Name = "disk-renamed"
-	_, err = diskRepo.Update(ctx, created, false)
+	_, err = diskRepo.Update(ctx, created, false, []string{"name"})
 	require.NoError(t, err)
 
 	regs := registerIntents(queryFGARegisterRows(ctx, t, pool, dID))

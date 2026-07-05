@@ -61,7 +61,7 @@ type DiskRepo interface {
 	List(ctx context.Context, f DiskFilter, p Pagination) ([]*domain.Disk, string, error)
 	Insert(ctx context.Context, d *domain.Disk) (*domain.Disk, error)
 	// Update — emitLabelsRegister эмитит mirror.upsert при labels-в-маске (parity с Instance).
-	Update(ctx context.Context, d *domain.Disk, emitLabelsRegister bool) (*domain.Disk, error)
+	Update(ctx context.Context, d *domain.Disk, emitLabelsRegister bool, changed []string) (*domain.Disk, error)
 	Delete(ctx context.Context, id string) error
 	// SetZoneIfDetached атомарно меняет zone_id, но только если диск НЕ attached
 	// (Relocate). Гонка с AttachDisk закрывается на DB-уровне (row-lock на disks),
@@ -79,7 +79,7 @@ type ImageRepo interface {
 	List(ctx context.Context, f ImageFilter, p Pagination) ([]*domain.Image, string, error)
 	Insert(ctx context.Context, i *domain.Image) (*domain.Image, error)
 	// Update — emitLabelsRegister эмитит mirror.upsert при labels-в-маске (parity с Instance).
-	Update(ctx context.Context, i *domain.Image, emitLabelsRegister bool) (*domain.Image, error)
+	Update(ctx context.Context, i *domain.Image, emitLabelsRegister bool, changed []string) (*domain.Image, error)
 	Delete(ctx context.Context, id string) error
 }
 
@@ -89,7 +89,7 @@ type SnapshotRepo interface {
 	List(ctx context.Context, f SnapshotFilter, p Pagination) ([]*domain.Snapshot, string, error)
 	Insert(ctx context.Context, s *domain.Snapshot) (*domain.Snapshot, error)
 	// Update — emitLabelsRegister эмитит mirror.upsert при labels-в-маске (parity с Instance).
-	Update(ctx context.Context, s *domain.Snapshot, emitLabelsRegister bool) (*domain.Snapshot, error)
+	Update(ctx context.Context, s *domain.Snapshot, emitLabelsRegister bool, changed []string) (*domain.Snapshot, error)
 	Delete(ctx context.Context, id string) error
 }
 
@@ -101,12 +101,17 @@ type InstanceRepo interface {
 	// созданные из disk_spec (вставляются в этой же TX). Возвращает созданную
 	// ВМ (с заполненными AttachedDisks).
 	Insert(ctx context.Context, in *domain.Instance, inlineDisks []*domain.Disk) (*domain.Instance, error)
-	// Update обновляет mutable поля + status (для lifecycle-операций).
-	// emitLabelsRegister: true когда "labels" присутствует в update-mask (или
-	// full-object PATCH применяет labels) → repo эмитит свежий FGA register-intent
-	// с обновлёнными labels в той же writer-tx (refresh IAM resource_mirror —
-	// within-service-инвариант на DB-уровне); false → register-intent НЕ эмитится.
-	Update(ctx context.Context, in *domain.Instance, emitLabelsRegister bool) (*domain.Instance, error)
+	// Update обновляет mutable descriptive/resource поля (status НЕ трогает —
+	// им владеет SetStatusCAS). emitLabelsRegister: true когда "labels" присутствует
+	// в update-mask (или full-object PATCH применяет labels) → repo эмитит свежий FGA
+	// register-intent с обновлёнными labels в той же writer-tx (refresh IAM
+	// resource_mirror); false → register-intent НЕ эмитится.
+	//
+	// changed — фактически изменённые mask-поля; repo пишет ТОЛЬКО их колонки
+	// (column-scoped UPDATE). Без scoping конкурентный Update по другому полю
+	// затирается значением из устаревшего Get-снимка (lost update) — read-modify-write
+	// вне одной TX. Пустой changed → no-op reload (behaviour-preserving).
+	Update(ctx context.Context, in *domain.Instance, emitLabelsRegister bool, changed []string) (*domain.Instance, error)
 	// SetStatusCAS атомарно переводит instance из expected-status в next-status
 	// (CAS на DB-уровне: conditional UPDATE WHERE id=$1 AND status=$expected).
 	// Если row не существует → ErrNotFound; если status не совпадает с

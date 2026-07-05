@@ -168,23 +168,48 @@ func (r *DiskRepo) Insert(ctx context.Context, d *domain.Disk) (*domain.Disk, er
 // ревокался при снятии/смене метки. Полное снятие меток (labels={}) эмитит mirror.upsert
 // с пустыми labels (НЕ Unregister — ресурс жив). Когда false (name/description/size
 // без labels) — register-intent НЕ эмитится (меньше reconcile-шума).
-func (r *DiskRepo) Update(ctx context.Context, d *domain.Disk, emitLabelsRegister bool) (*domain.Disk, error) {
-	labelsJSON, err := marshalJSONB(d.Labels, "Disk.labels")
-	if err != nil {
-		return nil, err
+func (r *DiskRepo) Update(ctx context.Context, d *domain.Disk, emitLabelsRegister bool, changed []string) (*domain.Disk, error) {
+	// column-scoped SET: пишем только изменённые колонки (см. updateSet) — иначе
+	// конкурентный Update по другому полю затирается устаревшим снимком (lost update).
+	ch := changedSet(changed)
+	us := newUpdateSet(d.ID)
+	if _, ok := ch["name"]; ok {
+		us.add("name", d.Name)
 	}
-	dppJSON, err := marshalProtoJSONB(d.DiskPlacementPolicy, "Disk.disk_placement_policy")
-	if err != nil {
-		return nil, err
+	if _, ok := ch["description"]; ok {
+		us.add("description", d.Description)
 	}
+	if _, ok := ch["labels"]; ok {
+		labelsJSON, err := marshalJSONB(d.Labels, "Disk.labels")
+		if err != nil {
+			return nil, err
+		}
+		us.add("labels", labelsJSON)
+	}
+	if _, ok := ch["size"]; ok {
+		us.add("size", d.Size)
+	}
+	if _, ok := ch["disk_placement_policy"]; ok {
+		dppJSON, err := marshalProtoJSONB(d.DiskPlacementPolicy, "Disk.disk_placement_policy")
+		if err != nil {
+			return nil, err
+		}
+		us.add("disk_placement_policy", dppJSON)
+	}
+
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, service.ErrInternal
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	const q = `UPDATE disks SET name=$2, description=$3, labels=$4, size=$5, disk_placement_policy=$6 WHERE id=$1 RETURNING ` + diskCols
-	result, err := scanDisk(tx.QueryRow(ctx, q, d.ID, d.Name, d.Description, labelsJSON, d.Size, dppJSON))
+	var result *domain.Disk
+	if us.empty() {
+		result, err = scanDisk(tx.QueryRow(ctx, `SELECT `+diskCols+` FROM disks WHERE id = $1`, d.ID))
+	} else {
+		q := `UPDATE disks ` + us.clause() + ` WHERE id = $1 RETURNING ` + diskCols
+		result, err = scanDisk(tx.QueryRow(ctx, q, us.args...))
+	}
 	if err != nil {
 		return nil, wrapPgErr(err, "Disk", d.ID)
 	}

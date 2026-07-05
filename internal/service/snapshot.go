@@ -170,18 +170,23 @@ func (s *SnapshotService) Update(ctx context.Context, req UpdateSnapshotReq) (*o
 		// register-intent refresh (mirror.upsert) so label-scoped grants revoke on
 		// label-remove/change. Empty mask = full-PATCH includes labels.
 		labelsInMask := false
+		// changed — фактически изменённые колонки (column-scoped UPDATE, no lost update).
+		changed := make([]string, 0, len(updates))
 		for _, f := range updates {
 			switch f {
 			case "name":
 				snap.Name = req.Name
+				changed = append(changed, "name")
 			case "description":
 				snap.Description = req.Description
+				changed = append(changed, "description")
 			case "labels":
 				snap.Labels = req.Labels
 				labelsInMask = true
+				changed = append(changed, "labels")
 			}
 		}
-		updated, err := s.repo.Update(ctx, snap, labelsInMask)
+		updated, err := s.repo.Update(ctx, snap, labelsInMask, changed)
 		if err != nil {
 			return nil, mapRepoErr(err)
 		}

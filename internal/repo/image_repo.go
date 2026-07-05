@@ -166,18 +166,41 @@ func (r *ImageRepo) Insert(ctx context.Context, i *domain.Image) (*domain.Image,
 // resource_mirror не протух и label-scoped грант ревокался при снятии/смене метки.
 // Полное снятие меток → upsert {} (НЕ Unregister). false (name/description/min_disk_size
 // без labels) → register-intent НЕ эмитится.
-func (r *ImageRepo) Update(ctx context.Context, i *domain.Image, emitLabelsRegister bool) (*domain.Image, error) {
-	labelsJSON, err := marshalJSONB(i.Labels, "Image.labels")
-	if err != nil {
-		return nil, err
+func (r *ImageRepo) Update(ctx context.Context, i *domain.Image, emitLabelsRegister bool, changed []string) (*domain.Image, error) {
+	// column-scoped SET: пишем только изменённые колонки (см. updateSet) — иначе
+	// конкурентный Update по другому полю затирается устаревшим снимком (lost update).
+	ch := changedSet(changed)
+	us := newUpdateSet(i.ID)
+	if _, ok := ch["name"]; ok {
+		us.add("name", i.Name)
 	}
+	if _, ok := ch["description"]; ok {
+		us.add("description", i.Description)
+	}
+	if _, ok := ch["labels"]; ok {
+		labelsJSON, err := marshalJSONB(i.Labels, "Image.labels")
+		if err != nil {
+			return nil, err
+		}
+		us.add("labels", labelsJSON)
+	}
+	if _, ok := ch["min_disk_size"]; ok {
+		us.add("min_disk_size", i.MinDiskSize)
+	}
+
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, service.ErrInternal
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	const q = `UPDATE images SET name=$2, description=$3, labels=$4, min_disk_size=$5 WHERE id=$1 RETURNING ` + imageCols
-	result, err := scanImage(tx.QueryRow(ctx, q, i.ID, i.Name, i.Description, labelsJSON, i.MinDiskSize))
+
+	var result *domain.Image
+	if us.empty() {
+		result, err = scanImage(tx.QueryRow(ctx, `SELECT `+imageCols+` FROM images WHERE id = $1`, i.ID))
+	} else {
+		q := `UPDATE images ` + us.clause() + ` WHERE id = $1 RETURNING ` + imageCols
+		result, err = scanImage(tx.QueryRow(ctx, q, us.args...))
+	}
 	if err != nil {
 		return nil, wrapPgErr(err, "Image", i.ID)
 	}

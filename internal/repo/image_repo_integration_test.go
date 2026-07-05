@@ -54,7 +54,7 @@ func TestImageRepo_T31Revoke03Image_LabelRemoveEmitsMirrorUpsert(t *testing.T) {
 	assert.Equal(t, map[string]string{"tier": "treska"}, payloadMirror(t, regsAfterCreate[0].payload).Labels)
 
 	created.Labels = map[string]string{}
-	_, err = imgRepo.Update(ctx, created, true)
+	_, err = imgRepo.Update(ctx, created, true, []string{"labels"})
 	require.NoError(t, err)
 
 	regs := registerIntents(queryFGARegisterRows(ctx, t, pool, imgID))
@@ -95,7 +95,7 @@ func TestImageRepo_T31Idm03Image_NonLabelUpdateNoEmit(t *testing.T) {
 	require.NoError(t, err)
 
 	created.Name = "img-renamed"
-	_, err = imgRepo.Update(ctx, created, false)
+	_, err = imgRepo.Update(ctx, created, false, []string{"name"})
 	require.NoError(t, err)
 
 	regs := registerIntents(queryFGARegisterRows(ctx, t, pool, imgID))

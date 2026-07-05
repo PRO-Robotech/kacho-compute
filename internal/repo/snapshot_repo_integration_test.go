@@ -54,7 +54,7 @@ func TestSnapshotRepo_T31Revoke03Snapshot_LabelRemoveEmitsMirrorUpsert(t *testin
 	assert.Equal(t, map[string]string{"tier": "treska"}, payloadMirror(t, regsAfterCreate[0].payload).Labels)
 
 	created.Labels = map[string]string{}
-	_, err = snapRepo.Update(ctx, created, true)
+	_, err = snapRepo.Update(ctx, created, true, []string{"labels"})
 	require.NoError(t, err)
 
 	regs := registerIntents(queryFGARegisterRows(ctx, t, pool, snapID))
@@ -95,7 +95,7 @@ func TestSnapshotRepo_T31Idm03Snapshot_NonLabelUpdateNoEmit(t *testing.T) {
 	require.NoError(t, err)
 
 	created.Name = "snap-renamed"
-	_, err = snapRepo.Update(ctx, created, false)
+	_, err = snapRepo.Update(ctx, created, false, []string{"name"})
 	require.NoError(t, err)
 
 	regs := registerIntents(queryFGARegisterRows(ctx, t, pool, snapID))

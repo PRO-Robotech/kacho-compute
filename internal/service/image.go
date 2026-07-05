@@ -261,23 +261,29 @@ func (s *ImageService) Update(ctx context.Context, req UpdateImageReq) (*operati
 		// register-intent refresh (mirror.upsert) so label-scoped grants revoke on
 		// label-remove/change. Empty mask = full-PATCH includes labels.
 		labelsInMask := false
+		// changed — фактически изменённые колонки (column-scoped UPDATE, no lost update).
+		changed := make([]string, 0, len(updates))
 		for _, f := range updates {
 			switch f {
 			case "name":
 				i.Name = req.Name
+				changed = append(changed, "name")
 			case "description":
 				i.Description = req.Description
+				changed = append(changed, "description")
 			case "labels":
 				i.Labels = req.Labels
 				labelsInMask = true
+				changed = append(changed, "labels")
 			case "min_disk_size":
 				if len(req.UpdateMask) == 0 && req.MinDiskSize == 0 {
 					continue
 				}
 				i.MinDiskSize = req.MinDiskSize
+				changed = append(changed, "min_disk_size")
 			}
 		}
-		updated, err := s.repo.Update(ctx, i, labelsInMask)
+		updated, err := s.repo.Update(ctx, i, labelsInMask, changed)
 		if err != nil {
 			return nil, mapRepoErr(err)
 		}
