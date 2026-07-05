@@ -122,7 +122,7 @@ func (r *DiskRepo) Insert(_ context.Context, d *domain.Disk) (*domain.Disk, erro
 
 // Update обновляет диск. Записывает emitLabelsRegister в LastUpdateEmitLabels
 // для проверки use-case-тестом.
-func (r *DiskRepo) Update(_ context.Context, d *domain.Disk, emitLabelsRegister bool) (*domain.Disk, error) {
+func (r *DiskRepo) Update(_ context.Context, d *domain.Disk, emitLabelsRegister bool, _ []string) (*domain.Disk, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	flag := emitLabelsRegister
@@ -259,7 +259,7 @@ func (r *ImageRepo) Insert(_ context.Context, i *domain.Image) (*domain.Image, e
 }
 
 // Update обновляет образ. Записывает emitLabelsRegister.
-func (r *ImageRepo) Update(_ context.Context, i *domain.Image, emitLabelsRegister bool) (*domain.Image, error) {
+func (r *ImageRepo) Update(_ context.Context, i *domain.Image, emitLabelsRegister bool, _ []string) (*domain.Image, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	flag := emitLabelsRegister
@@ -352,7 +352,7 @@ func (r *SnapshotRepo) Insert(_ context.Context, s *domain.Snapshot) (*domain.Sn
 }
 
 // Update обновляет снапшот. Записывает emitLabelsRegister.
-func (r *SnapshotRepo) Update(_ context.Context, s *domain.Snapshot, emitLabelsRegister bool) (*domain.Snapshot, error) {
+func (r *SnapshotRepo) Update(_ context.Context, s *domain.Snapshot, emitLabelsRegister bool, _ []string) (*domain.Snapshot, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	flag := emitLabelsRegister
@@ -464,7 +464,7 @@ func (r *InstanceRepo) Insert(_ context.Context, in *domain.Instance, inlineDisk
 
 // Update обновляет ВМ. Записывает emitLabelsRegister в LastUpdateEmitLabels
 // (epic RSAB β, D-β6) для проверки use-case-тестом.
-func (r *InstanceRepo) Update(_ context.Context, in *domain.Instance, emitLabelsRegister bool) (*domain.Instance, error) {
+func (r *InstanceRepo) Update(_ context.Context, in *domain.Instance, emitLabelsRegister bool, _ []string) (*domain.Instance, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	flag := emitLabelsRegister

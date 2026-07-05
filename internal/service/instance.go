@@ -336,22 +336,34 @@ func (s *InstanceService) Update(ctx context.Context, req UpdateInstanceReq) (*o
 		// so the IAM resource_mirror tracks dev→prod label dynamics. A full-object
 		// PATCH (empty mask) applies labels too, so `updates` already includes it.
 		labelsInMask := false
+		// changed — фактически изменённые mask-поля. Передаётся в repo.Update, чтобы
+		// UPDATE писал ТОЛЬКО эти колонки (column-scoped), а не весь набор из
+		// устаревшего Get-снимка — иначе конкурентный Update по другому полю
+		// затирается (lost update). Поля, пропущенные из-за условий (silent-ignore),
+		// в changed НЕ добавляются.
+		changed := make([]string, 0, len(updates))
 		for _, f := range updates {
 			switch f {
 			case "name":
 				in.Name = req.Name
+				changed = append(changed, "name")
 			case "description":
 				in.Description = req.Description
+				changed = append(changed, "description")
 			case "labels":
 				in.Labels = req.Labels
 				labelsInMask = true
+				changed = append(changed, "labels")
 			case "service_account_id":
 				in.ServiceAccountID = req.ServiceAccountID
+				changed = append(changed, "service_account_id")
 			case "placement_policy":
 				in.PlacementPolicy = req.PlacementPolicy
+				changed = append(changed, "placement_policy")
 			case "network_settings":
 				if req.NetworkSettingsType != "" {
 					in.NetworkSettingsType = req.NetworkSettingsType
+					changed = append(changed, "network_settings")
 				}
 			case "resources_spec":
 				if !full {
@@ -360,18 +372,20 @@ func (s *InstanceService) Update(ctx context.Context, req UpdateInstanceReq) (*o
 						return nil, err
 					}
 					in.Cores, in.Memory, in.CoreFraction, in.GPUs = req.Cores, req.Memory, defaultCoreFraction(req.CoreFraction), req.GPUs
+					changed = append(changed, "resources_spec")
 				}
 			case "platform_id":
 				if !full && req.PlatformID != "" {
 					touchesCompute = true
 					in.PlatformID = req.PlatformID
+					changed = append(changed, "platform_id")
 				}
 			}
 		}
 		if touchesCompute && in.Status != domain.InstanceStatusStopped {
 			return nil, status.Error(codes.FailedPrecondition, "Instance must be stopped")
 		}
-		updated, err := s.repo.Update(ctx, in, labelsInMask)
+		updated, err := s.repo.Update(ctx, in, labelsInMask, changed)
 		if err != nil {
 			return nil, mapRepoErr(err)
 		}

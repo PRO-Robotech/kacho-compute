@@ -242,15 +242,20 @@ func (s *DiskService) doUpdate(ctx context.Context, req UpdateDiskReq) (*anypb.A
 	// dynamics and ARM_LABELS grants revoke on label-remove/change. Empty mask =
 	// full-PATCH applies labels too, so `updates` already includes it.
 	labelsInMask := false
+	// changed — фактически изменённые колонки (column-scoped UPDATE, no lost update).
+	changed := make([]string, 0, len(updates))
 	for _, f := range updates {
 		switch f {
 		case "name":
 			d.Name = req.Name
+			changed = append(changed, "name")
 		case "description":
 			d.Description = req.Description
+			changed = append(changed, "description")
 		case "labels":
 			d.Labels = req.Labels
 			labelsInMask = true
+			changed = append(changed, "labels")
 		case "size":
 			// silent-ignore size==0 при full-PATCH; explicit-mask size требует увеличения.
 			if len(req.UpdateMask) == 0 && req.Size == 0 {
@@ -263,11 +268,13 @@ func (s *DiskService) doUpdate(ctx context.Context, req UpdateDiskReq) (*anypb.A
 				return nil, status.Errorf(codes.InvalidArgument, "size must be at most %d bytes", diskSizeMaxUpdate)
 			}
 			d.Size = req.Size
+			changed = append(changed, "size")
 		case "disk_placement_policy":
 			d.DiskPlacementPolicy = req.DiskPlacementPolicy
+			changed = append(changed, "disk_placement_policy")
 		}
 	}
-	updated, err := s.repo.Update(ctx, d, labelsInMask)
+	updated, err := s.repo.Update(ctx, d, labelsInMask, changed)
 	if err != nil {
 		return nil, mapRepoErr(err)
 	}

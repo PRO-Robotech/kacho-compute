@@ -189,7 +189,8 @@ func (r *InstanceRepo) Insert(ctx context.Context, in *domain.Instance, inlineDi
 	return created, nil
 }
 
-// Update обновляет mutable поля ВМ + status + outbox UPDATED.
+// Update обновляет mutable descriptive/resource поля ВМ + outbox UPDATED.
+// status НЕ трогается — им владеет исключительно SetStatusCAS (lifecycle).
 //
 // emitLabelsRegister: when true (the use-case saw "labels" in the update-mask, or
 // a full-object PATCH that applies labels) a fresh FGA register-intent carrying the
@@ -198,25 +199,65 @@ func (r *InstanceRepo) Insert(ctx context.Context, in *domain.Instance, inlineDi
 // (name/description/… without labels) NO register-intent is emitted — labels-
 // membership and the immutable parent are unchanged, so a refresh would be
 // pointless traffic.
-func (r *InstanceRepo) Update(ctx context.Context, in *domain.Instance, emitLabelsRegister bool) (*domain.Instance, error) {
-	labelsJSON, err := marshalJSONB(in.Labels, "Instance.labels")
-	if err != nil {
-		return nil, err
+func (r *InstanceRepo) Update(ctx context.Context, in *domain.Instance, emitLabelsRegister bool, changed []string) (*domain.Instance, error) {
+	// column-scoped SET: пишем ТОЛЬКО фактически изменённые колонки (`changed`).
+	// Полный column-set затирал бы независимое поле, изменённое конкурентным
+	// Update, значением из устаревшего Get-снимка (lost update). status в SET
+	// НЕ входит никогда — им владеет атомарный SetStatusCAS (lifecycle); писать
+	// его здесь клобберило бы конкурентный Stop/Start/Restart.
+	ch := changedSet(changed)
+	us := newUpdateSet(in.ID)
+	if _, ok := ch["name"]; ok {
+		us.add("name", in.Name)
 	}
-	ppJSON, err := marshalProtoJSONB(in.PlacementPolicy, "Instance.placement_policy")
-	if err != nil {
-		return nil, err
+	if _, ok := ch["description"]; ok {
+		us.add("description", in.Description)
 	}
+	if _, ok := ch["labels"]; ok {
+		labelsJSON, err := marshalJSONB(in.Labels, "Instance.labels")
+		if err != nil {
+			return nil, err
+		}
+		us.add("labels", labelsJSON)
+	}
+	if _, ok := ch["service_account_id"]; ok {
+		us.add("service_account_id", in.ServiceAccountID)
+	}
+	if _, ok := ch["placement_policy"]; ok {
+		ppJSON, err := marshalProtoJSONB(in.PlacementPolicy, "Instance.placement_policy")
+		if err != nil {
+			return nil, err
+		}
+		us.add("placement_policy", ppJSON)
+	}
+	if _, ok := ch["network_settings"]; ok {
+		us.add("network_settings_type", in.NetworkSettingsType)
+	}
+	if _, ok := ch["resources_spec"]; ok {
+		us.add("cores", in.Cores)
+		us.add("memory", in.Memory)
+		us.add("core_fraction", in.CoreFraction)
+		us.add("gpus", in.GPUs)
+	}
+	if _, ok := ch["platform_id"]; ok {
+		us.add("platform_id", in.PlatformID)
+	}
+
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, service.ErrInternal
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	const q = `UPDATE instances SET name=$2, description=$3, labels=$4, service_account_id=$5, cores=$6, memory=$7,
-		core_fraction=$8, gpus=$9, platform_id=$10, status=$11, network_settings_type=$12, placement_policy=$13
-		WHERE id=$1 RETURNING ` + instanceCols
-	updated, err := scanInstance(tx.QueryRow(ctx, q, in.ID, in.Name, in.Description, labelsJSON, in.ServiceAccountID,
-		in.Cores, in.Memory, in.CoreFraction, in.GPUs, in.PlatformID, instanceStatusName(in.Status), in.NetworkSettingsType, ppJSON))
+
+	var updated *domain.Instance
+	if us.empty() {
+		// mask не задел ни одной mutable-колонки — no-op: перечитываем строку
+		// (NotFound если её нет) и всё равно эмитим UPDATED (behaviour-preserving).
+		updated, err = scanInstance(tx.QueryRow(ctx, fmt.Sprintf(`SELECT %s FROM instances WHERE id = $1`, instanceCols), in.ID))
+	} else {
+		q := `UPDATE instances ` + us.clause() + ` WHERE id = $1 RETURNING ` + instanceCols
+		updated, err = scanInstance(tx.QueryRow(ctx, q, us.args...))
+	}
 	if err != nil {
 		return nil, wrapPgErr(err, "Instance", in.ID)
 	}
@@ -400,6 +441,12 @@ func (r *InstanceRepo) mutateAndReload(ctx context.Context, id, eventType string
 		// Отделяем от generic AlreadyExists (мапит в FailedPrecondition, не AlreadyExists).
 		if isAttachedDisksDiskIDUniqViolation(err) {
 			return nil, fmt.Errorf("%w: disk already attached to another instance", service.ErrFailedPrecondition)
+		}
+		// per-instance device_name / boot uniqueness — тот же класс инварианта, что
+		// sequential software-check в service.AttachDisk (FailedPrecondition). Держим
+		// error-контракт согласованным между sequential и concurrent путями.
+		if isAttachedDisksDeviceOrBootUniqViolation(err) {
+			return nil, fmt.Errorf("%w: device_name or boot-disk already in use on this instance", service.ErrFailedPrecondition)
 		}
 		if isUniqueViolation(err) {
 			return nil, service.ErrAlreadyExists

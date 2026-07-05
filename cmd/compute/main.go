@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -452,28 +453,73 @@ func validateAuthMode(cfg config.Config, logger *slog.Logger) (productionMode bo
 		logger.Warn("AuthMode=production: anonymous callers will be rejected")
 	case "production-strict":
 		productionMode = true
-		// TLS-check on the IAM peer (project-existence-check edge).
-		if !cfg.IAMTLS {
-			return false, fmt.Errorf("production-strict mode: KACHO_COMPUTE_IAM_TLS=true required")
+		// TLS-check on the actually-dialed transport edges (per-edge mTLS value-
+		// structs), NOT the legacy server-auth-only cfg.IAMTLS bool — that knob no
+		// longer wires any live dial, so gating on it gave false assurance while
+		// every cross-service edge + both listeners could still run plaintext.
+		if terr := insecureEdgesInProductionStrict(cfg); terr != nil {
+			return false, terr
 		}
 		switch cfg.DBSSLMode {
 		case "require", "verify-ca", "verify-full":
 		default:
 			return false, fmt.Errorf("production-strict mode: KACHO_COMPUTE_DB_SSLMODE must be one of require|verify-ca|verify-full (got %q)", cfg.DBSSLMode)
 		}
-		logger.Warn("AuthMode=production-strict: anonymous rejected + TLS+SSL strictly validated")
+		logger.Warn("AuthMode=production-strict: anonymous rejected + per-edge mTLS+SSL strictly validated")
 	default:
 		return false, fmt.Errorf("unknown KACHO_COMPUTE_AUTH_MODE=%q (allowed: dev, production, production-strict)", cfg.AuthMode)
 	}
 	if !productionMode {
-		if !cfg.IAMTLS {
-			logger.Warn("KACHO_COMPUTE_IAM_TLS=false — cross-service gRPC plaintext (dev only)")
+		if terr := insecureEdgesInProductionStrict(cfg); terr != nil {
+			logger.Warn("insecure cross-service/listener transport (dev only)", "detail", terr.Error())
 		}
 		if cfg.DBSSLMode == "" || cfg.DBSSLMode == "disable" {
 			logger.Warn("KACHO_COMPUTE_DB_SSLMODE=disable — DB plaintext (dev only)")
 		}
 	}
 	return productionMode, nil
+}
+
+// insecureEdgesInProductionStrict возвращает non-nil ошибку, перечисляющую
+// КАЖДОЕ реально дозваниваемое transport-ребро, у которого per-edge mTLS
+// выключен. nil ⇒ все провода защищены. Гейт production-strict строится на этом
+// (а не на мёртвом cfg.IAMTLS): каждое перечисленное ребро несёт forwarded
+// x-kacho-principal-* identity и/или DB/registration-payload, поэтому plaintext
+// на любом из них компрометирует authorization-subject на проводе (CWE-319).
+//
+//   - оба server-listener'а (PublicServerMTLS / InternalServerMTLS) — принимают
+//     forwarded principal, всегда обязательны;
+//   - project/geo peer-рёбра (IAMProjectMTLS / GeoMTLS) — дозваниваются на
+//     request-path каждой мутации, кроме SkipPeerValidation;
+//   - authz Check-ребро (IAMAuthzMTLS) — per-RPC FGA-gate, активно кроме breakglass;
+//   - register-drainer ребро (IAMRegisterMTLS) — реплеит FGA-registration в iam,
+//     активно при FGARegisterDrainerEnabled.
+func insecureEdgesInProductionStrict(cfg config.Config) error {
+	var insecure []string
+	if !cfg.PublicServerMTLS.Enable {
+		insecure = append(insecure, "PUBLIC_SERVER_MTLS_ENABLE")
+	}
+	if !cfg.InternalServerMTLS.Enable {
+		insecure = append(insecure, "INTERNAL_SERVER_MTLS_ENABLE")
+	}
+	if !cfg.SkipPeerValidation {
+		if !cfg.IAMProjectMTLS.Enable {
+			insecure = append(insecure, "IAM_PROJECT_MTLS_ENABLE")
+		}
+		if !cfg.GeoMTLS.Enable {
+			insecure = append(insecure, "GEO_MTLS_ENABLE")
+		}
+	}
+	if !cfg.AuthZBreakglass && !cfg.IAMAuthzMTLS.Enable {
+		insecure = append(insecure, "IAM_AUTHZ_MTLS_ENABLE")
+	}
+	if cfg.FGARegisterDrainerEnabled && !cfg.IAMRegisterMTLS.Enable {
+		insecure = append(insecure, "IAM_REGISTER_MTLS_ENABLE")
+	}
+	if len(insecure) == 0 {
+		return nil
+	}
+	return fmt.Errorf("production-strict mode requires per-edge mTLS on all live transport edges; insecure (Enable=false): %s", strings.Join(insecure, ", "))
 }
 
 // dialPeers открывает gRPC-клиенты к peer-сервисам (kacho-iam — public :9090 для

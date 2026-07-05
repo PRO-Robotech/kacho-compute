@@ -155,18 +155,38 @@ func (r *SnapshotRepo) Insert(ctx context.Context, s *domain.Snapshot) (*domain.
 // resource_mirror не протух и label-scoped грант ревокался при снятии/смене метки.
 // Полное снятие меток → upsert {} (НЕ Unregister). false (name/description без labels) →
 // register-intent НЕ эмитится.
-func (r *SnapshotRepo) Update(ctx context.Context, s *domain.Snapshot, emitLabelsRegister bool) (*domain.Snapshot, error) {
-	labelsJSON, err := marshalJSONB(s.Labels, "Snapshot.labels")
-	if err != nil {
-		return nil, err
+func (r *SnapshotRepo) Update(ctx context.Context, s *domain.Snapshot, emitLabelsRegister bool, changed []string) (*domain.Snapshot, error) {
+	// column-scoped SET: пишем только изменённые колонки (см. updateSet) — иначе
+	// конкурентный Update по другому полю затирается устаревшим снимком (lost update).
+	ch := changedSet(changed)
+	us := newUpdateSet(s.ID)
+	if _, ok := ch["name"]; ok {
+		us.add("name", s.Name)
 	}
+	if _, ok := ch["description"]; ok {
+		us.add("description", s.Description)
+	}
+	if _, ok := ch["labels"]; ok {
+		labelsJSON, err := marshalJSONB(s.Labels, "Snapshot.labels")
+		if err != nil {
+			return nil, err
+		}
+		us.add("labels", labelsJSON)
+	}
+
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, service.ErrInternal
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	const q = `UPDATE snapshots SET name=$2, description=$3, labels=$4 WHERE id=$1 RETURNING ` + snapshotCols
-	result, err := scanSnapshot(tx.QueryRow(ctx, q, s.ID, s.Name, s.Description, labelsJSON))
+
+	var result *domain.Snapshot
+	if us.empty() {
+		result, err = scanSnapshot(tx.QueryRow(ctx, `SELECT `+snapshotCols+` FROM snapshots WHERE id = $1`, s.ID))
+	} else {
+		q := `UPDATE snapshots ` + us.clause() + ` WHERE id = $1 RETURNING ` + snapshotCols
+		result, err = scanSnapshot(tx.QueryRow(ctx, q, us.args...))
+	}
 	if err != nil {
 		return nil, wrapPgErr(err, "Snapshot", s.ID)
 	}

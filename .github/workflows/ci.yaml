@@ -67,7 +67,12 @@ jobs:
       - uses: actions/setup-go@v6
         with: { go-version-file: kacho-compute/go.mod, cache-dependency-path: kacho-compute/go.sum }
       - run: go mod download
-      - run: go test ./internal/repo/... -race -count=1 -timeout 300s
+      # internal/clients holds the short-gated testcontainers integration &
+      # exactly-once/two-replica concurrency tests (register-drainer durability,
+      # FGA backstop). They MUST run here — the unit job runs -short and skips
+      # them — otherwise the async exactly-once safety net is compiled but never
+      # asserted in CI.
+      - run: go test ./internal/repo/... ./internal/clients/... -race -count=1 -timeout 300s
 
   authz-deny-suite:
     name: authz-deny suite — generate + validate (KAC-122)

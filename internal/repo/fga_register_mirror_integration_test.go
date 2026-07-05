@@ -122,7 +122,7 @@ func Test_Beta04_UpdateLabels_EmitsNewIntent(t *testing.T) {
 
 	// dev → prod, "labels" in mask → emitLabelsRegister = true.
 	created.Labels = map[string]string{"env": "prod", "team": "core"}
-	_, err = instRepo.Update(ctx, created, true)
+	_, err = instRepo.Update(ctx, created, true, []string{"labels"})
 	require.NoError(t, err)
 
 	rows := queryFGARegisterRows(ctx, t, pool, inID)
@@ -165,7 +165,7 @@ func Test_BetaHardening_RegisterIntentStampsMonotonicSourceVersion(t *testing.T)
 	require.NoError(t, err)
 
 	created.Labels = map[string]string{"env": "prod"}
-	_, err = instRepo.Update(ctx, created, true)
+	_, err = instRepo.Update(ctx, created, true, []string{"labels"})
 	require.NoError(t, err)
 
 	var regs []fgaRegisterRow
@@ -245,7 +245,7 @@ func Test_Beta04b_UpdateNonLabels_NoNewIntent(t *testing.T) {
 
 	// name-only update → emitLabelsRegister = false.
 	created.Name = "vm-renamed"
-	_, err = instRepo.Update(ctx, created, false)
+	_, err = instRepo.Update(ctx, created, false, []string{"name"})
 	require.NoError(t, err)
 
 	rows := queryFGARegisterRows(ctx, t, pool, inID)
@@ -321,7 +321,7 @@ func Test_Beta05_ConcurrentUpdateLabels_OutboxConsistent(t *testing.T) {
 			defer wg.Done()
 			cp := *created
 			cp.Labels = map[string]string{"env": []string{"dev", "prod"}[n%2]}
-			_, uerr := instRepo.Update(ctx, &cp, true)
+			_, uerr := instRepo.Update(ctx, &cp, true, []string{"labels"})
 			assert.NoError(t, uerr)
 		}(i)
 	}

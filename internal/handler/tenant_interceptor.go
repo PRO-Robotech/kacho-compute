@@ -19,6 +19,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+
+	"github.com/PRO-Robotech/kacho-corelib/grpcsrv"
 )
 
 type tenantCtxKey struct{}
@@ -81,7 +83,8 @@ func AssertFolderOwnership(ctx context.Context, folderID string) error {
 // productionMode=true — fail-closed гейт: anonymous caller → PermissionDenied сразу.
 func TenantUnaryInterceptor(requireAdmin, productionMode bool) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-		t := tenantFromMetadata(ctx)
+		_, trusted := grpcsrv.TrustedPrincipalFromContext(ctx)
+		t := tenantFromMetadata(ctx, trusted)
 		if productionMode && t.IsAnonymous() {
 			return nil, status.Error(codes.PermissionDenied,
 				"AuthN required (production mode): set x-kacho-* identity headers via gateway")
@@ -99,7 +102,8 @@ func TenantUnaryInterceptor(requireAdmin, productionMode bool) grpc.UnaryServerI
 // TenantStreamInterceptor — то же для server-stream RPC (для Watch).
 func TenantStreamInterceptor(requireAdmin, productionMode bool) grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		t := tenantFromMetadata(ss.Context())
+		_, trusted := grpcsrv.TrustedPrincipalFromContext(ss.Context())
+		t := tenantFromMetadata(ss.Context(), trusted)
 		if productionMode && t.IsAnonymous() {
 			return status.Error(codes.PermissionDenied,
 				"AuthN required (production mode): set x-kacho-* identity headers via gateway")
@@ -137,7 +141,17 @@ type wrappedStream struct {
 func (w *wrappedStream) Context() context.Context { return w.ctx }
 
 // tenantFromMetadata — internal helper, извлекает TenantCtx из gRPC md.
-func tenantFromMetadata(ctx context.Context) TenantCtx {
+//
+// trusted — решение trust-aware principal-extract'а (grpcsrv.TrustedPrincipalFromContext):
+// на mTLS-листенере метадата доверяется ⟺ peer предъявил verified client-cert
+// trusted forwarder'а (api-gateway); insecure-листенер = back-compat trusted.
+// authz-влияющие заголовки (x-kacho-admin → Admin, x-kacho-folder-id → ProjectIDs)
+// читаются ТОЛЬКО от trusted peer'а — иначе peer, дотянувшийся до листенера напрямую
+// (TLS без verified cert), мог бы подделать `x-kacho-admin: true` и пройти admin-gate
+// / folder-ownership, т.к. эти заголовки не связаны с verified peer-identity
+// (в отличие от principal, который trust-gated). x-kacho-actor — audit-only, не
+// влияет на authz → читается всегда.
+func tenantFromMetadata(ctx context.Context, trusted bool) TenantCtx {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return TenantCtx{}
@@ -145,6 +159,13 @@ func tenantFromMetadata(ctx context.Context) TenantCtx {
 	t := TenantCtx{}
 	if v := md.Get("x-kacho-actor"); len(v) > 0 {
 		t.Actor = v[0]
+	}
+	if !trusted {
+		// Untrusted peer: игнорируем forgeable authz-заголовки. TenantCtx остаётся
+		// anonymous для authz (Admin=false, ProjectIDs=nil) — production-mode gate
+		// отобьёт его как anonymous, а authoritative per-RPC FGA Check (на trust-gated
+		// principal) остаётся основным гейтом.
+		return t
 	}
 	if v := md.Get("x-kacho-admin"); len(v) > 0 && v[0] == "true" {
 		t.Admin = true
