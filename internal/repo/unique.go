@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/PRO-Robotech/kacho-compute/internal/service"
+	"github.com/PRO-Robotech/kacho-compute/internal/ports"
 )
 
 // isUniqueViolation — Postgres unique-constraint violation (SQLSTATE 23505).
@@ -94,15 +94,15 @@ func wrapPgErr(err error, kind, id string) error {
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		if id != "" {
-			return fmt.Errorf("%w: %s %s not found", service.ErrNotFound, kind, id)
+			return fmt.Errorf("%w: %s %s not found", ports.ErrNotFound, kind, id)
 		}
-		return service.ErrNotFound
+		return ports.ErrNotFound
 	}
 	if isUniqueViolation(err) {
-		return service.ErrAlreadyExists
+		return ports.ErrAlreadyExists
 	}
 	if isFKViolation(err) {
-		return fmt.Errorf("%w: The %s %s is being used", service.ErrFailedPrecondition, strings.ToLower(kind), id)
+		return fmt.Errorf("%w: The %s %s is being used", ports.ErrFailedPrecondition, strings.ToLower(kind), id)
 	}
-	return service.ErrInternal
+	return ports.ErrInternal
 }

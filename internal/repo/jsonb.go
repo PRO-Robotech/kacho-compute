@@ -10,27 +10,27 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/PRO-Robotech/kacho-compute/internal/service"
+	"github.com/PRO-Robotech/kacho-compute/internal/ports"
 )
 
-// marshalJSONB сериализует v в JSONB-байты. Возвращает обёрнутую service.ErrInternal
+// marshalJSONB сериализует v в JSONB-байты. Возвращает обёрнутую ports.ErrInternal
 // при ошибке. Парная форма к unmarshalJSONB. Зеркалит kacho-vpc/internal/repo/jsonb.go.
 func marshalJSONB(v any, field string) ([]byte, error) {
 	b, err := json.Marshal(v)
 	if err != nil {
-		return nil, fmt.Errorf("%w: marshal JSONB %s: %v", service.ErrInternal, field, err)
+		return nil, fmt.Errorf("%w: marshal JSONB %s: %v", ports.ErrInternal, field, err)
 	}
 	return b, nil
 }
 
 // unmarshalJSONB десериализует JSONB-байты в target. Возвращает обёрнутую
-// service.ErrInternal при ошибке. nil/empty raw — no-op.
+// ports.ErrInternal при ошибке. nil/empty raw — no-op.
 func unmarshalJSONB(raw []byte, target any, field string) error {
 	if len(raw) == 0 {
 		return nil
 	}
 	if err := json.Unmarshal(raw, target); err != nil {
-		return fmt.Errorf("%w: corrupted JSONB %s: %v", service.ErrInternal, field, err)
+		return fmt.Errorf("%w: corrupted JSONB %s: %v", ports.ErrInternal, field, err)
 	}
 	return nil
 }
@@ -43,7 +43,7 @@ func marshalProtoJSONB[T proto.Message](m T, field string) ([]byte, error) {
 	}
 	b, err := protojson.Marshal(m)
 	if err != nil {
-		return nil, fmt.Errorf("%w: marshal proto JSONB %s: %v", service.ErrInternal, field, err)
+		return nil, fmt.Errorf("%w: marshal proto JSONB %s: %v", ports.ErrInternal, field, err)
 	}
 	return b, nil
 }
@@ -55,7 +55,7 @@ func unmarshalProtoJSONB(raw []byte, target proto.Message, field string) error {
 		return nil
 	}
 	if err := protojson.Unmarshal(raw, target); err != nil {
-		return fmt.Errorf("%w: corrupted proto JSONB %s: %v", service.ErrInternal, field, err)
+		return fmt.Errorf("%w: corrupted proto JSONB %s: %v", ports.ErrInternal, field, err)
 	}
 	return nil
 }

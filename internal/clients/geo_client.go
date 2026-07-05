@@ -15,15 +15,14 @@ import (
 	geov1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/geo/v1"
 
 	"github.com/PRO-Robotech/kacho-compute/internal/ports"
-	"github.com/PRO-Robotech/kacho-compute/internal/service"
 )
 
-// GeoClient реализует service.ZoneRegistry через gRPC к kacho-geo
+// GeoClient реализует ports.ZoneRegistry через gRPC к kacho-geo
 // (geo.v1.ZoneService.Get) — источник existence-check для Instance.zone_id.
 // Geography (Region/Zone) — домен leaf-сервиса kacho-geo; compute зонами не
 // владеет и их не обслуживает, лишь валидирует свой zone_id как consumer.
 //
-// Контракт ZoneRegistry (см. mapZoneRefErr): geo NOT_FOUND → service.ErrNotFound
+// Контракт ZoneRegistry (см. mapZoneRefErr): geo NOT_FOUND → ports.ErrNotFound
 // (→ InvalidArgument "Zone <id> not found", fail-closed на мутации Instance);
 // транспортная ошибка (geo недоступен) → проброс gRPC Unavailable (→ Unavailable
 // "zone check: ...", fail-closed для мутаций).
@@ -48,10 +47,10 @@ func NewGeoClientWith(zones geov1.ZoneServiceClient) *GeoClient {
 }
 
 // GetZone валидирует zone_id через geo.v1.ZoneService.Get. Найдено → ZoneInfo
-// (id + region). geo NOT_FOUND → service.ErrNotFound (mapZoneRefErr → InvalidArgument).
+// (id + region). geo NOT_FOUND → ports.ErrNotFound (mapZoneRefErr → InvalidArgument).
 // geo недоступен (после retry) → проброс gRPC Unavailable (mapZoneRefErr → Unavailable).
-func (c *GeoClient) GetZone(ctx context.Context, zoneID string) (service.ZoneInfo, error) {
-	var out service.ZoneInfo
+func (c *GeoClient) GetZone(ctx context.Context, zoneID string) (ports.ZoneInfo, error) {
+	var out ports.ZoneInfo
 	err := retry.OnUnavailable(ctx, func(ctx context.Context) error {
 		z, rerr := c.zones.Get(auth.PropagateOutgoing(ctx), &geov1.GetZoneRequest{ZoneId: zoneID})
 		if rerr != nil {
@@ -60,11 +59,11 @@ func (c *GeoClient) GetZone(ctx context.Context, zoneID string) (service.ZoneInf
 			}
 			return rerr
 		}
-		out = service.ZoneInfo{ID: z.GetId(), RegionID: z.GetRegionId()}
+		out = ports.ZoneInfo{ID: z.GetId(), RegionID: z.GetRegionId()}
 		return nil
 	})
 	if err != nil {
-		return service.ZoneInfo{}, err
+		return ports.ZoneInfo{}, err
 	}
 	return out, nil
 }
@@ -75,12 +74,12 @@ func (c *GeoClient) GetZone(ctx context.Context, zoneID string) (service.ZoneInf
 type NoopGeoClient struct{}
 
 // GetZone всегда возвращает ZoneInfo{ID: zoneID} без обращения к geo.
-func (NoopGeoClient) GetZone(_ context.Context, zoneID string) (service.ZoneInfo, error) {
-	return service.ZoneInfo{ID: zoneID}, nil
+func (NoopGeoClient) GetZone(_ context.Context, zoneID string) (ports.ZoneInfo, error) {
+	return ports.ZoneInfo{ID: zoneID}, nil
 }
 
 // ensure compile-time: both impls satisfy the use-case port.
 var (
-	_ service.ZoneRegistry = (*GeoClient)(nil)
-	_ service.ZoneRegistry = NoopGeoClient{}
+	_ ports.ZoneRegistry = (*GeoClient)(nil)
+	_ ports.ZoneRegistry = NoopGeoClient{}
 )

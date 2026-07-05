@@ -11,13 +11,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kacho-compute/internal/domain"
-	"github.com/PRO-Robotech/kacho-compute/internal/service"
+	"github.com/PRO-Robotech/kacho-compute/internal/ports"
 	"github.com/PRO-Robotech/kacho-corelib/validate"
 )
 
 // ---- DiskTypeRepo ----
 
-// DiskTypeRepo — реализация service.DiskTypeRepo поверх pgxpool.
+// DiskTypeRepo — реализация ports.DiskTypeRepo поверх pgxpool.
 type DiskTypeRepo struct {
 	pool *pgxpool.Pool
 }
@@ -42,7 +42,7 @@ func (r *DiskTypeRepo) Get(ctx context.Context, id string) (*domain.DiskType, er
 
 // List возвращает типы дисков с cursor-пагинацией по id (конвенция Kachō:
 // page_size валидируется через corevalidate.PageSize, garbage page_token → InvalidArgument).
-func (r *DiskTypeRepo) List(ctx context.Context, p service.Pagination) ([]*domain.DiskType, string, error) {
+func (r *DiskTypeRepo) List(ctx context.Context, p ports.Pagination) ([]*domain.DiskType, string, error) {
 	pageSize, err := validate.PageSize("page_size", p.PageSize)
 	if err != nil {
 		return nil, "", err
@@ -137,7 +137,7 @@ func (r *DiskTypeRepo) Delete(ctx context.Context, id string) error {
 		return wrapPgErr(err, "Disk type", id)
 	}
 	if tag.RowsAffected() == 0 {
-		return service.ErrNotFound
+		return ports.ErrNotFound
 	}
 	return nil
 }

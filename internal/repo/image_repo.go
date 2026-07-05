@@ -18,10 +18,10 @@ import (
 
 	"github.com/PRO-Robotech/kacho-compute/internal/domain"
 	"github.com/PRO-Robotech/kacho-compute/internal/fgaintent"
-	"github.com/PRO-Robotech/kacho-compute/internal/service"
+	"github.com/PRO-Robotech/kacho-compute/internal/ports"
 )
 
-// ImageRepo — реализация service.ImageRepo поверх pgxpool.
+// ImageRepo — реализация ports.ImageRepo поверх pgxpool.
 type ImageRepo struct {
 	pool *pgxpool.Pool
 }
@@ -53,7 +53,7 @@ func (r *ImageRepo) GetLatestByFamily(ctx context.Context, folderID, family stri
 }
 
 // List возвращает образы по folder с cursor-pagination.
-func (r *ImageRepo) List(ctx context.Context, f service.ImageFilter, p service.Pagination) ([]*domain.Image, string, error) {
+func (r *ImageRepo) List(ctx context.Context, f ports.ImageFilter, p ports.Pagination) ([]*domain.Image, string, error) {
 	pageSize, err := validate.PageSize("page_size", p.PageSize)
 	if err != nil {
 		return nil, "", err
@@ -135,7 +135,7 @@ func (r *ImageRepo) Insert(ctx context.Context, i *domain.Image) (*domain.Image,
 	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return nil, service.ErrInternal
+		return nil, ports.ErrInternal
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	const q = `INSERT INTO images (id, project_id, created_at, name, description, labels, family, storage_size, min_disk_size, product_ids,
@@ -146,11 +146,11 @@ func (r *ImageRepo) Insert(ctx context.Context, i *domain.Image) (*domain.Image,
 		return nil, wrapPgErr(err, "Image", i.Name)
 	}
 	if err := emitCompute(ctx, tx, "Image", result.ID, "CREATED", imagePayload(result)); err != nil {
-		return nil, service.ErrInternal
+		return nil, ports.ErrInternal
 	}
 	// FGA owner-tuple register-intent in the SAME writer-tx (no dual-write).
 	if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Image", result.ID, result.ProjectID, result.Labels); err != nil {
-		return nil, service.ErrInternal
+		return nil, ports.ErrInternal
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, wrapPgErr(err, "Image", i.Name)
@@ -190,7 +190,7 @@ func (r *ImageRepo) Update(ctx context.Context, i *domain.Image, emitLabelsRegis
 
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return nil, service.ErrInternal
+		return nil, ports.ErrInternal
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -205,13 +205,13 @@ func (r *ImageRepo) Update(ctx context.Context, i *domain.Image, emitLabelsRegis
 		return nil, wrapPgErr(err, "Image", i.ID)
 	}
 	if err := emitCompute(ctx, tx, "Image", result.ID, "UPDATED", imagePayload(result)); err != nil {
-		return nil, service.ErrInternal
+		return nil, ports.ErrInternal
 	}
 	// refresh the IAM resource_mirror only when labels were in the mask
 	// (mirror.upsert, EventRegister) in the SAME writer-tx; empty labels → upsert {}.
 	if emitLabelsRegister {
 		if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Image", result.ID, result.ProjectID, result.Labels); err != nil {
-			return nil, service.ErrInternal
+			return nil, ports.ErrInternal
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -224,7 +224,7 @@ func (r *ImageRepo) Update(ctx context.Context, i *domain.Image, emitLabelsRegis
 func (r *ImageRepo) Delete(ctx context.Context, id string) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return service.ErrInternal
+		return ports.ErrInternal
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	// DELETE … RETURNING project_id so the FGA unregister-intent can build the
@@ -233,16 +233,16 @@ func (r *ImageRepo) Delete(ctx context.Context, id string) error {
 	err = tx.QueryRow(ctx, `DELETE FROM images WHERE id = $1 RETURNING project_id`, id).Scan(&projectID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("%w: Image %s not found", service.ErrNotFound, id)
+			return fmt.Errorf("%w: Image %s not found", ports.ErrNotFound, id)
 		}
 		return wrapPgErr(err, "Image", id)
 	}
 	if err := emitCompute(ctx, tx, "Image", id, "DELETED", map[string]any{"id": id}); err != nil {
-		return service.ErrInternal
+		return ports.ErrInternal
 	}
 	// symmetric FGA unregister-intent in the SAME writer-tx.
 	if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventUnregister, "Image", id, projectID, nil); err != nil {
-		return service.ErrInternal
+		return ports.ErrInternal
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return wrapPgErr(err, "Image", id)
