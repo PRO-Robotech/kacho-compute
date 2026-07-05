@@ -157,7 +157,7 @@ func (s *ImageService) Create(ctx context.Context, req CreateImageReq) (*operati
 }
 
 func (s *ImageService) doCreate(ctx context.Context, imageID string, req CreateImageReq) (*anypb.Any, error) {
-	if err := s.checkFolder(ctx, req.ProjectID); err != nil {
+	if err := checkProject(ctx, s.projectClient, req.ProjectID); err != nil {
 		return nil, err
 	}
 	// minDiskSize / storageSize наследуются от источника (образ, созданный из
@@ -346,15 +346,4 @@ func (s *ImageService) ListOperations(ctx context.Context, id string, p Paginati
 		return nil, "", mapRepoErr(err)
 	}
 	return s.opsRepo.List(ctx, operations.ListFilter{ResourceID: id, PageSize: p.PageSize, PageToken: p.PageToken})
-}
-
-func (s *ImageService) checkFolder(ctx context.Context, folderID string) error {
-	exists, err := s.projectClient.Exists(ctx, folderID)
-	if err != nil {
-		return status.Error(codes.Unavailable, "folder check: upstream project service unavailable")
-	}
-	if !exists {
-		return status.Errorf(codes.NotFound, "Folder with id %s not found", folderID)
-	}
-	return nil
 }

@@ -84,6 +84,34 @@ func isFKViolation(err error) bool {
 	return strings.Contains(s, "23503") || strings.Contains(s, "violates foreign key")
 }
 
+// isCheckViolation — Postgres check_violation (SQLSTATE 23514). Легитимный
+// bad-input по user-reachable CHECK-constraint → gRPC InvalidArgument
+// (data-integrity.md SQLSTATE→gRPC table).
+func isCheckViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23514"
+	}
+	return strings.Contains(err.Error(), "23514")
+}
+
+// isExclusionViolation — Postgres exclusion_violation (SQLSTATE 23P01). Состояние
+// ресурса не позволяет (пересечение EXCLUDE-range) → gRPC FailedPrecondition
+// (data-integrity.md SQLSTATE→gRPC table).
+func isExclusionViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23P01"
+	}
+	return strings.Contains(err.Error(), "23P01")
+}
+
 // wrapPgErr классифицирует pgx-ошибку и возвращает sentinel-ошибку из
 // service-пакета. НЕ leak'ает raw PG-сообщение клиенту: неизвестные классы → ErrInternal.
 //
@@ -103,6 +131,14 @@ func wrapPgErr(err error, kind, id string) error {
 	}
 	if isFKViolation(err) {
 		return fmt.Errorf("%w: The %s %s is being used", ports.ErrFailedPrecondition, strings.ToLower(kind), id)
+	}
+	if isCheckViolation(err) {
+		// Фиксированный текст: не leak'аем raw CHECK-detail (constraint-имя /
+		// pg-message) наружу — только класс ошибки.
+		return ports.ErrInvalidArg
+	}
+	if isExclusionViolation(err) {
+		return ports.ErrFailedPrecondition
 	}
 	return ports.ErrInternal
 }

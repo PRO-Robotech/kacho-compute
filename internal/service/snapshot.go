@@ -104,12 +104,8 @@ func (s *SnapshotService) Create(ctx context.Context, req CreateSnapshotReq) (*o
 }
 
 func (s *SnapshotService) doCreate(ctx context.Context, snapID string, req CreateSnapshotReq) (*anypb.Any, error) {
-	exists, err := s.projectClient.Exists(ctx, req.ProjectID)
-	if err != nil {
-		return nil, status.Error(codes.Unavailable, "folder check: upstream project service unavailable")
-	}
-	if !exists {
-		return nil, status.Errorf(codes.NotFound, "Folder with id %s not found", req.ProjectID)
+	if err := checkProject(ctx, s.projectClient, req.ProjectID); err != nil {
+		return nil, err
 	}
 	d, err := s.diskRepo.Get(ctx, req.DiskID)
 	if err != nil {

@@ -141,7 +141,7 @@ func (s *DiskService) Create(ctx context.Context, req CreateDiskReq) (*operation
 }
 
 func (s *DiskService) doCreate(ctx context.Context, diskID string, req CreateDiskReq) (*anypb.Any, error) {
-	if err := s.checkFolder(ctx, req.ProjectID); err != nil {
+	if err := checkProject(ctx, s.projectClient, req.ProjectID); err != nil {
 		return nil, err
 	}
 	if _, err := s.zones.GetZone(ctx, req.ZoneID); err != nil {
@@ -381,15 +381,4 @@ func (s *DiskService) ListOperations(ctx context.Context, id string, p Paginatio
 		return nil, "", mapRepoErr(err)
 	}
 	return s.opsRepo.List(ctx, operations.ListFilter{ResourceID: id, PageSize: p.PageSize, PageToken: p.PageToken})
-}
-
-func (s *DiskService) checkFolder(ctx context.Context, folderID string) error {
-	exists, err := s.projectClient.Exists(ctx, folderID)
-	if err != nil {
-		return status.Error(codes.Unavailable, "folder check: upstream project service unavailable")
-	}
-	if !exists {
-		return status.Errorf(codes.NotFound, "Folder with id %s not found", folderID)
-	}
-	return nil
 }

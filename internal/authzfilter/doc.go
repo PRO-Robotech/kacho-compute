@@ -15,7 +15,7 @@
 //
 // Public catalog (DiskType / Zone / Region) bypasses this filter — anyone
 // authenticated can list catalog. Bypass is the caller's responsibility
-// (passes BypassFilter() instead of a real filter).
+// (passes a nil filter, or runs with Config.Enabled=false, instead of a real filter).
 //
 // Configurable env vars (all KACHO_COMPUTE_LIST_FILTER_*):
 //   - URL/grpc address — re-uses KACHO_COMPUTE_AUTHZ_IAM_GRPC_ADDR.
