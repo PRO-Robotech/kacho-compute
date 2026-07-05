@@ -44,7 +44,6 @@ func TestIntegration_InstanceSetStatusCAS_ConcurrentStopOnStopped(t *testing.T) 
 		ZoneID: "ru-central1-a", PlatformID: "standard-v3", Cores: 2, Memory: 2 << 30, CoreFraction: 100,
 		Status: domain.InstanceStatusStopped, // <-- начальный state: STOPPED
 		FQDN:   inID + ".auto.internal", NetworkSettingsType: "STANDARD",
-		NetworkInterfaces: []domain.NetworkInterface{{Index: "0", SubnetID: "e9bsub", PrimaryV4Address: "10.0.0.10"}},
 	}
 	_, err = instRepo.Insert(ctx, in, nil)
 	require.NoError(t, err)
@@ -115,7 +114,6 @@ func TestIntegration_InstanceSetStatusCAS_ConcurrentRestartOnRunning(t *testing.
 		ZoneID: "ru-central1-a", PlatformID: "standard-v3", Cores: 2, Memory: 2 << 30, CoreFraction: 100,
 		Status: domain.InstanceStatusRunning, // <-- начальный state: RUNNING
 		FQDN:   inID + ".auto.internal", NetworkSettingsType: "STANDARD",
-		NetworkInterfaces: []domain.NetworkInterface{{Index: "0", SubnetID: "e9bsub", PrimaryV4Address: "10.0.0.10"}},
 	}
 	_, err = instRepo.Insert(ctx, in, nil)
 	require.NoError(t, err)
@@ -190,7 +188,6 @@ func TestIntegration_InstanceSetStatusCAS_StopRestartRace(t *testing.T) {
 		ZoneID: "ru-central1-a", PlatformID: "standard-v3", Cores: 2, Memory: 2 << 30, CoreFraction: 100,
 		Status: domain.InstanceStatusRunning,
 		FQDN:   inID + ".auto.internal", NetworkSettingsType: "STANDARD",
-		NetworkInterfaces: []domain.NetworkInterface{{Index: "0", SubnetID: "e9bsub", PrimaryV4Address: "10.0.0.10"}},
 	}
 	_, err = instRepo.Insert(ctx, in, nil)
 	require.NoError(t, err)

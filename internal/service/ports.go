@@ -37,12 +37,6 @@ type (
 
 	// ProjectClient — port для проверки существования Folder.
 	ProjectClient = ports.ProjectClient
-	// VPCClient — port для cross-service взаимодействия с kacho-vpc
-	// (IPAM-аллокация эфемерных external Address под one-to-one NAT + teardown +
-	// referrer-tracking). NIC-привязка убрана из lifecycle Instance.
-	VPCClient = ports.VPCClient
-	// VPCAddress — выделенный IP-адрес VPC (IP + id Address-ресурса).
-	VPCAddress = ports.VPCAddress
 	// ZoneInfo — минимальные данные о зоне (id + region).
 	ZoneInfo = ports.ZoneInfo
 	// ZoneRegistry — port existence-check zone_id (Disk/Instance Create, Disk Relocate).

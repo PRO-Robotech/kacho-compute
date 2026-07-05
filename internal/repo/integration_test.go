@@ -157,14 +157,12 @@ func TestIntegration_InstanceRepo_AttachFKCascade(t *testing.T) {
 		ID: inID, ProjectID: "f", CreatedAt: time.Now().UTC().Truncate(time.Microsecond), Name: "vm-1",
 		ZoneID: "ru-central1-a", PlatformID: "standard-v3", Cores: 2, Memory: 2 << 30, CoreFraction: 100,
 		Status: domain.InstanceStatusRunning, FQDN: inID + ".auto.internal", NetworkSettingsType: "STANDARD",
-		NetworkInterfaces: []domain.NetworkInterface{{Index: "0", SubnetID: "e9bsub", PrimaryV4Address: "10.0.0.10"}},
-		AttachedDisks:     []domain.AttachedDisk{{DiskID: bootDiskID, IsBoot: true, AutoDelete: true}},
+		AttachedDisks: []domain.AttachedDisk{{DiskID: bootDiskID, IsBoot: true, AutoDelete: true}},
 	}
 	inlineBoot := &domain.Disk{ID: bootDiskID, ProjectID: "f", CreatedAt: time.Now().UTC().Truncate(time.Microsecond), ZoneID: "ru-central1-a", Size: 4194304, BlockSize: 4096, Status: domain.DiskStatusReady}
 	created, err := instRepo.Insert(ctx, in, []*domain.Disk{inlineBoot})
 	require.NoError(t, err)
 	require.Len(t, created.AttachedDisks, 1)
-	require.Len(t, created.NetworkInterfaces, 1)
 
 	// boot disk attached → cannot delete (FK RESTRICT).
 	err = diskRepo.Delete(ctx, bootDiskID)
@@ -191,7 +189,7 @@ func TestIntegration_InstanceRepo_AttachFKCascade(t *testing.T) {
 	_, err = instRepo.SetStatusCAS(ctx, inID, domain.InstanceStatusRunning, domain.InstanceStatusStopped)
 	require.ErrorIs(t, err, service.ErrFailedPrecondition)
 
-	// Delete instance with auto-delete boot disk → NIC + attached_disks cleaned via CASCADE, boot disk deleted.
+	// Delete instance with auto-delete boot disk → attached_disks cleaned via CASCADE, boot disk deleted.
 	require.NoError(t, instRepo.Delete(ctx, inID, []string{bootDiskID}))
 	_, err = instRepo.Get(ctx, inID)
 	require.ErrorIs(t, err, service.ErrNotFound)

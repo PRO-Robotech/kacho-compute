@@ -62,7 +62,6 @@ func TestMTLS_SEC_D_16_DisabledDefaultInsecure(t *testing.T) {
 		"KACHO_COMPUTE_DB_PASSWORD": "x",
 	}))
 	assert.False(t, cfg.IAMRegisterMTLS.Enable, "register→iam mTLS off by default")
-	assert.False(t, cfg.VPCMTLS.Enable, "compute→vpc mTLS off by default")
 
 	// dial opt builds without cert files when disabled.
 	opt, err := cfg.IAMRegisterClientCreds()

@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -30,13 +29,6 @@ import (
 // Полная per-platform валидация (cores/memory/gpus по платформам standard-v1/v2/v3,
 // gpu-*) живет в platforms.go; здесь — базовая проверка допустимых core_fraction.
 var validCoreFractions = map[int64]struct{}{0: {}, 5: {}, 20: {}, 50: {}, 100: {}}
-
-// NatSpec — спека one-to-one NAT.
-type NatSpec struct {
-	Address   string // manual external IP ("" = auto-allocate синтетический)
-	IPVersion int32
-	AddressID string // VPC address ref (если задан — проверяется существование)
-}
 
 // DiskSourceSpec — оборачивает либо ссылку на существующий диск, либо параметры
 // inline-создания нового диска (ровно одно поле непусто).
@@ -104,21 +96,14 @@ type InstanceService struct {
 	// SKIP_PEER_VALIDATION — no-op. Wiring — cmd/compute/main.go.
 	zones         ZoneRegistry
 	projectClient ProjectClient
-	vpcClient     VPCClient
 	opsRepo       operations.Repo
-	// skipIPAM — true при KACHO_COMPUTE_SKIP_PEER_VALIDATION: cross-service
-	// VPC IPAM-аллокация отключена, NIC-ам выдаются синтетические IP (synth*).
-	skipIPAM bool
 }
 
-// NewInstanceService создаёт InstanceService. skipIPAM=true (зеркалит
-// KACHO_COMPUTE_SKIP_PEER_VALIDATION) → NIC-ам выдаются синтетические IP вместо
-// реальных, выделенных через kacho-vpc IPAM (для unit/newman/load без VPC).
-func NewInstanceService(repo InstanceRepo, diskRepo DiskRepo, imageRepo ImageRepo, snapshotRepo SnapshotRepo, zones ZoneRegistry, projectClient ProjectClient, vpcClient VPCClient, opsRepo operations.Repo, skipIPAM bool) *InstanceService {
+// NewInstanceService создаёт InstanceService.
+func NewInstanceService(repo InstanceRepo, diskRepo DiskRepo, imageRepo ImageRepo, snapshotRepo SnapshotRepo, zones ZoneRegistry, projectClient ProjectClient, opsRepo operations.Repo) *InstanceService {
 	return &InstanceService{
 		repo: repo, diskRepo: diskRepo, imageRepo: imageRepo, snapshotRepo: snapshotRepo,
-		zones: zones, projectClient: projectClient, vpcClient: vpcClient, opsRepo: opsRepo,
-		skipIPAM: skipIPAM,
+		zones: zones, projectClient: projectClient, opsRepo: opsRepo,
 	}
 }
 
@@ -258,134 +243,6 @@ func (s *InstanceService) doCreate(ctx context.Context, instanceID string, req C
 	// (closes the lost-tuple bug N5: the owner-tuple is now durable + retried, so the
 	// per-resource Check "no path" DENY window is finite, not permanent).
 	return anypb.New(protoconv.Instance(created))
-}
-
-// markNatAddress помечает one-to-one-NAT Address: эфемерный (compute создал) →
-// MarkAddressEphemeralInUse; reserved (по address_id) → SetAddressReference.
-func (s *InstanceService) markNatAddress(ctx context.Context, nat *domain.OneToOneNat, instanceID, instanceName string) {
-	if nat.AddressID == "" {
-		return
-	}
-	if nat.Ephemeral {
-		s.markEphemeralAddressInUse(ctx, nat.AddressID, instanceID, instanceName)
-		return
-	}
-	s.setAddressReference(ctx, nat.AddressID, instanceID, instanceName)
-}
-
-// markEphemeralAddressInUse — best-effort MarkAddressEphemeralInUse на один
-// Address (no-op если addressID пуст): reserved=false, used=true + referrer.
-// Ошибка → warning, не fatal.
-func (s *InstanceService) markEphemeralAddressInUse(ctx context.Context, addressID, instanceID, instanceName string) {
-	if addressID == "" {
-		return
-	}
-	if err := s.vpcClient.MarkAddressEphemeralInUse(ctx, addressID, "compute_instance", instanceID, instanceName); err != nil {
-		slog.WarnContext(ctx, "failed to mark vpc address ephemeral-in-use (best-effort)",
-			"address_id", addressID, "instance_id", instanceID, "err", err)
-	}
-}
-
-// setAddressReference — best-effort SetAddressReference на один Address (no-op
-// если addressID пуст; reserved-флаг адреса не меняется). Ошибка → warning, не fatal.
-func (s *InstanceService) setAddressReference(ctx context.Context, addressID, instanceID, instanceName string) {
-	if addressID == "" {
-		return
-	}
-	if err := s.vpcClient.SetAddressReference(ctx, addressID, "compute_instance", instanceID, instanceName); err != nil {
-		slog.WarnContext(ctx, "failed to set vpc address referrer (best-effort)",
-			"address_id", addressID, "instance_id", instanceID, "err", err)
-	}
-}
-
-// clearAddressReference — best-effort ClearAddressReference на один Address
-// (no-op если addressID пуст). Ошибка → warning, не fatal.
-func (s *InstanceService) clearAddressReference(ctx context.Context, addressID string) {
-	if addressID == "" {
-		return
-	}
-	if err := s.vpcClient.ClearAddressReference(ctx, addressID); err != nil {
-		slog.WarnContext(ctx, "failed to clear vpc address referrer (best-effort)",
-			"address_id", addressID, "err", err)
-	}
-}
-
-// reservedNatAddressIDs возвращает id reserved (Ephemeral=false) external
-// NAT-адресов, на которые ссылаются NIC-и инстанса. Эфемерные не включаются —
-// для них referrer уходит через FK CASCADE при DeleteAddress.
-func reservedNatAddressIDs(in *domain.Instance) []string {
-	var out []string
-	for i := range in.NetworkInterfaces {
-		nic := &in.NetworkInterfaces[i]
-		if nic.PrimaryV4Nat != nil && !nic.PrimaryV4Nat.Ephemeral && nic.PrimaryV4Nat.AddressID != "" {
-			out = append(out, nic.PrimaryV4Nat.AddressID)
-		}
-		if nic.PrimaryV6Nat != nil && !nic.PrimaryV6Nat.Ephemeral && nic.PrimaryV6Nat.AddressID != "" {
-			out = append(out, nic.PrimaryV6Nat.AddressID)
-		}
-	}
-	return out
-}
-
-// resolveNatAddress материализует one-to-one NAT-конфигурацию NIC'а:
-//   - spec.AddressID задан → reserved Address: читаем его external IP (ephemeral=false);
-//   - skipIPAM → синтетический external IP (ephemeral=false);
-//   - spec.Address задан вручную → используем как есть (ephemeral=false);
-//   - иначе → создаём эфемерный external Address в folder/zone (kacho-vpc inline
-//     выделяет публичный IP из AddressPool) (ephemeral=true).
-//
-// Возвращает (*OneToOneNat, addressID, error). addressID непустой только для
-// случаев reserved/эфемерный (нужен для teardown эфемерных).
-func (s *InstanceService) resolveNatAddress(ctx context.Context, folderID, zoneID, addrName string, spec *NatSpec, idx int) (*domain.OneToOneNat, string, error) {
-	nat := &domain.OneToOneNat{IPVersion: spec.IPVersion}
-	switch {
-	case spec.AddressID != "":
-		addr, found, err := s.vpcClient.GetExternalAddress(ctx, spec.AddressID)
-		if err != nil {
-			return nil, "", status.Errorf(codes.Unavailable, "address check: %v", err)
-		}
-		if !found {
-			return nil, "", status.Errorf(codes.NotFound, "Address %s not found", spec.AddressID)
-		}
-		nat.AddressID = spec.AddressID
-		nat.Address = addr.IP
-		if nat.Address == "" && s.skipIPAM {
-			nat.Address = synthExternalIP(idx)
-		}
-		return nat, spec.AddressID, nil
-	case s.skipIPAM:
-		nat.Address = synthExternalIP(idx)
-		if spec.Address != "" {
-			nat.Address = spec.Address
-		}
-		return nat, "", nil
-	case spec.Address != "":
-		nat.Address = spec.Address
-		return nat, "", nil
-	default:
-		addr, err := s.vpcClient.CreateExternalAddress(ctx, folderID, addrName, zoneID)
-		if err != nil {
-			return nil, "", status.Errorf(codes.Internal, "allocate external ip for nic %d: %v", idx, err)
-		}
-		nat.Address = addr.IP
-		nat.AddressID = addr.AddressID
-		nat.Ephemeral = true
-		return nat, addr.AddressID, nil
-	}
-}
-
-// releaseAddresses best-effort удаляет эфемерные Address-ресурсы (на rollback
-// Create или при teardown Delete). VPC недоступен / Address уже удалён — лишь
-// предупреждение в лог; не валит вызывающую операцию.
-func (s *InstanceService) releaseAddresses(ctx context.Context, addressIDs []string) {
-	for _, id := range addressIDs {
-		if id == "" {
-			continue
-		}
-		if err := s.vpcClient.DeleteAddress(ctx, id); err != nil {
-			slog.WarnContext(ctx, "failed to release ephemeral vpc address (best-effort)", "address_id", id, "err", err)
-		}
-	}
 }
 
 // resolveDiskSource резолвит DiskSourceSpec в AttachedDisk + (опционально) новый
@@ -778,110 +635,6 @@ func (s *InstanceService) DetachDisk(ctx context.Context, id, diskID, deviceName
 	return &op, nil
 }
 
-// AddOneToOneNat включает NAT на NIC (status ∈ {RUNNING, STOPPED}).
-func (s *InstanceService) AddOneToOneNat(ctx context.Context, id, nicIndex string, spec *NatSpec) (*operations.Operation, error) {
-	if id == "" {
-		return nil, status.Error(codes.InvalidArgument, "instance_id required")
-	}
-	op, err := operations.New(ids.PrefixOperationCompute, fmt.Sprintf("Add one-to-one NAT to instance %s", id),
-		&computev1.AddInstanceOneToOneNatMetadata{InstanceId: id})
-	if err != nil {
-		return nil, err
-	}
-	if err := s.opsRepo.Create(ctx, op); err != nil {
-		return nil, err
-	}
-	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		in, err := s.repo.Get(ctx, id)
-		if err != nil {
-			return nil, mapRepoErr(err)
-		}
-		if in.Status != domain.InstanceStatusRunning && in.Status != domain.InstanceStatusStopped {
-			return nil, status.Error(codes.FailedPrecondition, "Instance is not running or stopped")
-		}
-		nic := findNIC(in, nicIndex)
-		if nic == nil {
-			return nil, status.Errorf(codes.InvalidArgument, "network interface %q not found", nicIndex)
-		}
-		if nic.PrimaryV4Nat != nil {
-			return nil, status.Error(codes.FailedPrecondition, "One-to-one NAT is already enabled on the network interface")
-		}
-		natSpec := spec
-		if natSpec == nil {
-			natSpec = &NatSpec{}
-		}
-		nat, addrID, err := s.resolveNatAddress(ctx, in.ProjectID, in.ZoneID, nicNatAddressName(id, nic.Index), natSpec, 0)
-		if err != nil {
-			return nil, err
-		}
-		copyNIC := *nic
-		copyNIC.PrimaryV4Nat = nat
-		updated, err := s.repo.ReplaceNIC(ctx, id, copyNIC)
-		if err != nil {
-			if nat.Ephemeral && addrID != "" {
-				s.releaseAddresses(ctx, []string{addrID})
-			}
-			return nil, mapRepoErr(err)
-		}
-		// Referrer-tracking: a newly-created ephemeral external Address →
-		// MarkAddressEphemeralInUse (reserved=false, used=true + referrer); a
-		// user-provided reserved address → SetAddressReference (referrer only).
-		// Best-effort.
-		s.markNatAddress(ctx, nat, in.ID, in.Name)
-		return anypb.New(protoconv.Instance(updated))
-	})
-	return &op, nil
-}
-
-// RemoveOneToOneNat выключает NAT на NIC.
-func (s *InstanceService) RemoveOneToOneNat(ctx context.Context, id, nicIndex string) (*operations.Operation, error) {
-	if id == "" {
-		return nil, status.Error(codes.InvalidArgument, "instance_id required")
-	}
-	op, err := operations.New(ids.PrefixOperationCompute, fmt.Sprintf("Remove one-to-one NAT from instance %s", id),
-		&computev1.RemoveInstanceOneToOneNatMetadata{InstanceId: id})
-	if err != nil {
-		return nil, err
-	}
-	if err := s.opsRepo.Create(ctx, op); err != nil {
-		return nil, err
-	}
-	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		in, err := s.repo.Get(ctx, id)
-		if err != nil {
-			return nil, mapRepoErr(err)
-		}
-		nic := findNIC(in, nicIndex)
-		if nic == nil {
-			return nil, status.Errorf(codes.InvalidArgument, "network interface %q not found", nicIndex)
-		}
-		if nic.PrimaryV4Nat == nil {
-			return nil, status.Error(codes.FailedPrecondition, "One-to-one NAT is not enabled on the network interface")
-		}
-		releaseID := ""  // ephemeral address to delete (referrer goes via FK CASCADE)
-		clearRefID := "" // reserved address whose referrer we explicitly clear
-		if nic.PrimaryV4Nat.Ephemeral {
-			releaseID = nic.PrimaryV4Nat.AddressID
-		} else {
-			clearRefID = nic.PrimaryV4Nat.AddressID
-		}
-		copyNIC := *nic
-		copyNIC.PrimaryV4Nat = nil
-		updated, err := s.repo.ReplaceNIC(ctx, id, copyNIC)
-		if err != nil {
-			return nil, mapRepoErr(err)
-		}
-		// Free the ephemeral external Address (best-effort) now that the NIC no
-		// longer references it; or clear the referrer on a reserved address.
-		if releaseID != "" {
-			s.releaseAddresses(ctx, []string{releaseID})
-		}
-		s.clearAddressReference(ctx, clearRefID)
-		return anypb.New(protoconv.Instance(updated))
-	})
-	return &op, nil
-}
-
 // SimulateMaintenanceEvent — no-op (control-plane: возвращает done-операцию с самой ВМ).
 func (s *InstanceService) SimulateMaintenanceEvent(ctx context.Context, id string) (*operations.Operation, error) {
 	if id == "" {
@@ -932,37 +685,9 @@ func (s *InstanceService) Delete(ctx context.Context, id string) (*operations.Op
 		if err := s.repo.Delete(ctx, id, autoDelete); err != nil {
 			return nil, mapRepoErr(err)
 		}
-		// Release any ephemeral VPC Address resources still referenced by the
-		// instance's NICs (one-to-one NAT addresses created via AddOneToOneNat).
-		// All best-effort: VPC unavailable / already-gone → log warning, don't
-		// fail the delete. The referrer rows of ephemeral addresses go away via
-		// FK CASCADE on delete; for any reserved one-to-one-NAT address we
-		// explicitly clear the referrer so it shows used=false again.
-		s.releaseAddresses(ctx, ephemeralAddressIDs(in))
-		for _, addrID := range reservedNatAddressIDs(in) {
-			s.clearAddressReference(ctx, addrID)
-		}
 		return anypb.New(&emptypb.Empty{})
 	})
 	return &op, nil
-}
-
-// ephemeralAddressIDs возвращает id всех Address-ресурсов, которые compute
-// создал для NIC-ей этого инстанса (internal — непустой PrimaryV4AddressID;
-// external — PrimaryV4Nat.AddressID при Ephemeral=true). Reserved-адреса
-// (переданные клиентом по address_id) не включаются.
-func ephemeralAddressIDs(in *domain.Instance) []string {
-	var out []string
-	for i := range in.NetworkInterfaces {
-		nic := &in.NetworkInterfaces[i]
-		if nic.PrimaryV4AddressID != "" {
-			out = append(out, nic.PrimaryV4AddressID)
-		}
-		if nic.PrimaryV4Nat != nil && nic.PrimaryV4Nat.Ephemeral && nic.PrimaryV4Nat.AddressID != "" {
-			out = append(out, nic.PrimaryV4Nat.AddressID)
-		}
-	}
-	return out
 }
 
 // GetSerialPortOutput — sync RPC: синтетический текст (control-plane).
@@ -1029,33 +754,12 @@ func defaultCoreFraction(cf int64) int64 {
 	return cf
 }
 
-func findNIC(in *domain.Instance, index string) *domain.NetworkInterface {
-	if index == "" && len(in.NetworkInterfaces) == 1 {
-		return &in.NetworkInterfaces[0]
-	}
-	for i := range in.NetworkInterfaces {
-		if in.NetworkInterfaces[i].Index == index {
-			return &in.NetworkInterfaces[i]
-		}
-	}
-	return nil
-}
-
 func fqdn(id, hostname string) string {
 	if hostname != "" {
 		return hostname + ".ru-central1.internal"
 	}
 	return id + ".auto.internal"
 }
-
-func synthExternalIP(i int) string { return fmt.Sprintf("203.0.113.%d", 10+i) }
-
-// nicNatAddressName — имя эфемерного VPC Address-ресурса, создаваемого для
-// one-to-one NAT NIC'а (AddOneToOneNat). Уникально в пределах folder
-// (instanceID уникален) и соответствует regex имени Address
-// (`|[a-zA-Z]([-_a-zA-Z0-9]{0,61}[a-zA-Z0-9])?`, ≤63 символов): instanceID
-// начинается с буквы `e` (prefix `epd`), длина 20.
-func nicNatAddressName(instanceID, idx string) string { return instanceID + "-nat" + idx }
 
 func orDefault(v, def string) string {
 	if v == "" {

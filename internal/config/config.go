@@ -52,27 +52,15 @@ type Config struct {
 	// IAMTLS — TLS для cross-service gRPC к kacho-iam.
 	IAMTLS bool `envconfig:"KACHO_COMPUTE_IAM_TLS" default:"false"`
 
-	// VPCGRPCAddr — адрес kacho-vpc (SubnetService/SecurityGroupService/AddressService.Get
-	// для валидации Instance network_interface_spec).
-	VPCGRPCAddr string `envconfig:"KACHO_COMPUTE_VPC_GRPC_ADDR" default:"vpc.kacho.svc.cluster.local:9090"`
-	// VPCTLS — TLS для cross-service gRPC к vpc.
-	VPCTLS bool `envconfig:"KACHO_COMPUTE_VPC_TLS" default:"false"`
-
-	// VPCInternalGRPCAddr — адрес internal-порта kacho-vpc (порт 9091) для
-	// internal VPC-вызовов (IPAM/address teardown). zone_id-валидация идёт в
-	// kacho-geo (GeoGRPCAddr), не сюда.
-	VPCInternalGRPCAddr string `envconfig:"KACHO_COMPUTE_VPC_INTERNAL_GRPC_ADDR" default:"vpc.kacho.svc.cluster.local:9091"`
-	// VPCInternalTLS — TLS для cross-service gRPC к internal-порту vpc.
-	VPCInternalTLS bool `envconfig:"KACHO_COMPUTE_VPC_INTERNAL_TLS" default:"false"`
-
 	// GeoGRPCAddr — адрес kacho-geo (geo.v1.ZoneService.Get, public :9090) для
 	// валидации Instance/Disk.zone_id. Geography (Region/Zone) — leaf-сервис
 	// kacho-geo; compute больше не валидирует zone_id по своей таблице `zones` и не
 	// обслуживает Region/Zone.
 	GeoGRPCAddr string `envconfig:"KACHO_COMPUTE_GEO_GRPC_ADDR" default:"kacho-geo.kacho.svc.cluster.local:9090"`
 
-	// SkipPeerValidation — отключить cross-service existence-check (subnet/SG/address
-	// в VPC, folder в RM) → no-op. Для unit/newman/load-тестов без поднятых peer-сервисов.
+	// SkipPeerValidation — отключить cross-service existence-check (folder в
+	// kacho-iam, zone_id в kacho-geo) → no-op. Для unit/newman/load-тестов без
+	// поднятых peer-сервисов.
 	SkipPeerValidation bool `envconfig:"KACHO_COMPUTE_SKIP_PEER_VALIDATION" default:"false"`
 
 	// AuthMode — fail-closed гейт перед IAM merge: `dev` | `production` | `production-strict`.
@@ -177,13 +165,10 @@ type Config struct {
 	// internal :9091). ServerName = kacho-iam-internal.*.
 	IAMAuthzMTLS grpcclient.TLSClient `envconfig:"IAM_AUTHZ_MTLS"`
 
-	// VPCMTLS — client-creds для ребра compute→vpc (NIC-spec валидация + IPAM Address).
-	VPCMTLS grpcclient.TLSClient `envconfig:"VPC_MTLS"`
-
 	// GeoMTLS — client-creds для ребра compute→geo (geo.v1.ZoneService.Get,
 	// zone_id-валидация Instance). Enable=false (default) → insecure
 	// (dev backward-compat); enable=true без валидного cert-trio → startup error
-	// (fail-closed, без silent insecure-fallback) — паритет с VPCMTLS/IAM*MTLS.
+	// (fail-closed, без silent insecure-fallback) — паритет с IAM*MTLS.
 	GeoMTLS grpcclient.TLSClient `envconfig:"GEO_MTLS"`
 
 	// PublicServerMTLS — server-creds для публичного listener (:9090, GrpcPort).
@@ -213,11 +198,6 @@ func (c Config) IAMProjectClientCreds() (grpc.DialOption, error) {
 // (dev); enable=true без валидного cert-trio → error (fail-closed).
 func (c Config) IAMAuthzClientCreds() (grpc.DialOption, error) {
 	return grpcclient.TLSClientCreds(c.IAMAuthzMTLS)
-}
-
-// VPCClientCreds возвращает grpc.DialOption для ребра compute→vpc (NIC/IPAM).
-func (c Config) VPCClientCreds() (grpc.DialOption, error) {
-	return grpcclient.TLSClientCreds(c.VPCMTLS)
 }
 
 // GeoClientCreds возвращает grpc.DialOption для ребра compute→geo
