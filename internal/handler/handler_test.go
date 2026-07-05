@@ -105,10 +105,12 @@ func TestInternalCatalogHandler_AdminCRUD(t *testing.T) {
 func TestOperationHandler(t *testing.T) {
 	ops := portmock.NewOpsRepo()
 	h := NewOperationHandler(ops)
-	ctx := context.Background()
+	// Owner poll: op principal must match the caller principal in ctx.
+	owner := operations.Principal{Type: "user", ID: "usr-A", DisplayName: "test"}
+	ctx := operations.WithPrincipal(context.Background(), owner)
 	op, err := operations.New("epd", "test op", &computev1.CreateDiskMetadata{DiskId: "epdx"})
 	require.NoError(t, err)
-	require.NoError(t, ops.Create(ctx, op))
+	require.NoError(t, ops.CreateWithPrincipal(ctx, op, owner))
 	got, err := h.Get(ctx, &operationpb.GetOperationRequest{OperationId: op.ID})
 	require.NoError(t, err)
 	require.Equal(t, op.ID, got.Id)
