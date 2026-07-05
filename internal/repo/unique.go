@@ -45,6 +45,30 @@ func isAttachedDisksDiskIDUniqViolation(err error) bool {
 	return strings.Contains(err.Error(), "attached_disks_disk_id_uniq")
 }
 
+// isAttachedDisksDeviceOrBootUniqViolation — true если 23505 пришла на
+// per-instance partial-UNIQUE `attached_disks_device_uniq` (дубль непустого
+// device_name на одном instance) или `attached_disks_boot_uniq` (второй
+// boot-disk). Эти инварианты sequential-путь (service.AttachDisk software-loop)
+// отбивает как FailedPrecondition; concurrent-путь (mutateAndReload) должен
+// маппиться так же — а не в generic AlreadyExists, — чтобы error-контракт был
+// одинаков на обоих путях (audit: sequential vs DB-backstop code mismatch).
+func isAttachedDisksDeviceOrBootUniqViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		if pgErr.Code != "23505" {
+			return false
+		}
+		return pgErr.ConstraintName == "attached_disks_device_uniq" ||
+			pgErr.ConstraintName == "attached_disks_boot_uniq"
+	}
+	s := err.Error()
+	return strings.Contains(s, "attached_disks_device_uniq") ||
+		strings.Contains(s, "attached_disks_boot_uniq")
+}
+
 // isFKViolation — Postgres foreign_key_violation (SQLSTATE 23503). Возникает на
 // Delete Disk пока он attached (FK attached_disks.disk_id RESTRICT). Маппится в
 // gRPC FailedPrecondition ("The disk is being used").

@@ -408,6 +408,12 @@ func (r *InstanceRepo) mutateAndReload(ctx context.Context, id, eventType string
 		if isAttachedDisksDiskIDUniqViolation(err) {
 			return nil, fmt.Errorf("%w: disk already attached to another instance", service.ErrFailedPrecondition)
 		}
+		// per-instance device_name / boot uniqueness — тот же класс инварианта, что
+		// sequential software-check в service.AttachDisk (FailedPrecondition). Держим
+		// error-контракт согласованным между sequential и concurrent путями.
+		if isAttachedDisksDeviceOrBootUniqViolation(err) {
+			return nil, fmt.Errorf("%w: device_name or boot-disk already in use on this instance", service.ErrFailedPrecondition)
+		}
 		if isUniqueViolation(err) {
 			return nil, service.ErrAlreadyExists
 		}
