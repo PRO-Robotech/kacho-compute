@@ -189,7 +189,8 @@ func (r *InstanceRepo) Insert(ctx context.Context, in *domain.Instance, inlineDi
 	return created, nil
 }
 
-// Update обновляет mutable поля ВМ + status + outbox UPDATED.
+// Update обновляет mutable descriptive/resource поля ВМ + outbox UPDATED.
+// status НЕ трогается — им владеет исключительно SetStatusCAS (lifecycle).
 //
 // emitLabelsRegister: when true (the use-case saw "labels" in the update-mask, or
 // a full-object PATCH that applies labels) a fresh FGA register-intent carrying the
@@ -212,11 +213,17 @@ func (r *InstanceRepo) Update(ctx context.Context, in *domain.Instance, emitLabe
 		return nil, service.ErrInternal
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	// NB: the status column is deliberately NOT in the SET clause. Update is a
+	// read-modify-write of descriptive/resource fields; it never carries a status
+	// change (no update-mask field maps to status). status is owned solely by the
+	// atomic SetStatusCAS lifecycle path — writing it back here from the stale
+	// snapshot read at use-case start would clobber a concurrent Stop/Start/Restart
+	// transition (second-writer-wins). See instance_update_status_race_integration_test.go.
 	const q = `UPDATE instances SET name=$2, description=$3, labels=$4, service_account_id=$5, cores=$6, memory=$7,
-		core_fraction=$8, gpus=$9, platform_id=$10, status=$11, network_settings_type=$12, placement_policy=$13
+		core_fraction=$8, gpus=$9, platform_id=$10, network_settings_type=$11, placement_policy=$12
 		WHERE id=$1 RETURNING ` + instanceCols
 	updated, err := scanInstance(tx.QueryRow(ctx, q, in.ID, in.Name, in.Description, labelsJSON, in.ServiceAccountID,
-		in.Cores, in.Memory, in.CoreFraction, in.GPUs, in.PlatformID, instanceStatusName(in.Status), in.NetworkSettingsType, ppJSON))
+		in.Cores, in.Memory, in.CoreFraction, in.GPUs, in.PlatformID, in.NetworkSettingsType, ppJSON))
 	if err != nil {
 		return nil, wrapPgErr(err, "Instance", in.ID)
 	}
