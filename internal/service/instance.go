@@ -438,21 +438,10 @@ func (s *InstanceService) UpdateMetadata(ctx context.Context, instanceID string,
 		return nil, err
 	}
 	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		in, err := s.repo.Get(ctx, instanceID)
-		if err != nil {
-			return nil, mapRepoErr(err)
-		}
-		md := map[string]string{}
-		for k, v := range in.Metadata {
-			md[k] = v
-		}
-		for _, k := range del {
-			delete(md, k)
-		}
-		for k, v := range upsert {
-			md[k] = v
-		}
-		updated, err := s.repo.SetMetadata(ctx, instanceID, md)
+		// Атомарный delete+upsert merge на DB-уровне (project-rule #10). Прежний
+		// Get→merge-in-Go→SetMetadata(full-overwrite) был read-modify-write вне TX и
+		// терял дельту конкурентного UpdateMetadata (second-writer-wins).
+		updated, err := s.repo.MergeMetadata(ctx, instanceID, del, upsert)
 		if err != nil {
 			return nil, mapRepoErr(err)
 		}
@@ -478,9 +467,24 @@ func (s *InstanceService) Stop(ctx context.Context, id string) (*operations.Oper
 		"Instance is not running", &computev1.StopInstanceMetadata{InstanceId: id})
 }
 
-// Restart перезапускает RUNNING ВМ. Two-step CAS: RUNNING→RESTARTING (gate
-// для concurrent Restart — ровно один winner), затем RESTARTING→RUNNING
-// (мы owner state RESTARTING, второй CAS не race-able). Конечный state — RUNNING.
+// Restart перезапускает RUNNING ВМ. Single atomic CAS RUNNING→RUNNING (без
+// durably-committed промежуточного RESTARTING).
+//
+// Почему НЕ two-step (RUNNING→RESTARTING→RUNNING): промежуточный RESTARTING
+// коммитился отдельной транзакцией; прерывание воркера между двумя коммитами
+// (crash / panic / срабатывание per-op deadline) оставляло ВМ навсегда в
+// RESTARTING без пути восстановления — Start требует STOPPED, Stop/Restart
+// требуют RUNNING, AttachDisk требует RUNNING|STOPPED → любой последующий CAS
+// падал FailedPrecondition (bricked instance). Orphan-resolver трактует
+// RestartInstanceMetadata как kindUpdate и, видя ВМ присутствующей, помечал
+// операцию Done(current) не переигрывая замыкание — заклиненный RESTARTING
+// маскировался под успех.
+//
+// В control-plane реального гипервизора нет — restart мгновенный, промежуточный
+// durable state не нужен. Одиночный `SetStatusCAS(RUNNING→RUNNING)` идемпотентен:
+// row-level lock сериализует конкурентные Restart'ы, каждый видит RUNNING и
+// подтверждает RUNNING (no bricking, no intermediate). RESTARTING enum в proto
+// сохранён — контракт не тронут.
 func (s *InstanceService) Restart(ctx context.Context, id string) (*operations.Operation, error) {
 	if id == "" {
 		return nil, status.Error(codes.InvalidArgument, "instance_id required")
@@ -494,16 +498,7 @@ func (s *InstanceService) Restart(ctx context.Context, id string) (*operations.O
 		return nil, err
 	}
 	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		// Step 1: RUNNING → RESTARTING (gate). Concurrent Restarts: только
-		// один writer пройдёт CAS, остальные получат FailedPrecondition.
-		if _, err := s.repo.SetStatusCAS(ctx, id, domain.InstanceStatusRunning, domain.InstanceStatusRestarting); err != nil {
-			return nil, mapLifecycleErr(err, "Instance is not running")
-		}
-		// Step 2: RESTARTING → RUNNING (control-plane: реального гипервизора
-		// нет, restart мгновенный). Мы owner state RESTARTING — race не
-		// возможен; если кто-то параллельно перевёл нас (admin/etc.) и
-		// status уже не RESTARTING — это аномалия, лучше FailedPrecondition.
-		updated, err := s.repo.SetStatusCAS(ctx, id, domain.InstanceStatusRestarting, domain.InstanceStatusRunning)
+		updated, err := s.repo.SetStatusCAS(ctx, id, domain.InstanceStatusRunning, domain.InstanceStatusRunning)
 		if err != nil {
 			return nil, mapLifecycleErr(err, "Instance is not running")
 		}

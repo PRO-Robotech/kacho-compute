@@ -141,6 +141,35 @@ func TestInstance_Stop_Start_Restart_StateMachine(t *testing.T) {
 	require.Equal(t, computev1.Instance_RUNNING, in.Status)
 }
 
+// TestInstance_Restart_SingleCAS_FromStopped — Restart на не-RUNNING инстансе
+// отбивается FailedPrecondition. После перехода на одиночный atomic CAS
+// RUNNING→RUNNING (без durable промежуточного RESTARTING) прекондишн-контракт
+// сохранён: Stop→Restart → FailedPrecondition, а инстанс НЕ застревает в
+// RESTARTING (нет bricked-state, из которого Start/Stop/Restart/Attach падали бы
+// навсегда). Регрессионный якорь для finding «Restart persists intermediate
+// RESTARTING … interruption leaves the instance permanently bricked».
+func TestInstance_Restart_SingleCAS_FromStopped(t *testing.T) {
+	svc, repo, _, _, ops := newInstanceSvc(t, true)
+	seedRunningInstance(repo, domain.InstanceStatusStopped)
+
+	op, err := svc.Restart(context.Background(), "epdvm1")
+	require.NoError(t, err)
+	done := portmock.AwaitOpDone(t, ops, op.ID)
+	require.NotNil(t, done.Error)
+	require.Equal(t, int32(codes.FailedPrecondition), done.Error.Code)
+
+	// Инстанс не тронут: остаётся STOPPED (никакого залипшего RESTARTING),
+	// последующий Start проходит штатно.
+	got, gerr := repo.Get(context.Background(), "epdvm1")
+	require.NoError(t, gerr)
+	require.Equal(t, domain.InstanceStatusStopped, got.Status)
+
+	op, err = svc.Start(context.Background(), "epdvm1")
+	require.NoError(t, err)
+	in := instanceFromOp(t, portmock.AwaitOpDone(t, ops, op.ID))
+	require.Equal(t, computev1.Instance_RUNNING, in.Status)
+}
+
 func TestInstance_Update_ResourcesRequiresStopped(t *testing.T) {
 	svc, repo, _, _, ops := newInstanceSvc(t, true)
 	seedRunningInstance(repo, domain.InstanceStatusRunning)

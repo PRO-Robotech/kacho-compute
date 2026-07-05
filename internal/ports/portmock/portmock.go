@@ -529,15 +529,26 @@ func (r *InstanceRepo) DetachDisk(_ context.Context, id, diskID string) (*domain
 	return in, nil
 }
 
-// SetMetadata заменяет metadata.
-func (r *InstanceRepo) SetMetadata(_ context.Context, id string, metadata map[string]string) (*domain.Instance, error) {
+// MergeMetadata атомарно применяет delete+upsert дельту (под r.mu — зеркалит
+// row-level-lock атомарность DB-адаптера: read+merge+write под одним локом).
+func (r *InstanceRepo) MergeMetadata(_ context.Context, id string, del []string, upsert map[string]string) (*domain.Instance, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	in, ok := r.data[id]
 	if !ok {
 		return nil, ports.ErrNotFound
 	}
-	in.Metadata = metadata
+	md := map[string]string{}
+	for k, v := range in.Metadata {
+		md[k] = v
+	}
+	for _, k := range del {
+		delete(md, k)
+	}
+	for k, v := range upsert {
+		md[k] = v
+	}
+	in.Metadata = md
 	return in, nil
 }
 
