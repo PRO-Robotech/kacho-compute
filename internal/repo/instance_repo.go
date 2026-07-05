@@ -575,7 +575,7 @@ func insertAttachedDiskTx(ctx context.Context, tx pgx.Tx, instanceID string, ad 
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	// Атомарный zone/status-consistent attach (project-rule #10): диск лочится
+	// Атомарный zone/status-consistent attach (within-service DB-invariant): диск лочится
 	// FOR UPDATE в CTE — это сериализует против Disk.Relocate (SetZoneIfDetached
 	// берёт тот же FOR UPDATE на disks(id)). Zone- и READY-предикаты вычисляются
 	// ПОД локом, поэтому прежняя TOCTOU-гонка (service-слой читал zone unlocked,
