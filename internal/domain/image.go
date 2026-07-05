@@ -6,7 +6,7 @@ package domain
 import (
 	"time"
 
-	computev1 "github.com/PRO-Robotech/kacho-compute/proto/gen/go/kacho/cloud/compute/v1"
+	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
 )
 
 // ImageStatus — состояние образа (control-plane: всегда READY после Create).
