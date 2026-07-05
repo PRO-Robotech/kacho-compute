@@ -15,6 +15,36 @@ db:
   name: kacho_compute
   passwordSecretName: kacho-umbrella-pg-compute
   passwordSecretKey: password
+  # sslMode — postgres sslmode for the DSN (migrator + serve). Any production
+  # AuthMode fail-closed refuses boot unless this is require|verify-ca|verify-full
+  # (config.go requireDBSSLMode): sslmode=disable ships the DB password + row data
+  # as plaintext (CWE-319). Default `require` (TLS-on, works without a
+  # pre-provisioned client CA); harden to verify-full where a root cert is mounted.
+  # Set `disable` only on a dev stand running auth.mode=dev.
+  sslMode: require
+
+# ─── SEC auth posture (arms the binary's fail-closed production gates) ──
+# auth.mode drives cmd/compute/main.go::validateAuthMode. rules/security.md:
+# "любой деплой — production-mode". `production` rejects anonymous, requires
+# server-mTLS on both listeners (⇒ mtls.enable=true below), a TLS DB channel
+# (db.sslMode ∈ require|verify-ca|verify-full) and a non-empty trusted-forwarder
+# allow-list. `production-strict` additionally demands per-edge client-mTLS on
+# every live peer edge. `dev` is the only insecure mode (local stand only).
+auth:
+  mode: production
+  # requireIAM — fail-closed boot-gate (KACHO_COMPUTE_REQUIRE_IAM): mutating
+  # Create is refused (UNAVAILABLE) and readiness stays NotReady until the
+  # register-drainer is IAM-connected, so no resource is ever created without a
+  # deliverable owner-tuple intent. Production: true; dev back-compat: false.
+  requireIAM: true
+  # trustedForwarderSANs — comma-separated allow-list of client-cert SANs
+  # permitted to forward the end-user principal (x-kacho-principal-*). MUST be
+  # non-empty in any production mode (config.go requireTrustedForwarders): empty
+  # ⇒ any mTLS peer is trusted to forward → confused-deputy / tenant crossing
+  # (CWE-290/CWE-441). Default: the api-gateway SA SPIFFE id (the only legitimate
+  # forwarder). Set empty only when auth.mode=dev.
+  trustedForwarderSANs: "spiffe://kacho.cloud/ns/kacho/sa/kacho-api-gateway"
+
 iamAddr: "kacho-iam.kacho.svc.cluster.local:9090"
 # KAC-127: resourceManagerAddr удалён — RM-fallback больше не поддерживается.
 vpcAddr: "vpc.kacho.svc.cluster.local:9090"
@@ -41,7 +71,12 @@ skipPeerValidation: "false"
 #   compute→geo (zone_id):   KACHO_COMPUTE_GEO_MTLS_*          (kacho-geo epic S4, :9090 ZoneService.Get)
 # serverName на dial-стороне = реальный dial-host (∈ server-SAN пира, КРИТ#1 / I6).
 mtls:
-  enable: false
+  # enable=true (default): server-mTLS on both listeners — required by the default
+  # auth.mode=production gate (insecureListenersInProduction). Flip to false ONLY
+  # together with auth.mode=dev (local insecure stand). Per-edge client-mTLS
+  # (.edges.*) stays independently opt-in for a staged rollout; auth.mode=
+  # production-strict additionally requires those.
+  enable: true
   # ─── internal-CA leaf-cert issuance (this chart owns its Certificate, rule #1) ─
   # client-cert URI-SAN saName MUST match the IAM module-SA seed (SEC-C migration
   # 0009): kacho-compute → sva(md5("kacho-compute")) holds fga_writer@iam_fgaproxy.

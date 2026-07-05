@@ -172,7 +172,7 @@ func (s *InstanceService) Create(ctx context.Context, req CreateInstanceReq) (*o
 }
 
 func (s *InstanceService) doCreate(ctx context.Context, instanceID string, req CreateInstanceReq) (*anypb.Any, error) {
-	if err := s.checkFolder(ctx, req.ProjectID); err != nil {
+	if err := checkProject(ctx, s.projectClient, req.ProjectID); err != nil {
 		return nil, err
 	}
 	if _, err := s.zones.GetZone(ctx, req.ZoneID); err != nil {
@@ -714,17 +714,6 @@ func (s *InstanceService) ListOperations(ctx context.Context, id string, p Pagin
 		return nil, "", mapRepoErr(err)
 	}
 	return s.opsRepo.List(ctx, operations.ListFilter{ResourceID: id, PageSize: p.PageSize, PageToken: p.PageToken})
-}
-
-func (s *InstanceService) checkFolder(ctx context.Context, folderID string) error {
-	exists, err := s.projectClient.Exists(ctx, folderID)
-	if err != nil {
-		return status.Error(codes.Unavailable, "folder check: upstream project service unavailable")
-	}
-	if !exists {
-		return status.Errorf(codes.NotFound, "Folder with id %s not found", folderID)
-	}
-	return nil
 }
 
 // ---- helpers ----

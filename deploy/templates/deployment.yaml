@@ -30,6 +30,9 @@ spec:
               value: "{{ .Values.db.user }}"
             - name: KACHO_COMPUTE_DB_NAME
               value: "{{ .Values.db.name }}"
+            # SEC: migrator DB channel must be TLS too (same sslMode as serve).
+            - name: KACHO_COMPUTE_DB_SSLMODE
+              value: {{ .Values.db.sslMode | quote }}
             - name: KACHO_COMPUTE_DB_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -63,6 +66,21 @@ spec:
               value: "{{ .Values.ports.grpc }}"
             - name: KACHO_COMPUTE_INTERNAL_PORT
               value: "{{ .Values.ports.internalGrpc }}"
+            # ─── SEC auth posture — arms fail-closed production gates ──────
+            # cmd/compute/main.go::validateAuthMode + requireDBSSLMode +
+            # requireTrustedForwarders + RequireIAM boot-gate. Chart defaults to
+            # production (rules/security.md: every deploy is production-mode); a
+            # dev stand overrides auth.mode=dev + mtls.enable=false + db.sslMode=disable.
+            - name: KACHO_COMPUTE_AUTH_MODE
+              value: {{ .Values.auth.mode | quote }}
+            - name: KACHO_COMPUTE_DB_SSLMODE
+              value: {{ .Values.db.sslMode | quote }}
+            - name: KACHO_COMPUTE_REQUIRE_IAM
+              value: {{ .Values.auth.requireIAM | quote }}
+            {{- with .Values.auth.trustedForwarderSANs }}
+            - name: KACHO_COMPUTE_AUTHZ_TRUSTED_FORWARDER_SANS
+              value: {{ . | quote }}
+            {{- end }}
             # KAC-106 (E1): peer for project-existence switched to kacho-iam.
             - name: KACHO_COMPUTE_IAM_GRPC_ADDR
               value: "{{ .Values.iamAddr }}"

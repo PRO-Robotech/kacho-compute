@@ -144,7 +144,8 @@ type DiskTypeRepo interface {
 
 // ProjectClient — port для проверки существования Project в kacho-iam
 // (ProjectService.Get). Аргумент projectID — id владельца-проекта (в схеме
-// kacho-compute хранится в legacy-именованной колонке `folder_id`).
+// kacho-compute хранится в колонке `project_id`; переименована из legacy
+// `folder_id` миграцией 0009_rename_folder_to_project).
 type ProjectClient interface {
 	Exists(ctx context.Context, projectID string) (bool, error)
 }

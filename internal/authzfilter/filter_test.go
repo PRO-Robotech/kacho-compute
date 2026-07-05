@@ -132,7 +132,7 @@ func TestFGAFilter_EmptyGrant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("empty grant: should not error, got: %v", err)
 	}
-	if !d.IsEmpty() || d.IsBypass() {
+	if !d.Empty || d.IsBypass() {
 		t.Fatalf("empty grant: expected Empty=true BypassAll=false, got %+v", d)
 	}
 	if len(d.IDs()) != 0 {
@@ -265,17 +265,6 @@ func TestFGAFilter_CacheBounded(t *testing.T) {
 	}
 	if size := f.Size(); size > cfg.CacheMaxEntries {
 		t.Fatalf("cache bound violated: size=%d > max=%d", size, cfg.CacheMaxEntries)
-	}
-}
-
-// Bypass filter trivially bypasses.
-func TestBypassFilter(t *testing.T) {
-	d, err := BypassFilter{}.ListAllowedIDs(context.Background(), "user:anyone", "system", "catalog.read")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !d.IsBypass() {
-		t.Fatalf("BypassFilter must return BypassAll=true")
 	}
 }
 

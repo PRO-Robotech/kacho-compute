@@ -39,14 +39,12 @@ type Decision struct {
 // IsBypass — true если фильтрация не применяется (catalog / fail-open).
 func (d Decision) IsBypass() bool { return d.BypassAll }
 
-// IsEmpty — true если allow-list пуст (handler возвращает []).
-func (d Decision) IsEmpty() bool { return d.Empty }
-
 // IDs — отсортированный allow-list (deterministic ordering for stable pagination).
 func (d Decision) IDs() []string { return d.AllowedIDs }
 
-// Filter — port интерфейс. Реализация — FGAFilter (через iam.ListObjects)
-// либо BypassFilter (public-catalog / FGA disabled).
+// Filter — port интерфейс. Единственная реализация — FGAFilter (через
+// iam.ListObjects); public-catalog / FGA-disabled bypass выражается nil-фильтром
+// в handler'е (resolveListFilter) либо Config.Enabled=false, а не отдельным типом.
 type Filter interface {
 	// ListAllowedIDs возвращает Decision для (subject, resourceType, action).
 	// resourceType — FGA object type ("compute_instance", "compute_disk", ...).
@@ -55,15 +53,6 @@ type Filter interface {
 	// relation. subject — FGA subject string ("user:usr_alice"
 	// или "service_account:sa_xxx").
 	ListAllowedIDs(ctx context.Context, subject, resourceType, action string) (Decision, error)
-}
-
-// BypassFilter — singleton фильтр-заглушка, всегда возвращающий BypassAll=true.
-// Используется для public-catalog RPC (DiskType / Zone / Region List).
-type BypassFilter struct{}
-
-// ListAllowedIDs возвращает BypassAll=true.
-func (BypassFilter) ListAllowedIDs(_ context.Context, _, _, _ string) (Decision, error) {
-	return Decision{BypassAll: true}, nil
 }
 
 // Config — параметры FGAFilter.

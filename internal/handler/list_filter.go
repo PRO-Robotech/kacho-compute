@@ -31,7 +31,7 @@ import (
 )
 
 // resolveListFilter — извлекает subject из request Principal, вызывает FGA filter,
-// возвращает authzfilter.Decision (handler ветвится по IsBypass/IsEmpty/IDs).
+// возвращает authzfilter.Decision (handler ветвится по IsBypass/len(IDs)).
 //
 // Decision rules:
 //   - filter nil → BypassAll (FGA disabled in dev / breakglass).
