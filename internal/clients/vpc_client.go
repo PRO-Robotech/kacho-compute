@@ -14,9 +14,9 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/PRO-Robotech/kacho-corelib/auth"
-	operationv1 "github.com/PRO-Robotech/kacho-corelib/proto/gen/go/kacho/cloud/operation"
+	operationv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/operation"
 	"github.com/PRO-Robotech/kacho-corelib/retry"
-	vpcv1 "github.com/PRO-Robotech/kacho-vpc/proto/gen/go/kacho/cloud/vpc/v1"
+	vpcv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/vpc/v1"
 
 	"github.com/PRO-Robotech/kacho-compute/internal/service"
 )

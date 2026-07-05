@@ -34,7 +34,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho-corelib/operations"
 
-	computev1 "github.com/PRO-Robotech/kacho-compute/proto/gen/go/kacho/cloud/compute/v1"
+	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
 
 	"github.com/PRO-Robotech/kacho-compute/internal/domain"
 	"github.com/PRO-Robotech/kacho-compute/internal/ports"
