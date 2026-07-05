@@ -63,12 +63,12 @@ func (h *DiskHandler) List(ctx context.Context, req *computev1.ListDisksRequest)
 		return nil, err
 	}
 	filter := svc.DiskFilter{ProjectID: req.ProjectId, Filter: req.Filter}
-	if !dec.bypass {
-		if len(dec.allowedIDs) == 0 {
+	if !dec.IsBypass() {
+		if len(dec.IDs()) == 0 {
 			// Empty grant → return empty list (NOT error).
 			return &computev1.ListDisksResponse{}, nil
 		}
-		filter.AllowedIDs = dec.allowedIDs
+		filter.AllowedIDs = dec.IDs()
 	}
 	disks, nextToken, err := h.svc.List(ctx, filter,
 		svc.Pagination{PageToken: req.PageToken, PageSize: req.PageSize})

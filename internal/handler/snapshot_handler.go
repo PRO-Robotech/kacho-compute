@@ -59,11 +59,11 @@ func (h *SnapshotHandler) List(ctx context.Context, req *computev1.ListSnapshots
 		return nil, err
 	}
 	filter := svc.SnapshotFilter{ProjectID: req.ProjectId, Filter: req.Filter}
-	if !dec.bypass {
-		if len(dec.allowedIDs) == 0 {
+	if !dec.IsBypass() {
+		if len(dec.IDs()) == 0 {
 			return &computev1.ListSnapshotsResponse{}, nil
 		}
-		filter.AllowedIDs = dec.allowedIDs
+		filter.AllowedIDs = dec.IDs()
 	}
 	snaps, nextToken, err := h.svc.List(ctx, filter,
 		svc.Pagination{PageToken: req.PageToken, PageSize: req.PageSize})
