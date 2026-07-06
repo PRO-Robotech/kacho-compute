@@ -25,8 +25,8 @@ Compute-NIC бэкуется ресурсом kacho-vpc `NetworkInterface` (`nic
 управляет реальным data plane: он только хранит
 конфигурацию, валидирует её, имитирует жизненный цикл (детерминированная
 state-машина Instance), эмитит события об изменениях.
-Внешний контракт повторяет Yandex Cloud Compute API (`kacho.cloud.compute.v1`
-== зеркало `yandex.cloud.compute.v1`) по форме и семантике.
+Внешний контракт — замороженный публичный контракт продукта в пакете
+`kacho.cloud.compute.v1` (стабильная форма и семантика).
 
 **Место в Kachō (polyrepo).** Внешние клиенты ходят через `kacho-api-gateway`
 (gRPC-proxy + grpc-gateway REST). Сервисы общаются по gRPC; у каждого — своя

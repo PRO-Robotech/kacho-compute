@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bytes"
 	"io"
 	"log/slog"
 	"strings"
@@ -17,6 +18,11 @@ import (
 
 func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// captureLogger — logger, пишущий в buf (для проверки boot-time WARN'ов).
+func captureLogger(buf *bytes.Buffer) *slog.Logger {
+	return slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
 }
 
 // allEdgesSecured возвращает config, у которого КАЖДОЕ реально дозваниваемое
@@ -306,6 +312,56 @@ func TestValidateAuthMode_Production_RequiresDBSSL(t *testing.T) {
 		if _, err := validateAuthMode(cfg, discardLogger()); err != nil {
 			t.Errorf("production must accept DBSSLMode=%q; got err: %v", ok, err)
 		}
+	}
+}
+
+// breakglass в production — намеренный emergency-escape (зеркалит kacho-vpc:
+// warn-not-reject; существующий TestValidateAuthMode_ProductionStrict_
+// BreakglassDropsAuthzEdge подтверждает, что gate его пропускает). НО он не должен
+// быть МОЛЧАЛИВЫМ: boot ОБЯЗАН громко предупредить, что per-RPC authz Check
+// целиком обойдён. Finding r9b#1: «production gate silently disables all authz».
+func TestValidateAuthMode_Production_BreakglassEmitsLoudWarn(t *testing.T) {
+	for _, mode := range []string{"production", "production-strict"} {
+		t.Run(mode, func(t *testing.T) {
+			var cfg config.Config
+			if mode == "production-strict" {
+				cfg = allEdgesSecured()
+			} else {
+				cfg = securedProduction()
+			}
+			cfg.AuthMode = mode
+			cfg.AuthZBreakglass = true
+			// production-strict иначе потребует IAM_AUTHZ_MTLS; breakglass снимает это.
+			cfg.IAMAuthzMTLS.Enable = false
+
+			var buf bytes.Buffer
+			prod, err := validateAuthMode(cfg, captureLogger(&buf))
+			if err != nil {
+				t.Fatalf("breakglass in %s must NOT reject boot (emergency escape, mirrors kacho-vpc); got err: %v", mode, err)
+			}
+			if !prod {
+				t.Errorf("%s must report productionMode=true", mode)
+			}
+			got := strings.ToLower(buf.String())
+			if !strings.Contains(got, "breakglass") {
+				t.Errorf("%s + breakglass must emit a boot WARN naming breakglass; got log: %q", mode, buf.String())
+			}
+			if !strings.Contains(got, "bypass") {
+				t.Errorf("%s + breakglass WARN must state that authz Check is BYPASSED; got log: %q", mode, buf.String())
+			}
+		})
+	}
+}
+
+// Обратная сторона: без breakglass production НЕ должен эмитить breakglass-WARN
+// (иначе алерт-шум / притупление внимания к реальному emergency-обходу).
+func TestValidateAuthMode_Production_NoBreakglassNoWarn(t *testing.T) {
+	var buf bytes.Buffer
+	if _, err := validateAuthMode(securedProduction(), captureLogger(&buf)); err != nil {
+		t.Fatalf("secured production must pass; got: %v", err)
+	}
+	if strings.Contains(strings.ToLower(buf.String()), "breakglass") {
+		t.Errorf("production WITHOUT breakglass must not emit a breakglass WARN; got log: %q", buf.String())
 	}
 }
 

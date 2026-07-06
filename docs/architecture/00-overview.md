@@ -11,8 +11,8 @@
 об изменениях через outbox.
 Compute-NIC бэкуется ресурсом kacho-vpc `NetworkInterface` (`nic_id`, эпик `KAC-9`).
 
-Внешний контракт повторяет Yandex Cloud Compute API (`kacho.cloud.compute.v1`
-== зеркало `yandex.cloud.compute.v1`): proto-форма, имена полей, enum-значения,
+Внешний контракт зафиксирован как стабильный замороженный контракт продукта в
+пакете `kacho.cloud.compute.v1`: proto-форма, имена полей, enum-значения,
 `google.api.http` annotations, `(kacho.cloud.api.operation)` options, error
 texts, status codes, timestamp precision, regex'ы, behavioural semantics.
 
@@ -122,13 +122,12 @@ prefix `epd`).
    `migrations/common`). В compute-репо живёт ТОЛЬКО compute-доменная логика;
    утилита, нужная 2+ сервисам, выносится в corelib, а не дублируется.
 2. **`kacho-proto`** — единый центральный репо всех `.proto`. **External**
-   (verbatim-YC) сервисы обязаны повторять YC Compute API 1-в-1 (proto-форма,
+   сервисы держат замороженный публичный контракт 1-в-1 (proto-форма,
    имена полей, enum, `google.api.http`, `(kacho.cloud.api.operation)` options).
    **Internal** (`Internal*`) — на наше усмотрение (контракт может меняться
    свободно, наружу не публикуется). Compute-домен зафиксирован в
-   `kacho-proto/proto/kacho/cloud/compute/v1/*.proto` (vendored от YC,
-   переименован пакет `yandex.cloud.compute.v1` → `kacho.cloud.compute.v1`,
-   gen/go сгенерирован).
+   `kacho-proto/proto/kacho/cloud/compute/v1/*.proto` (пакет
+   `kacho.cloud.compute.v1`, gen/go сгенерирован).
 3. **Тесты на КАЖДУЮ функциональность** — Go-unit (`internal/service/*_test.go`,
    `internal/handler/*_test.go`, `internal/repo/*integration_test.go`) и newman
    e2e (`tests/newman/cases/*.py`). Каждый RPC и каждый класс кейсов
@@ -212,17 +211,16 @@ internal/
 синглтоны вне `cmd/`; ORM (gorm/ent/bun); каскадное удаление через границу
 сервиса; новые единые БД.
 
-## Verbatim-YC parity goal
+## Стабильность внешнего контракта
 
-`kacho.cloud.compute.v1` — побайтовое зеркало `yandex.cloud.compute.v1` (после
-переименования пакета). Цель — клиент (`yc compute` CLI / SDK), направленный на
-api-gateway вместо `compute.api.cloud.yandex.net`, ведёт себя идентично:
-тот же proto-message, те же REST-пути, те же error texts и gRPC-коды, та же
+`kacho.cloud.compute.v1` — замороженный публичный контракт продукта. Цель —
+клиент (SDK / CLI), написанный против опубликованного контракта и направленный на
+api-gateway, ведёт себя детерминированно и стабильно между релизами: тот же
+proto-message, те же REST-пути, те же error texts и gRPC-коды, та же
 timestamp-precision (секунды), те же regex'ы валидации, та же state-машина
-Instance, те же precondition-ошибки. Любой newman-кейс должен зеленеть и против
-реального YC. Осознанные текущие расхождения (id-syntax, непроверенные тексты) —
-зафиксированы в [`07-known-divergences.md`](07-known-divergences.md), баги —
-в GitHub Issues.
+Instance, те же precondition-ошибки. Осознанные текущие расхождения контракта
+(id-syntax, непроверенные тексты) — зафиксированы в
+[`07-known-divergences.md`](07-known-divergences.md), баги — в GitHub Issues.
 
 ## Что НЕ owns kacho-compute
 

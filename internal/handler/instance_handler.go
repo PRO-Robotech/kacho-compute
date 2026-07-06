@@ -100,6 +100,19 @@ func (h *InstanceHandler) Create(ctx context.Context, req *computev1.CreateInsta
 	if err := AssertFolderOwnership(ctx, req.ProjectId); err != nil {
 		return nil, err
 	}
+	op, err := h.svc.Create(ctx, CreateReqFromProto(req))
+	if err != nil {
+		return nil, err
+	}
+	return operationToProto(op), nil
+}
+
+// CreateReqFromProto — чистая proto→use-case конвертация CreateInstanceRequest в
+// svc.CreateInstanceReq (без auth/transport). Тот же маппинг, что выполняет RPC
+// Create; выделен, чтобы fuzz (internal/fuzz) прогонял ровно этот путь на
+// hostile-входах. network_interface_specs игнорируются — Instance создаётся без
+// auto-NIC (NIC-binding вынесен из lifecycle Instance).
+func CreateReqFromProto(req *computev1.CreateInstanceRequest) svc.CreateInstanceReq {
 	cr := svc.CreateInstanceReq{
 		ProjectID:        req.ProjectId,
 		Name:             req.Name,
@@ -127,13 +140,7 @@ func (h *InstanceHandler) Create(ctx context.Context, req *computev1.CreateInsta
 	for _, sd := range req.SecondaryDiskSpecs {
 		cr.SecondaryDisks = append(cr.SecondaryDisks, diskSourceFromSpec(sd))
 	}
-	// network_interface_specs are ignored — the Instance is created without any
-	// auto-NIC (NIC binding removed from the Instance lifecycle).
-	op, err := h.svc.Create(ctx, cr)
-	if err != nil {
-		return nil, err
-	}
-	return operationToProto(op), nil
+	return cr
 }
 
 // Update инициирует обновление Instance.
