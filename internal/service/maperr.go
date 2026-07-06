@@ -64,6 +64,21 @@ func mapRefErr(err error, resource, id string) error {
 	return mapRepoErr(err)
 }
 
+// crossProjectNotFound returns the SAME NotFound status a genuinely-missing
+// reference yields (mapRefErr's not-found branch), used to reject a well-formed
+// source/attach reference that resolves to a resource owned by ANOTHER project.
+//
+// repo.Get resolves a resource by primary key across ALL projects, but only the
+// caller's own project is FGA-Checked — so without this guard a caller with
+// editor on their own project could copy a victim project's disk/snapshot/image
+// (data exfiltration) or take over a victim's disk (cross-project attach +
+// auto_delete destruction). The reject is DELIBERATELY indistinguishable from a
+// nonexistent id (identical code + message) so it is not an existence oracle
+// leaking that "this id exists, just in another project" (BOLA, CWE-639).
+func crossProjectNotFound(resource, id string) error {
+	return status.Errorf(codes.NotFound, "%s %s not found", resource, id)
+}
+
 // mapZoneRefErr транслирует ошибку existence-check zone_id (через ZoneRegistry —
 // kacho-geo geo.v1.ZoneService.Get; Geography принадлежит kacho-geo) в
 // gRPC-status, сохраняя контракт compute: неизвестная зона → InvalidArgument
