@@ -8,8 +8,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/PRO-Robotech/kacho-compute/internal/config"
 )
 
 // CLIENT mTLS on the compute→iam read/authz edges.
@@ -25,10 +23,9 @@ import (
 // for both iam read/authz edges → insecure dial-opt builds, no cert files read;
 // zero dev regression.
 func TestMTLS_SEC_I_C01_IAMReadAuthzDisabledDefaultInsecure(t *testing.T) {
-	var cfg config.Config
-	require.NoError(t, config.LoadInto(&cfg, map[string]string{
+	cfg := loadCfg(t, map[string]string{
 		"KACHO_COMPUTE_DB_PASSWORD": "x",
-	}))
+	})
 	assert.False(t, cfg.IAMProjectMTLS.Enable, "compute→iam ProjectService.Get mTLS off by default")
 	assert.False(t, cfg.IAMAuthzMTLS.Enable, "compute→iam Check/list-filter mTLS off by default")
 
@@ -45,15 +42,14 @@ func TestMTLS_SEC_I_C01_IAMReadAuthzDisabledDefaultInsecure(t *testing.T) {
 // client transport creds.
 func TestMTLS_SEC_I_C02_IAMProjectEnabledClientCredsBuild(t *testing.T) {
 	certFile, keyFile, caFile := writeTestCert(t)
-	var cfg config.Config
-	require.NoError(t, config.LoadInto(&cfg, map[string]string{
+	cfg := loadCfg(t, map[string]string{
 		"KACHO_COMPUTE_DB_PASSWORD":                 "x",
 		"KACHO_COMPUTE_IAM_PROJECT_MTLS_ENABLE":     "true",
 		"KACHO_COMPUTE_IAM_PROJECT_MTLS_CERTFILE":   certFile,
 		"KACHO_COMPUTE_IAM_PROJECT_MTLS_KEYFILE":    keyFile,
 		"KACHO_COMPUTE_IAM_PROJECT_MTLS_CAFILES":    caFile,
 		"KACHO_COMPUTE_IAM_PROJECT_MTLS_SERVERNAME": "kacho-iam.kacho.svc.cluster.local",
-	}))
+	})
 	assert.True(t, cfg.IAMProjectMTLS.Enable)
 	assert.Equal(t, "kacho-iam.kacho.svc.cluster.local", cfg.IAMProjectMTLS.ServerName)
 	opt, err := cfg.IAMProjectClientCreds()
@@ -66,15 +62,14 @@ func TestMTLS_SEC_I_C02_IAMProjectEnabledClientCredsBuild(t *testing.T) {
 // dial-host, Check + list-filter) builds client transport creds.
 func TestMTLS_SEC_I_C03_IAMAuthzEnabledClientCredsBuild(t *testing.T) {
 	certFile, keyFile, caFile := writeTestCert(t)
-	var cfg config.Config
-	require.NoError(t, config.LoadInto(&cfg, map[string]string{
+	cfg := loadCfg(t, map[string]string{
 		"KACHO_COMPUTE_DB_PASSWORD":               "x",
 		"KACHO_COMPUTE_IAM_AUTHZ_MTLS_ENABLE":     "true",
 		"KACHO_COMPUTE_IAM_AUTHZ_MTLS_CERTFILE":   certFile,
 		"KACHO_COMPUTE_IAM_AUTHZ_MTLS_KEYFILE":    keyFile,
 		"KACHO_COMPUTE_IAM_AUTHZ_MTLS_CAFILES":    caFile,
 		"KACHO_COMPUTE_IAM_AUTHZ_MTLS_SERVERNAME": "kacho-iam-internal.kacho.svc.cluster.local",
-	}))
+	})
 	assert.True(t, cfg.IAMAuthzMTLS.Enable)
 	assert.Equal(t, "kacho-iam-internal.kacho.svc.cluster.local", cfg.IAMAuthzMTLS.ServerName)
 	opt, err := cfg.IAMAuthzClientCreds()
@@ -85,12 +80,11 @@ func TestMTLS_SEC_I_C03_IAMAuthzEnabledClientCredsBuild(t *testing.T) {
 // TestMTLS_SEC_I_C07_IAMProjectFailClosedMissingCA — C-07 (mirror A-03): enable=true
 // but empty ca_files → error (fail-closed, never silent insecure).
 func TestMTLS_SEC_I_C07_IAMProjectFailClosedMissingCA(t *testing.T) {
-	var cfg config.Config
-	require.NoError(t, config.LoadInto(&cfg, map[string]string{
+	cfg := loadCfg(t, map[string]string{
 		"KACHO_COMPUTE_DB_PASSWORD":             "x",
 		"KACHO_COMPUTE_IAM_PROJECT_MTLS_ENABLE": "true",
 		// no CAFILES / SERVERNAME → fail-closed.
-	}))
+	})
 	_, err := cfg.IAMProjectClientCreds()
 	require.Error(t, err, "enabled ProjectService.Get mTLS without CA must fail-closed")
 }
@@ -99,13 +93,12 @@ func TestMTLS_SEC_I_C07_IAMProjectFailClosedMissingCA(t *testing.T) {
 // enable=true, valid CA but empty server_name → error (fail-closed).
 func TestMTLS_SEC_I_C07_IAMAuthzFailClosedMissingServerName(t *testing.T) {
 	_, _, caFile := writeTestCert(t)
-	var cfg config.Config
-	require.NoError(t, config.LoadInto(&cfg, map[string]string{
+	cfg := loadCfg(t, map[string]string{
 		"KACHO_COMPUTE_DB_PASSWORD":            "x",
 		"KACHO_COMPUTE_IAM_AUTHZ_MTLS_ENABLE":  "true",
 		"KACHO_COMPUTE_IAM_AUTHZ_MTLS_CAFILES": caFile,
 		// no SERVERNAME → fail-closed.
-	}))
+	})
 	_, err := cfg.IAMAuthzClientCreds()
 	require.Error(t, err, "enabled Check/list-filter mTLS without server_name must fail-closed")
 }
@@ -116,8 +109,7 @@ func TestMTLS_SEC_I_C07_IAMAuthzFailClosedMissingServerName(t *testing.T) {
 // would collapse the edges onto shared env names.
 func TestMTLS_SEC_I_PerEdgeIndependence(t *testing.T) {
 	certFile, keyFile, caFile := writeTestCert(t)
-	var cfg config.Config
-	require.NoError(t, config.LoadInto(&cfg, map[string]string{
+	cfg := loadCfg(t, map[string]string{
 		"KACHO_COMPUTE_DB_PASSWORD": "x",
 		// Only the project edge is on.
 		"KACHO_COMPUTE_IAM_PROJECT_MTLS_ENABLE":     "true",
@@ -125,7 +117,7 @@ func TestMTLS_SEC_I_PerEdgeIndependence(t *testing.T) {
 		"KACHO_COMPUTE_IAM_PROJECT_MTLS_KEYFILE":    keyFile,
 		"KACHO_COMPUTE_IAM_PROJECT_MTLS_CAFILES":    caFile,
 		"KACHO_COMPUTE_IAM_PROJECT_MTLS_SERVERNAME": "kacho-iam.kacho.svc.cluster.local",
-	}))
+	})
 	assert.True(t, cfg.IAMProjectMTLS.Enable, "project edge on")
 	assert.False(t, cfg.IAMAuthzMTLS.Enable, "authz edge independently off")
 	assert.False(t, cfg.IAMRegisterMTLS.Enable, "register edge independently off")

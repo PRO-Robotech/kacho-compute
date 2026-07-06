@@ -137,7 +137,7 @@ func (s *DiskService) doCreate(ctx context.Context, diskID string, req CreateDis
 	if err := checkProject(ctx, s.projectClient, req.ProjectID); err != nil {
 		return nil, err
 	}
-	if _, err := s.zones.GetZone(ctx, req.ZoneID); err != nil {
+	if err := s.zones.GetZone(ctx, req.ZoneID); err != nil {
 		return nil, mapZoneRefErr(err, req.ZoneID)
 	}
 	typeID := req.TypeID
@@ -342,7 +342,7 @@ func (s *DiskService) Relocate(ctx context.Context, id, destZoneID string) (*ope
 	return runOp(ctx, s.opsRepo, fmt.Sprintf("Relocate disk %s", id),
 		&computev1.RelocateDiskMetadata{DiskId: id, DestinationZoneId: destZoneID},
 		func(ctx context.Context) (*anypb.Any, error) {
-			if _, err := s.zones.GetZone(ctx, destZoneID); err != nil {
+			if err := s.zones.GetZone(ctx, destZoneID); err != nil {
 				return nil, mapZoneRefErr(err, destZoneID)
 			}
 			// Атомарный CAS на DB-уровне: zone_id меняется только если диск не attached.

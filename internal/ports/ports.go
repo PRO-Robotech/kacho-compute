@@ -152,16 +152,11 @@ type ProjectClient interface {
 	Exists(ctx context.Context, projectID string) (bool, error)
 }
 
-// ZoneInfo — минимальные данные о зоне, нужные compute'у: id + region.
-type ZoneInfo struct {
-	ID       string
-	RegionID string
-}
-
 // ZoneRegistry — port для existence-check zone_id в Disk.Create / Instance.Create
 // (и Disk.Relocate). Реализуется поверх kacho-geo (geo.v1.ZoneService.Get) через
-// clients.GeoClient — Geography (Region/Zone) принадлежит kacho-geo. GetZone
-// возвращает ErrNotFound, если зона неизвестна.
+// clients.GeoClient — Geography (Region/Zone) принадлежит kacho-geo. GetZone —
+// чистый existence-check: nil → зона существует; ErrNotFound → зона неизвестна;
+// иная ошибка (peer недоступен) пробрасывается для fail-closed на мутации.
 type ZoneRegistry interface {
-	GetZone(ctx context.Context, zoneID string) (ZoneInfo, error)
+	GetZone(ctx context.Context, zoneID string) error
 }

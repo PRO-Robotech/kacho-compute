@@ -46,36 +46,30 @@ func NewGeoClientWith(zones geov1.ZoneServiceClient) *GeoClient {
 	return &GeoClient{zones: zones}
 }
 
-// GetZone валидирует zone_id через geo.v1.ZoneService.Get. Найдено → ZoneInfo
-// (id + region). geo NOT_FOUND → ports.ErrNotFound (mapZoneRefErr → InvalidArgument).
+// GetZone валидирует существование zone_id через geo.v1.ZoneService.Get.
+// Найдено → nil. geo NOT_FOUND → ports.ErrNotFound (mapZoneRefErr → InvalidArgument).
 // geo недоступен (после retry) → проброс gRPC Unavailable (mapZoneRefErr → Unavailable).
-func (c *GeoClient) GetZone(ctx context.Context, zoneID string) (ports.ZoneInfo, error) {
-	var out ports.ZoneInfo
-	err := retry.OnUnavailable(ctx, func(ctx context.Context) error {
-		z, rerr := c.zones.Get(auth.PropagateOutgoing(ctx), &geov1.GetZoneRequest{ZoneId: zoneID})
+func (c *GeoClient) GetZone(ctx context.Context, zoneID string) error {
+	return retry.OnUnavailable(ctx, func(ctx context.Context) error {
+		_, rerr := c.zones.Get(auth.PropagateOutgoing(ctx), &geov1.GetZoneRequest{ZoneId: zoneID})
 		if rerr != nil {
 			if st, ok := status.FromError(rerr); ok && st.Code() == codes.NotFound {
 				return ports.ErrNotFound
 			}
 			return rerr
 		}
-		out = ports.ZoneInfo{ID: z.GetId(), RegionID: z.GetRegionId()}
 		return nil
 	})
-	if err != nil {
-		return ports.ZoneInfo{}, err
-	}
-	return out, nil
 }
 
 // NoopGeoClient — заглушка для KACHO_COMPUTE_SKIP_PEER_VALIDATION=true (zone
 // existence-check отключён → любая зона «существует») и для unit/newman без
-// поднятого kacho-geo. GetZone возвращает ZoneInfo с переданным id (region пуст).
+// поднятого kacho-geo. GetZone всегда успешен (любая зона существует).
 type NoopGeoClient struct{}
 
-// GetZone всегда возвращает ZoneInfo{ID: zoneID} без обращения к geo.
-func (NoopGeoClient) GetZone(_ context.Context, zoneID string) (ports.ZoneInfo, error) {
-	return ports.ZoneInfo{ID: zoneID}, nil
+// GetZone всегда возвращает nil без обращения к geo.
+func (NoopGeoClient) GetZone(_ context.Context, _ string) error {
+	return nil
 }
 
 // ensure compile-time: both impls satisfy the use-case port.

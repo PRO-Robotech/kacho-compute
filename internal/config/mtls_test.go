@@ -18,8 +18,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/PRO-Robotech/kacho-compute/internal/config"
 )
 
 // writeTestCert generates a throwaway self-signed cert+key+CA PEM trio for the
@@ -57,10 +55,9 @@ func writeTestCert(t *testing.T) (certFile, keyFile, caFile string) {
 // TestMTLS_SEC_D_16_DisabledDefaultInsecure — enable=false (default) → dial opts
 // build insecure; backward-compat, no cert files read.
 func TestMTLS_SEC_D_16_DisabledDefaultInsecure(t *testing.T) {
-	var cfg config.Config
-	require.NoError(t, config.LoadInto(&cfg, map[string]string{
+	cfg := loadCfg(t, map[string]string{
 		"KACHO_COMPUTE_DB_PASSWORD": "x",
-	}))
+	})
 	assert.False(t, cfg.IAMRegisterMTLS.Enable, "register→iam mTLS off by default")
 
 	// dial opt builds without cert files when disabled.
@@ -74,15 +71,14 @@ func TestMTLS_SEC_D_16_DisabledDefaultInsecure(t *testing.T) {
 // bufconn tests).
 func TestMTLS_SEC_D_17_EnabledClientCredsBuild(t *testing.T) {
 	certFile, keyFile, caFile := writeTestCert(t)
-	var cfg config.Config
-	require.NoError(t, config.LoadInto(&cfg, map[string]string{
+	cfg := loadCfg(t, map[string]string{
 		"KACHO_COMPUTE_DB_PASSWORD":                  "x",
 		"KACHO_COMPUTE_IAM_REGISTER_MTLS_ENABLE":     "true",
 		"KACHO_COMPUTE_IAM_REGISTER_MTLS_CERTFILE":   certFile,
 		"KACHO_COMPUTE_IAM_REGISTER_MTLS_KEYFILE":    keyFile,
 		"KACHO_COMPUTE_IAM_REGISTER_MTLS_CAFILES":    caFile,
 		"KACHO_COMPUTE_IAM_REGISTER_MTLS_SERVERNAME": "kacho-iam.kacho.svc.cluster.local",
-	}))
+	})
 	assert.True(t, cfg.IAMRegisterMTLS.Enable)
 	opt, err := cfg.IAMRegisterClientCreds()
 	require.NoError(t, err, "valid cert trio → client creds build")
@@ -92,12 +88,11 @@ func TestMTLS_SEC_D_17_EnabledClientCredsBuild(t *testing.T) {
 // TestMTLS_SEC_D_FailClosedMissingCA — enable=true but empty ca_files → error
 // (fail-closed, never silent insecure fallback).
 func TestMTLS_SEC_D_FailClosedMissingCA(t *testing.T) {
-	var cfg config.Config
-	require.NoError(t, config.LoadInto(&cfg, map[string]string{
+	cfg := loadCfg(t, map[string]string{
 		"KACHO_COMPUTE_DB_PASSWORD":              "x",
 		"KACHO_COMPUTE_IAM_REGISTER_MTLS_ENABLE": "true",
 		// no CAFILES / SERVERNAME → fail-closed.
-	}))
+	})
 	_, err := cfg.IAMRegisterClientCreds()
 	require.Error(t, err, "enabled mTLS without CA must fail-closed")
 }
