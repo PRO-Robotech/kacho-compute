@@ -64,7 +64,10 @@ type Config struct {
 	Timeout time.Duration
 	// CacheTTL — TTL одной записи в in-process decision cache.
 	CacheTTL time.Duration
-	// CacheMaxEntries — bound для cache size (LRU eviction если превышен).
+	// CacheMaxEntries — bound для cache size. TTL — первичный механизм вытеснения
+	// (записи живут CacheTTL); при превышении bound putCache сбрасывает одну
+	// произвольную запись (не LRU — см. putCache; TTL-short делает выбор жертвы
+	// несущественным).
 	CacheMaxEntries int
 	// FailOpen — на FGA error: true → BypassAll=true + audit-warn; false → Unavailable.
 	FailOpen bool

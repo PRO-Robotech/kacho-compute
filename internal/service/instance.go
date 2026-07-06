@@ -124,36 +124,50 @@ func (s *InstanceService) List(ctx context.Context, f InstanceFilter, p Paginati
 	return s.repo.List(ctx, f, p)
 }
 
-// Create инициирует создание Instance.
-func (s *InstanceService) Create(ctx context.Context, req CreateInstanceReq) (*operations.Operation, error) {
+// ValidateCreateInstanceReq — синхронная pre-flight валидация Create-запроса
+// (формат/диапазоны полей): required-поля, name/description/labels,
+// resources_spec (cores/memory/core_fraction), boot + secondary disk specs.
+// Чистая (без DB/peer-вызовов) — тот же контракт, что энфорсит RPC ДО постановки
+// async-операции. Выделена, чтобы её мог прогонять fuzz (internal/fuzz) на
+// hostile-входах без поднятого сервиса. Возвращает InvalidArgument-status при
+// нарушении, nil при валидном req.
+func ValidateCreateInstanceReq(req CreateInstanceReq) error {
 	if req.ProjectID == "" {
-		return nil, status.Error(codes.InvalidArgument, "project_id required")
+		return status.Error(codes.InvalidArgument, "project_id required")
 	}
 	if req.ZoneID == "" {
-		return nil, status.Error(codes.InvalidArgument, "zone_id required")
+		return status.Error(codes.InvalidArgument, "zone_id required")
 	}
 	if req.PlatformID == "" {
-		return nil, status.Error(codes.InvalidArgument, "platform_id required")
+		return status.Error(codes.InvalidArgument, "platform_id required")
 	}
 	if err := corevalidate.NameCompute("name", req.Name); err != nil {
-		return nil, err
+		return err
 	}
 	if err := corevalidate.Description("description", req.Description); err != nil {
-		return nil, err
+		return err
 	}
 	if err := corevalidate.Labels("labels", req.Labels); err != nil {
-		return nil, err
+		return err
 	}
 	if err := validateResources(req.Cores, req.Memory, req.CoreFraction); err != nil {
-		return nil, err
+		return err
 	}
 	if err := validateDiskSourceSpec("boot_disk_spec", req.BootDisk); err != nil {
-		return nil, err
+		return err
 	}
 	for i, sd := range req.SecondaryDisks {
 		if err := validateDiskSourceSpec(fmt.Sprintf("secondary_disk_specs[%d]", i), sd); err != nil {
-			return nil, err
+			return err
 		}
+	}
+	return nil
+}
+
+// Create инициирует создание Instance.
+func (s *InstanceService) Create(ctx context.Context, req CreateInstanceReq) (*operations.Operation, error) {
+	if err := ValidateCreateInstanceReq(req); err != nil {
+		return nil, err
 	}
 
 	instanceID := ids.NewID(ids.PrefixInstance)

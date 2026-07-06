@@ -105,7 +105,9 @@ type Config struct {
 	// access-binding revoke виден ≤5s; lower → больше RTT к iam.
 	ListFilterCacheTTLMs int `envconfig:"KACHO_COMPUTE_LIST_FILTER_CACHE_TTL_MS" default:"5000"`
 
-	// ListFilterCacheMaxEntries — bound для cache (LRU evict при превышении).
+	// ListFilterCacheMaxEntries — bound для cache. TTL-primary eviction; при
+	// превышении bound сбрасывается одна произвольная запись (не LRU — см.
+	// authzfilter.putCache).
 	// 10000 enough для ~1000 concurrent users × 10 unique (subject, type, action) keys.
 	ListFilterCacheMaxEntries int `envconfig:"KACHO_COMPUTE_LIST_FILTER_CACHE_MAX_ENTRIES" default:"10000"`
 

@@ -30,8 +30,8 @@
 
 Sub-phase 0.4 продукта Kachō. gRPC-сервис управления вычислительными ресурсами:
 **Instance, Disk, Image, Snapshot** + read-only справочники **DiskType, Zone**.
-Цель — verbatim parity с Yandex Cloud Compute API (`kacho.cloud.compute.v1`
-== зеркало `yandex.cloud.compute.v1`): proto-форма, error texts, status codes,
+Цель — стабильный замороженный публичный контракт продукта в пакете
+`kacho.cloud.compute.v1`: proto-форма, error texts, status codes,
 timestamp precision, regex'ы, behavioural semantics, state-машина Instance.
 
 Owns:
