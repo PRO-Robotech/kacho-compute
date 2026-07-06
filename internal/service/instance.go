@@ -168,7 +168,7 @@ func (s *InstanceService) doCreate(ctx context.Context, instanceID string, req C
 	if err := checkProject(ctx, s.projectClient, req.ProjectID); err != nil {
 		return nil, err
 	}
-	if _, err := s.zones.GetZone(ctx, req.ZoneID); err != nil {
+	if err := s.zones.GetZone(ctx, req.ZoneID); err != nil {
 		return nil, mapZoneRefErr(err, req.ZoneID)
 	}
 

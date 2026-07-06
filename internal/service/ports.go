@@ -37,8 +37,6 @@ type (
 
 	// ProjectClient — port для проверки существования Folder.
 	ProjectClient = ports.ProjectClient
-	// ZoneInfo — минимальные данные о зоне (id + region).
-	ZoneInfo = ports.ZoneInfo
 	// ZoneRegistry — port existence-check zone_id (Disk/Instance Create, Disk Relocate).
 	ZoneRegistry = ports.ZoneRegistry
 )

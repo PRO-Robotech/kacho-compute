@@ -5,7 +5,6 @@ package config
 
 import (
 	"fmt"
-	"os"
 
 	"google.golang.org/grpc"
 
@@ -255,30 +254,4 @@ func Load() (Config, error) {
 	var c Config
 	err := corecfg.LoadPrefixed(envPrefix, &c)
 	return c, err
-}
-
-// LoadInto — тест-хелпер: выставляет переданные env-переменные на время вызова
-// и загружает конфиг через тот же LoadPrefixed-путь, что и Load (без глобального
-// state-leak между тестами — все ключи восстанавливаются через t.Setenv-семантику
-// os.Setenv/Unsetenv с очисткой). Используется mTLS-конфиг-тестами.
-func LoadInto(c *Config, env map[string]string) error {
-	saved := make(map[string]*string, len(env))
-	for k, v := range env {
-		if prev, ok := os.LookupEnv(k); ok {
-			saved[k] = &prev
-		} else {
-			saved[k] = nil
-		}
-		_ = os.Setenv(k, v)
-	}
-	defer func() {
-		for k, prev := range saved {
-			if prev == nil {
-				_ = os.Unsetenv(k)
-			} else {
-				_ = os.Setenv(k, *prev)
-			}
-		}
-	}()
-	return corecfg.LoadPrefixed(envPrefix, c)
 }

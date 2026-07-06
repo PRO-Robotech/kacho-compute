@@ -55,6 +55,18 @@ func writeCmdTestCert(t *testing.T) (certFile, keyFile, caFile string) {
 	return certFile, keyFile, caFile
 }
 
+// loadCfg сеттит env, ограниченные тестом (t.Setenv), и грузит Config тем же
+// путём, что и прод config.Load — тест-хелпер не попадает в прод-бинарь.
+func loadCfg(t *testing.T, env map[string]string) config.Config {
+	t.Helper()
+	for k, v := range env {
+		t.Setenv(k, v)
+	}
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	return cfg
+}
+
 // CLIENT mTLS on the compute→iam read/authz dial seam: it must thread a per-edge
 // grpcclient.TLSClient (client-cert mTLS) rather than the server-auth-only bool.
 // These guard the seam: peerDialOptsCreds(creds, idle) builds the dial-opts from
@@ -76,10 +88,9 @@ func TestSEC_I_PeerDialOptsCreds_KeepsKeepalive(t *testing.T) {
 // enable=false (default) → corelib builds insecure creds (zero dev regression), the
 // dial-opts build without reading cert files.
 func TestSEC_I_IAMProjectDialCreds_Insecure_Default(t *testing.T) {
-	var cfg config.Config
-	require.NoError(t, config.LoadInto(&cfg, map[string]string{
+	cfg := loadCfg(t, map[string]string{
 		"KACHO_COMPUTE_DB_PASSWORD": "x",
-	}))
+	})
 	creds, err := grpcclient.TLSClientTransportCreds(cfg.IAMProjectMTLS)
 	require.NoError(t, err)
 	require.NotNil(t, creds)
@@ -92,15 +103,14 @@ func TestSEC_I_IAMProjectDialCreds_Insecure_Default(t *testing.T) {
 // is covered by corelib bufconn tests).
 func TestSEC_I_IAMAuthzDialCreds_ClientCert_Enabled(t *testing.T) {
 	certFile, keyFile, caFile := writeCmdTestCert(t)
-	var cfg config.Config
-	require.NoError(t, config.LoadInto(&cfg, map[string]string{
+	cfg := loadCfg(t, map[string]string{
 		"KACHO_COMPUTE_DB_PASSWORD":               "x",
 		"KACHO_COMPUTE_IAM_AUTHZ_MTLS_ENABLE":     "true",
 		"KACHO_COMPUTE_IAM_AUTHZ_MTLS_CERTFILE":   certFile,
 		"KACHO_COMPUTE_IAM_AUTHZ_MTLS_KEYFILE":    keyFile,
 		"KACHO_COMPUTE_IAM_AUTHZ_MTLS_CAFILES":    caFile,
 		"KACHO_COMPUTE_IAM_AUTHZ_MTLS_SERVERNAME": "kacho-iam-internal.kacho.svc.cluster.local",
-	}))
+	})
 	creds, err := grpcclient.TLSClientTransportCreds(cfg.IAMAuthzMTLS)
 	require.NoError(t, err, "valid trio → client-cert creds")
 	require.NotNil(t, creds)

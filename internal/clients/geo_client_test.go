@@ -33,8 +33,8 @@ func (f *fakeGeoZoneClient) List(_ context.Context, _ *geov1.ListZonesRequest, _
 	return nil, status.Error(codes.Unimplemented, "not used in test")
 }
 
-// TestGeoClient_GetZone_Found — geo возвращает зону → GeoClient отдаёт ZoneInfo
-// с id+region, nil error.
+// TestGeoClient_GetZone_Found — geo возвращает зону → GeoClient отдаёт nil
+// (existence-check прошёл).
 func TestGeoClient_GetZone_Found(t *testing.T) {
 	fake := &fakeGeoZoneClient{getFn: func(_ context.Context, in *geov1.GetZoneRequest) (*geov1.Zone, error) {
 		require.Equal(t, "ru-central1-a", in.GetZoneId())
@@ -42,9 +42,7 @@ func TestGeoClient_GetZone_Found(t *testing.T) {
 	}}
 	c := NewGeoClientWith(fake)
 
-	zi, err := c.GetZone(context.Background(), "ru-central1-a")
-	require.NoError(t, err)
-	require.Equal(t, service.ZoneInfo{ID: "ru-central1-a", RegionID: "ru-central1"}, zi)
+	require.NoError(t, c.GetZone(context.Background(), "ru-central1-a"))
 }
 
 // TestGeoClient_GetZone_NotFound — geo отвечает NOT_FOUND → GeoClient возвращает
@@ -56,7 +54,7 @@ func TestGeoClient_GetZone_NotFound(t *testing.T) {
 	}}
 	c := NewGeoClientWith(fake)
 
-	_, err := c.GetZone(context.Background(), "no-such-zone")
+	err := c.GetZone(context.Background(), "no-such-zone")
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ports.ErrNotFound), "geo NOT_FOUND must map to service.ErrNotFound, got %v", err)
 }
@@ -80,9 +78,8 @@ func TestGeoClient_GetZone_Unavailable(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // retry-цикл должен прерваться немедленно, не ждать 30s
 
-	zi, err := c.GetZone(ctx, "ru-central1-a")
+	err := c.GetZone(ctx, "ru-central1-a")
 	require.Error(t, err, "geo-down must propagate an error, never silent success")
-	require.Equal(t, service.ZoneInfo{}, zi, "no zone info on geo-down")
 	require.False(t, errors.Is(err, ports.ErrNotFound), "transport error must NOT be treated as not-found (fail-closed)")
 }
 

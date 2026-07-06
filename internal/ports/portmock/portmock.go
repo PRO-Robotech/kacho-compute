@@ -658,30 +658,30 @@ func (r *DiskTypeRepo) Delete(_ context.Context, id string) error {
 // (geo.v1.ZoneService.Get) — Geography принадлежит kacho-geo.
 type ZoneRegistry struct {
 	mu   sync.Mutex
-	data map[string]string // zoneID → regionID
+	data map[string]struct{} // set of known zoneIDs (existence-check)
 }
 
 // NewZoneRegistry создаёт ZoneRegistry с seed-зонами (ru-central1-{a,b,d} по умолчанию).
 func NewZoneRegistry(ids ...string) *ZoneRegistry {
-	r := &ZoneRegistry{data: make(map[string]string)}
+	r := &ZoneRegistry{data: make(map[string]struct{})}
 	if len(ids) == 0 {
 		ids = []string{"ru-central1-a", "ru-central1-b", "ru-central1-d"}
 	}
 	for _, id := range ids {
-		r.data[id] = "ru-central1"
+		r.data[id] = struct{}{}
 	}
 	return r
 }
 
-// GetZone — реализация ports.ZoneRegistry: зона по id → ZoneInfo (ErrNotFound при отсутствии).
-func (r *ZoneRegistry) GetZone(_ context.Context, zoneID string) (ports.ZoneInfo, error) {
+// GetZone — реализация ports.ZoneRegistry: existence-check зоны по id
+// (nil если зона засеяна, ErrNotFound при отсутствии).
+func (r *ZoneRegistry) GetZone(_ context.Context, zoneID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	region, ok := r.data[zoneID]
-	if !ok {
-		return ports.ZoneInfo{}, ports.ErrNotFound
+	if _, ok := r.data[zoneID]; !ok {
+		return ports.ErrNotFound
 	}
-	return ports.ZoneInfo{ID: zoneID, RegionID: region}, nil
+	return nil
 }
 
 // ---- ProjectClient ----
