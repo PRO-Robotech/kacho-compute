@@ -104,6 +104,12 @@ func (s *SnapshotService) doCreate(ctx context.Context, snapID string, req Creat
 	if err != nil {
 		return nil, mapRefErr(err, "Disk", req.DiskID)
 	}
+	// Cross-project BOLA guard: repo.Get resolves across ALL projects; reject a
+	// source disk owned by another project (NotFound — no existence oracle)
+	// BEFORE the status check so a victim's disk existence/state never leaks.
+	if d.ProjectID != req.ProjectID {
+		return nil, crossProjectNotFound("Disk", req.DiskID)
+	}
 	if d.Status != domain.DiskStatusReady {
 		return nil, status.Errorf(codes.FailedPrecondition, "Disk %s is not READY", req.DiskID)
 	}

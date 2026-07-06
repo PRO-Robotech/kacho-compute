@@ -163,6 +163,11 @@ func (s *ImageService) doCreate(ctx context.Context, imageID string, req CreateI
 		if err != nil {
 			return nil, mapRefErr(err, "Image", req.ImageID)
 		}
+		// Cross-project BOLA guard: reject a source owned by another project
+		// (NotFound — no existence oracle) so a victim image cannot be copied.
+		if src.ProjectID != req.ProjectID {
+			return nil, crossProjectNotFound("Image", req.ImageID)
+		}
 		minDiskSize = maxInt64(minDiskSize, src.MinDiskSize)
 		storageSize = src.StorageSize
 	case req.SnapshotID != "":
@@ -170,12 +175,19 @@ func (s *ImageService) doCreate(ctx context.Context, imageID string, req CreateI
 		if err != nil {
 			return nil, mapRefErr(err, "Snapshot", req.SnapshotID)
 		}
+		if src.ProjectID != req.ProjectID {
+			return nil, crossProjectNotFound("Snapshot", req.SnapshotID)
+		}
 		minDiskSize = maxInt64(minDiskSize, src.DiskSize)
 		storageSize = src.DiskSize
 	case req.DiskID != "":
 		d, err := s.diskRepo.Get(ctx, req.DiskID)
 		if err != nil {
 			return nil, mapRefErr(err, "Disk", req.DiskID)
+		}
+		// Reject cross-project disk BEFORE the status check (no state leak).
+		if d.ProjectID != req.ProjectID {
+			return nil, crossProjectNotFound("Disk", req.DiskID)
 		}
 		if d.Status != domain.DiskStatusReady {
 			return nil, status.Errorf(codes.FailedPrecondition, "Disk %s is not READY", req.DiskID)

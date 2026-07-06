@@ -246,6 +246,13 @@ func (s *InstanceService) resolveDiskSource(ctx context.Context, folderID, zoneI
 		if err != nil {
 			return domain.AttachedDisk{}, nil, mapRefErr(err, "Disk", spec.DiskID)
 		}
+		// Cross-project BOLA guard: repo.Get resolves across ALL projects; a
+		// caller must not attach a disk owned by another project to their own
+		// instance (cross-project takeover + auto_delete destruction). Reject
+		// with NotFound (no existence oracle) BEFORE any state leak.
+		if d.ProjectID != folderID {
+			return domain.AttachedDisk{}, nil, crossProjectNotFound("Disk", spec.DiskID)
+		}
 		if d.Status != domain.DiskStatusReady {
 			return domain.AttachedDisk{}, nil, status.Errorf(codes.FailedPrecondition, "Disk %s is not READY", spec.DiskID)
 		}
@@ -271,13 +278,24 @@ func (s *InstanceService) resolveDiskSource(ctx context.Context, folderID, zoneI
 		size = diskSizeMin
 	}
 	if spec.NewSourceImage != "" {
-		if _, err := s.imageRepo.Get(ctx, spec.NewSourceImage); err != nil {
+		img, err := s.imageRepo.Get(ctx, spec.NewSourceImage)
+		if err != nil {
 			return domain.AttachedDisk{}, nil, mapRefErr(err, "Image", spec.NewSourceImage)
+		}
+		// Cross-project BOLA guard: an inline boot/secondary disk must not be
+		// seeded from a source image owned by another project (data exfiltration
+		// into the caller's project). Reject with NotFound (no existence oracle).
+		if img.ProjectID != folderID {
+			return domain.AttachedDisk{}, nil, crossProjectNotFound("Image", spec.NewSourceImage)
 		}
 	}
 	if spec.NewSourceSnap != "" {
-		if _, err := s.snapshotRepo.Get(ctx, spec.NewSourceSnap); err != nil {
+		snap, err := s.snapshotRepo.Get(ctx, spec.NewSourceSnap)
+		if err != nil {
 			return domain.AttachedDisk{}, nil, mapRefErr(err, "Snapshot", spec.NewSourceSnap)
+		}
+		if snap.ProjectID != folderID {
+			return domain.AttachedDisk{}, nil, crossProjectNotFound("Snapshot", spec.NewSourceSnap)
 		}
 	}
 	d := &domain.Disk{
@@ -526,6 +544,14 @@ func (s *InstanceService) AttachDisk(ctx context.Context, id string, spec DiskSo
 			d, err := s.diskRepo.Get(ctx, spec.DiskID)
 			if err != nil {
 				return nil, mapRefErr(err, "Disk", spec.DiskID)
+			}
+			// Cross-project BOLA guard: repo.Get resolves across ALL projects; a
+			// caller must not attach a disk owned by another project to their own
+			// instance (cross-project takeover + auto_delete destruction). Reject
+			// with NotFound (no existence oracle) BEFORE the status/zone leak. The
+			// insertAttachedDiskTx CTE re-enforces this at the DB level.
+			if d.ProjectID != in.ProjectID {
+				return nil, crossProjectNotFound("Disk", spec.DiskID)
 			}
 			if d.Status != domain.DiskStatusReady {
 				return nil, status.Errorf(codes.FailedPrecondition, "Disk %s is not READY", spec.DiskID)

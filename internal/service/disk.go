@@ -158,6 +158,12 @@ func (s *DiskService) doCreate(ctx context.Context, diskID string, req CreateDis
 		if err != nil {
 			return nil, mapRefErr(err, "Image", req.ImageID)
 		}
+		// Cross-project BOLA guard: reject a source image owned by another
+		// project (NotFound — no existence oracle) BEFORE the size check so a
+		// victim image cannot be copied and its min_disk_size never leaks.
+		if img.ProjectID != req.ProjectID {
+			return nil, crossProjectNotFound("Image", req.ImageID)
+		}
 		if img.MinDiskSize > 0 && req.Size < img.MinDiskSize {
 			return nil, status.Errorf(codes.InvalidArgument, "Disk size %d is less than image min_disk_size %d", req.Size, img.MinDiskSize)
 		}
@@ -165,6 +171,9 @@ func (s *DiskService) doCreate(ctx context.Context, diskID string, req CreateDis
 		snap, err := s.snapshotRepo.Get(ctx, req.SnapshotID)
 		if err != nil {
 			return nil, mapRefErr(err, "Snapshot", req.SnapshotID)
+		}
+		if snap.ProjectID != req.ProjectID {
+			return nil, crossProjectNotFound("Snapshot", req.SnapshotID)
 		}
 		if snap.DiskSize > 0 && req.Size < snap.DiskSize {
 			return nil, status.Errorf(codes.InvalidArgument, "Disk size %d is less than snapshot disk_size %d", req.Size, snap.DiskSize)

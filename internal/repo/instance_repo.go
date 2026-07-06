@@ -607,16 +607,23 @@ func insertAttachedDiskTx(ctx context.Context, tx pgx.Tx, instanceID string, ad 
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	// Атомарный zone/status-consistent attach (within-service DB-invariant): диск лочится
-	// FOR UPDATE в CTE — это сериализует против Disk.Relocate (SetZoneIfDetached
-	// берёт тот же FOR UPDATE на disks(id)). Zone- и READY-предикаты вычисляются
-	// ПОД локом, поэтому прежняя TOCTOU-гонка (service-слой читал zone unlocked,
-	// затем безусловный INSERT) закрыта: если relocate закоммитил новую зону
-	// раньше, EvalPlanQual перечитывает её в CTE → предикат `ld.zone_id = i.zone_id`
-	// не сматчит → 0 rows → FailedPrecondition вместо cross-zone attach.
+	// Атомарный zone/status/project-consistent attach (within-service DB-invariant):
+	// диск лочится FOR UPDATE в CTE — это сериализует против Disk.Relocate
+	// (SetZoneIfDetached берёт тот же FOR UPDATE на disks(id)). Zone-, READY- и
+	// project-предикаты вычисляются ПОД локом, поэтому прежняя TOCTOU-гонка
+	// (service-слой читал zone unlocked, затем безусловный INSERT) закрыта: если
+	// relocate закоммитил новую зону раньше, EvalPlanQual перечитывает её в CTE →
+	// предикат `ld.zone_id = i.zone_id` не сматчит → 0 rows → FailedPrecondition
+	// вместо cross-zone attach.
+	//
+	// `ld.project_id = i.project_id` — cross-tenant BOLA guard на DB-уровне
+	// (project-rule 10): даже если service-слой пропустил бы disk чужого проекта
+	// (или его обошли), DB не даст прикрепить его к instance другого проекта
+	// (cross-project takeover + auto_delete destruction). project_id обоих ресурсов
+	// иммутабелен, так что предикат — статический инвариант, не гонка.
 	tag, err := tx.Exec(ctx, `
 		WITH locked_disk AS (
-			SELECT d.zone_id, d.status
+			SELECT d.zone_id, d.status, d.project_id
 			  FROM disks d
 			 WHERE d.id = $2
 			 FOR UPDATE
@@ -626,13 +633,14 @@ func insertAttachedDiskTx(ctx context.Context, tx pgx.Tx, instanceID string, ad 
 		  FROM locked_disk ld
 		  JOIN instances i ON i.id = $1
 		 WHERE ld.zone_id = i.zone_id
-		   AND ld.status = 'READY'`,
+		   AND ld.status = 'READY'
+		   AND ld.project_id = i.project_id`,
 		instanceID, ad.DiskID, ad.IsBoot, attachedDiskModeName(ad.Mode), ad.DeviceName, ad.AutoDelete, at)
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("%w: Disk %s is not READY or not in the instance zone", ports.ErrFailedPrecondition, ad.DiskID)
+		return fmt.Errorf("%w: Disk %s is not READY or not in the instance zone/project", ports.ErrFailedPrecondition, ad.DiskID)
 	}
 	return nil
 }
