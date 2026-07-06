@@ -462,7 +462,10 @@ func validateAuthMode(cfg config.Config, logger *slog.Logger) (productionMode bo
 		if terr := requireTrustedForwarders(cfg); terr != nil {
 			return false, terr
 		}
-		logger.Warn("AuthMode=production: anonymous rejected + server-mTLS listeners + SSL DB + forwarder allow-list required")
+		if terr := requireListFilter(cfg); terr != nil {
+			return false, terr
+		}
+		logger.Warn("AuthMode=production: anonymous rejected + server-mTLS listeners + SSL DB + forwarder allow-list + per-object List-filter required")
 	case "production-strict":
 		productionMode = true
 		// TLS-check on the actually-dialed transport edges (per-edge mTLS value-
@@ -478,7 +481,10 @@ func validateAuthMode(cfg config.Config, logger *slog.Logger) (productionMode bo
 		if terr := requireTrustedForwarders(cfg); terr != nil {
 			return false, terr
 		}
-		logger.Warn("AuthMode=production-strict: anonymous rejected + per-edge mTLS+SSL + forwarder allow-list strictly validated")
+		if terr := requireListFilter(cfg); terr != nil {
+			return false, terr
+		}
+		logger.Warn("AuthMode=production-strict: anonymous rejected + per-edge mTLS+SSL + forwarder allow-list + per-object List-filter strictly validated")
 	default:
 		return false, fmt.Errorf("unknown KACHO_COMPUTE_AUTH_MODE=%q (allowed: dev, production, production-strict)", cfg.AuthMode)
 	}
@@ -517,6 +523,27 @@ func requireTrustedForwarders(cfg config.Config) error {
 	if len(cfg.AuthZTrustedForwarderSANs) == 0 {
 		return fmt.Errorf("production mode requires a non-empty KACHO_COMPUTE_AUTHZ_TRUSTED_FORWARDER_SANS allow-list " +
 			"(empty → any mTLS peer is trusted to forward the end-user principal → subject spoofing / tenant crossing)")
+	}
+	return nil
+}
+
+// requireListFilter — в любом production-режиме per-object FGA-фильтр публичного
+// List обязан быть активен: master-switch включён (ListFilterEnabled=true) И задан
+// authz-endpoint (AuthZIAMGRPCAddr непуст — иначе authzConn=nil → buildListFilter
+// вернёт nil → handler'ы делают bypass фильтра). Per-RPC FGA Check гейтит List
+// лишь на project-tier `viewer`; сужение до per-object `v_get` делает ТОЛЬКО этот
+// фильтр. С выключенным фильтром любой principal с project-tier viewer видит ВСЕ
+// Disk/Image/Snapshot/Instance проекта, включая объекты без v_get (over-show /
+// BOLA-lite, CWE-862 / OWASP A01). Fail-closed зеркалит requireDBSSLMode /
+// requireTrustedForwarders (project-rule security.md → make audit-list-filter).
+func requireListFilter(cfg config.Config) error {
+	if !cfg.ListFilterEnabled {
+		return fmt.Errorf("production mode requires KACHO_COMPUTE_LIST_FILTER_ENABLED=true " +
+			"(false → public List bypasses the per-object FGA allow-list; project-tier viewer sees every resource → BOLA-lite)")
+	}
+	if cfg.AuthZIAMGRPCAddr == "" {
+		return fmt.Errorf("production mode requires KACHO_COMPUTE_AUTHZ_IAM_GRPC_ADDR (list-filter authorize endpoint) to be set " +
+			"(empty → authzConn nil → public List bypasses the per-object FGA filter)")
 	}
 	return nil
 }

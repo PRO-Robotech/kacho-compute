@@ -89,18 +89,11 @@ func (s *SnapshotService) Create(ctx context.Context, req CreateSnapshotReq) (*o
 		return nil, err
 	}
 	snapID := ids.NewID(ids.PrefixSnapshot)
-	op, err := operations.New(ids.PrefixOperationCompute, fmt.Sprintf("Create snapshot %s", req.Name),
-		&computev1.CreateSnapshotMetadata{SnapshotId: snapID, DiskId: req.DiskID})
-	if err != nil {
-		return nil, err
-	}
-	if err := s.opsRepo.Create(ctx, op); err != nil {
-		return nil, err
-	}
-	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		return s.doCreate(ctx, snapID, req)
-	})
-	return &op, nil
+	return runOp(ctx, s.opsRepo, fmt.Sprintf("Create snapshot %s", req.Name),
+		&computev1.CreateSnapshotMetadata{SnapshotId: snapID, DiskId: req.DiskID},
+		func(ctx context.Context) (*anypb.Any, error) {
+			return s.doCreate(ctx, snapID, req)
+		})
 }
 
 func (s *SnapshotService) doCreate(ctx context.Context, snapID string, req CreateSnapshotReq) (*anypb.Any, error) {
@@ -145,50 +138,43 @@ func (s *SnapshotService) Update(ctx context.Context, req UpdateSnapshotReq) (*o
 	if err := validateSnapshotUpdate(req); err != nil {
 		return nil, err
 	}
-	op, err := operations.New(ids.PrefixOperationCompute, fmt.Sprintf("Update snapshot %s", req.SnapshotID),
-		&computev1.UpdateSnapshotMetadata{SnapshotId: req.SnapshotID})
-	if err != nil {
-		return nil, err
-	}
-	if err := s.opsRepo.Create(ctx, op); err != nil {
-		return nil, err
-	}
-	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		snap, err := s.repo.Get(ctx, req.SnapshotID)
-		if err != nil {
-			return nil, mapRepoErr(err)
-		}
-		updates := req.UpdateMask
-		if len(updates) == 0 {
-			updates = []string{"name", "description", "labels"}
-		}
-		// labelsInMask (parity с InstanceService.Update): triggers an FGA
-		// register-intent refresh (mirror.upsert) so label-scoped grants revoke on
-		// label-remove/change. Empty mask = full-PATCH includes labels.
-		labelsInMask := false
-		// changed — фактически изменённые колонки (column-scoped UPDATE, no lost update).
-		changed := make([]string, 0, len(updates))
-		for _, f := range updates {
-			switch f {
-			case "name":
-				snap.Name = req.Name
-				changed = append(changed, "name")
-			case "description":
-				snap.Description = req.Description
-				changed = append(changed, "description")
-			case "labels":
-				snap.Labels = req.Labels
-				labelsInMask = true
-				changed = append(changed, "labels")
+	return runOp(ctx, s.opsRepo, fmt.Sprintf("Update snapshot %s", req.SnapshotID),
+		&computev1.UpdateSnapshotMetadata{SnapshotId: req.SnapshotID},
+		func(ctx context.Context) (*anypb.Any, error) {
+			snap, err := s.repo.Get(ctx, req.SnapshotID)
+			if err != nil {
+				return nil, mapRepoErr(err)
 			}
-		}
-		updated, err := s.repo.Update(ctx, snap, labelsInMask, changed)
-		if err != nil {
-			return nil, mapRepoErr(err)
-		}
-		return anypb.New(protoconv.Snapshot(updated))
-	})
-	return &op, nil
+			updates := req.UpdateMask
+			if len(updates) == 0 {
+				updates = []string{"name", "description", "labels"}
+			}
+			// labelsInMask (parity с InstanceService.Update): triggers an FGA
+			// register-intent refresh (mirror.upsert) so label-scoped grants revoke on
+			// label-remove/change. Empty mask = full-PATCH includes labels.
+			labelsInMask := false
+			// changed — фактически изменённые колонки (column-scoped UPDATE, no lost update).
+			changed := make([]string, 0, len(updates))
+			for _, f := range updates {
+				switch f {
+				case "name":
+					snap.Name = req.Name
+					changed = append(changed, "name")
+				case "description":
+					snap.Description = req.Description
+					changed = append(changed, "description")
+				case "labels":
+					snap.Labels = req.Labels
+					labelsInMask = true
+					changed = append(changed, "labels")
+				}
+			}
+			updated, err := s.repo.Update(ctx, snap, labelsInMask, changed)
+			if err != nil {
+				return nil, mapRepoErr(err)
+			}
+			return anypb.New(protoconv.Snapshot(updated))
+		})
 }
 
 func validateSnapshotUpdate(req UpdateSnapshotReq) error {
@@ -222,21 +208,14 @@ func (s *SnapshotService) Delete(ctx context.Context, id string) (*operations.Op
 	if id == "" {
 		return nil, status.Error(codes.InvalidArgument, "snapshot_id required")
 	}
-	op, err := operations.New(ids.PrefixOperationCompute, fmt.Sprintf("Delete snapshot %s", id),
-		&computev1.DeleteSnapshotMetadata{SnapshotId: id})
-	if err != nil {
-		return nil, err
-	}
-	if err := s.opsRepo.Create(ctx, op); err != nil {
-		return nil, err
-	}
-	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		if err := s.repo.Delete(ctx, id); err != nil {
-			return nil, mapRepoErr(err)
-		}
-		return anypb.New(&emptypb.Empty{})
-	})
-	return &op, nil
+	return runOp(ctx, s.opsRepo, fmt.Sprintf("Delete snapshot %s", id),
+		&computev1.DeleteSnapshotMetadata{SnapshotId: id},
+		func(ctx context.Context) (*anypb.Any, error) {
+			if err := s.repo.Delete(ctx, id); err != nil {
+				return nil, mapRepoErr(err)
+			}
+			return anypb.New(&emptypb.Empty{})
+		})
 }
 
 // ListOperations возвращает операции для Snapshot.

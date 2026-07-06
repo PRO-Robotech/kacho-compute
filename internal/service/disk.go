@@ -126,18 +126,11 @@ func (s *DiskService) Create(ctx context.Context, req CreateDiskReq) (*operation
 	}
 
 	diskID := ids.NewID(ids.PrefixDisk)
-	op, err := operations.New(ids.PrefixOperationCompute, fmt.Sprintf("Create disk %s", req.Name),
-		&computev1.CreateDiskMetadata{DiskId: diskID})
-	if err != nil {
-		return nil, err
-	}
-	if err := s.opsRepo.Create(ctx, op); err != nil {
-		return nil, err
-	}
-	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		return s.doCreate(ctx, diskID, req)
-	})
-	return &op, nil
+	return runOp(ctx, s.opsRepo, fmt.Sprintf("Create disk %s", req.Name),
+		&computev1.CreateDiskMetadata{DiskId: diskID},
+		func(ctx context.Context) (*anypb.Any, error) {
+			return s.doCreate(ctx, diskID, req)
+		})
 }
 
 func (s *DiskService) doCreate(ctx context.Context, diskID string, req CreateDiskReq) (*anypb.Any, error) {
@@ -214,18 +207,11 @@ func (s *DiskService) Update(ctx context.Context, req UpdateDiskReq) (*operation
 	if err := validateDiskUpdate(req); err != nil {
 		return nil, err
 	}
-	op, err := operations.New(ids.PrefixOperationCompute, fmt.Sprintf("Update disk %s", req.DiskID),
-		&computev1.UpdateDiskMetadata{DiskId: req.DiskID})
-	if err != nil {
-		return nil, err
-	}
-	if err := s.opsRepo.Create(ctx, op); err != nil {
-		return nil, err
-	}
-	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		return s.doUpdate(ctx, req)
-	})
-	return &op, nil
+	return runOp(ctx, s.opsRepo, fmt.Sprintf("Update disk %s", req.DiskID),
+		&computev1.UpdateDiskMetadata{DiskId: req.DiskID},
+		func(ctx context.Context) (*anypb.Any, error) {
+			return s.doUpdate(ctx, req)
+		})
 }
 
 func (s *DiskService) doUpdate(ctx context.Context, req UpdateDiskReq) (*anypb.Any, error) {
@@ -319,28 +305,21 @@ func (s *DiskService) Delete(ctx context.Context, id string) (*operations.Operat
 	if id == "" {
 		return nil, status.Error(codes.InvalidArgument, "disk_id required")
 	}
-	op, err := operations.New(ids.PrefixOperationCompute, fmt.Sprintf("Delete disk %s", id),
-		&computev1.DeleteDiskMetadata{DiskId: id})
-	if err != nil {
-		return nil, err
-	}
-	if err := s.opsRepo.Create(ctx, op); err != nil {
-		return nil, err
-	}
-	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		attached, err := s.repo.IsAttached(ctx, id)
-		if err != nil {
-			return nil, mapRepoErr(err)
-		}
-		if attached {
-			return nil, status.Errorf(codes.FailedPrecondition, "The disk %s is being used", id)
-		}
-		if err := s.repo.Delete(ctx, id); err != nil {
-			return nil, mapRepoErr(err)
-		}
-		return anypb.New(&emptypb.Empty{})
-	})
-	return &op, nil
+	return runOp(ctx, s.opsRepo, fmt.Sprintf("Delete disk %s", id),
+		&computev1.DeleteDiskMetadata{DiskId: id},
+		func(ctx context.Context) (*anypb.Any, error) {
+			attached, err := s.repo.IsAttached(ctx, id)
+			if err != nil {
+				return nil, mapRepoErr(err)
+			}
+			if attached {
+				return nil, status.Errorf(codes.FailedPrecondition, "The disk %s is being used", id)
+			}
+			if err := s.repo.Delete(ctx, id); err != nil {
+				return nil, mapRepoErr(err)
+			}
+			return anypb.New(&emptypb.Empty{})
+		})
 }
 
 // Relocate инициирует перенос Disk в другую зону (precondition: disk не attached).
@@ -351,28 +330,21 @@ func (s *DiskService) Relocate(ctx context.Context, id, destZoneID string) (*ope
 	if destZoneID == "" {
 		return nil, invalidArg("destination_zone_id", "destination_zone_id is required")
 	}
-	op, err := operations.New(ids.PrefixOperationCompute, fmt.Sprintf("Relocate disk %s", id),
-		&computev1.RelocateDiskMetadata{DiskId: id, DestinationZoneId: destZoneID})
-	if err != nil {
-		return nil, err
-	}
-	if err := s.opsRepo.Create(ctx, op); err != nil {
-		return nil, err
-	}
-	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		if _, err := s.zones.GetZone(ctx, destZoneID); err != nil {
-			return nil, mapZoneRefErr(err, destZoneID)
-		}
-		// Атомарный CAS на DB-уровне: zone_id меняется только если диск не attached.
-		// Software-side check-then-act (TOCTOU) допускал релокацию диска, который
-		// параллельный AttachDisk прикреплял между проверкой и update.
-		updated, err := s.repo.SetZoneIfDetached(ctx, id, destZoneID)
-		if err != nil {
-			return nil, mapRepoErr(err)
-		}
-		return anypb.New(protoconv.Disk(updated))
-	})
-	return &op, nil
+	return runOp(ctx, s.opsRepo, fmt.Sprintf("Relocate disk %s", id),
+		&computev1.RelocateDiskMetadata{DiskId: id, DestinationZoneId: destZoneID},
+		func(ctx context.Context) (*anypb.Any, error) {
+			if _, err := s.zones.GetZone(ctx, destZoneID); err != nil {
+				return nil, mapZoneRefErr(err, destZoneID)
+			}
+			// Атомарный CAS на DB-уровне: zone_id меняется только если диск не attached.
+			// Software-side check-then-act (TOCTOU) допускал релокацию диска, который
+			// параллельный AttachDisk прикреплял между проверкой и update.
+			updated, err := s.repo.SetZoneIfDetached(ctx, id, destZoneID)
+			if err != nil {
+				return nil, mapRepoErr(err)
+			}
+			return anypb.New(protoconv.Disk(updated))
+		})
 }
 
 // ListOperations возвращает операции для конкретного Disk.

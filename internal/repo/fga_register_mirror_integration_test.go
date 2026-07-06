@@ -204,7 +204,7 @@ func Test_BetaHardening_UnregisterIntentStampsTombstoneVersion(t *testing.T) {
 	in, boot := newMirrorInstance(inID, projectID, map[string]string{"env": "dev"})
 	_, err = instRepo.Insert(ctx, in, []*domain.Disk{boot})
 	require.NoError(t, err)
-	require.NoError(t, instRepo.Delete(ctx, inID, []string{boot.ID}))
+	require.NoError(t, instRepo.Delete(ctx, inID))
 
 	rows := queryFGARegisterRows(ctx, t, pool, inID)
 	var reg, unreg fgaRegisterRow
@@ -277,7 +277,7 @@ func Test_Beta07_DeleteInstance_UnregisterIntent(t *testing.T) {
 	_, err = instRepo.Insert(ctx, in, []*domain.Disk{boot})
 	require.NoError(t, err)
 
-	require.NoError(t, instRepo.Delete(ctx, inID, []string{boot.ID}))
+	require.NoError(t, instRepo.Delete(ctx, inID))
 
 	rows := queryFGARegisterRows(ctx, t, pool, inID)
 	var sawUnreg bool

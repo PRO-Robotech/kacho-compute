@@ -128,9 +128,11 @@ type InstanceRepo interface {
 	// не Go-side read-modify-write, иначе second-writer-wins под concurrency).
 	// Возвращает обновлённую ВМ.
 	MergeMetadata(ctx context.Context, id string, del []string, upsert map[string]string) (*domain.Instance, error)
-	// Delete удаляет ВМ; autoDeleteDiskIDs — диски с auto_delete=true (удаляются
-	// в той же TX до DELETE instance; остальные строки attached_disks чистит CASCADE).
-	Delete(ctx context.Context, id string, autoDeleteDiskIDs []string) error
+	// Delete удаляет ВМ. Диски с auto_delete=true определяются ВНУТРИ TX Delete из
+	// текущих строк attached_disks (не из snapshot вызывающего — иначе конкурентный
+	// AttachDisk между out-of-tx Get и Delete-TX оставил бы orphan-диск, project-rule
+	// 10); остальные строки attached_disks чистит FK CASCADE.
+	Delete(ctx context.Context, id string) error
 }
 
 // DiskTypeRepo — port-интерфейс репозитория типов дисков (read + admin CRUD).

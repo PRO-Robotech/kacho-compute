@@ -157,18 +157,11 @@ func (s *InstanceService) Create(ctx context.Context, req CreateInstanceReq) (*o
 	}
 
 	instanceID := ids.NewID(ids.PrefixInstance)
-	op, err := operations.New(ids.PrefixOperationCompute, fmt.Sprintf("Create instance %s", req.Name),
-		&computev1.CreateInstanceMetadata{InstanceId: instanceID})
-	if err != nil {
-		return nil, err
-	}
-	if err := s.opsRepo.Create(ctx, op); err != nil {
-		return nil, err
-	}
-	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		return s.doCreate(ctx, instanceID, req)
-	})
-	return &op, nil
+	return runOp(ctx, s.opsRepo, fmt.Sprintf("Create instance %s", req.Name),
+		&computev1.CreateInstanceMetadata{InstanceId: instanceID},
+		func(ctx context.Context) (*anypb.Any, error) {
+			return s.doCreate(ctx, instanceID, req)
+		})
 }
 
 func (s *InstanceService) doCreate(ctx context.Context, instanceID string, req CreateInstanceReq) (*anypb.Any, error) {
@@ -313,85 +306,78 @@ func (s *InstanceService) Update(ctx context.Context, req UpdateInstanceReq) (*o
 	if err := validateInstanceUpdate(req); err != nil {
 		return nil, err
 	}
-	op, err := operations.New(ids.PrefixOperationCompute, fmt.Sprintf("Update instance %s", req.InstanceID),
-		&computev1.UpdateInstanceMetadata{InstanceId: req.InstanceID})
-	if err != nil {
-		return nil, err
-	}
-	if err := s.opsRepo.Create(ctx, op); err != nil {
-		return nil, err
-	}
-	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		in, err := s.repo.Get(ctx, req.InstanceID)
-		if err != nil {
-			return nil, mapRepoErr(err)
-		}
-		updates := req.UpdateMask
-		full := len(updates) == 0
-		if full {
-			updates = []string{"name", "description", "labels", "service_account_id", "placement_policy", "network_settings"}
-		}
-		touchesCompute := false
-		// labelsInMask (epic RSAB β, D-β6): triggers an FGA register-intent refresh
-		// so the IAM resource_mirror tracks dev→prod label dynamics. A full-object
-		// PATCH (empty mask) applies labels too, so `updates` already includes it.
-		labelsInMask := false
-		// changed — фактически изменённые mask-поля. Передаётся в repo.Update, чтобы
-		// UPDATE писал ТОЛЬКО эти колонки (column-scoped), а не весь набор из
-		// устаревшего Get-снимка — иначе конкурентный Update по другому полю
-		// затирается (lost update). Поля, пропущенные из-за условий (silent-ignore),
-		// в changed НЕ добавляются.
-		changed := make([]string, 0, len(updates))
-		for _, f := range updates {
-			switch f {
-			case "name":
-				in.Name = req.Name
-				changed = append(changed, "name")
-			case "description":
-				in.Description = req.Description
-				changed = append(changed, "description")
-			case "labels":
-				in.Labels = req.Labels
-				labelsInMask = true
-				changed = append(changed, "labels")
-			case "service_account_id":
-				in.ServiceAccountID = req.ServiceAccountID
-				changed = append(changed, "service_account_id")
-			case "placement_policy":
-				in.PlacementPolicy = req.PlacementPolicy
-				changed = append(changed, "placement_policy")
-			case "network_settings":
-				if req.NetworkSettingsType != "" {
-					in.NetworkSettingsType = req.NetworkSettingsType
-					changed = append(changed, "network_settings")
-				}
-			case "resources_spec":
-				if !full {
-					touchesCompute = true
-					if err := validateResources(req.Cores, req.Memory, req.CoreFraction); err != nil {
-						return nil, err
+	return runOp(ctx, s.opsRepo, fmt.Sprintf("Update instance %s", req.InstanceID),
+		&computev1.UpdateInstanceMetadata{InstanceId: req.InstanceID},
+		func(ctx context.Context) (*anypb.Any, error) {
+			in, err := s.repo.Get(ctx, req.InstanceID)
+			if err != nil {
+				return nil, mapRepoErr(err)
+			}
+			updates := req.UpdateMask
+			full := len(updates) == 0
+			if full {
+				updates = []string{"name", "description", "labels", "service_account_id", "placement_policy", "network_settings"}
+			}
+			touchesCompute := false
+			// labelsInMask (epic RSAB β, D-β6): triggers an FGA register-intent refresh
+			// so the IAM resource_mirror tracks dev→prod label dynamics. A full-object
+			// PATCH (empty mask) applies labels too, so `updates` already includes it.
+			labelsInMask := false
+			// changed — фактически изменённые mask-поля. Передаётся в repo.Update, чтобы
+			// UPDATE писал ТОЛЬКО эти колонки (column-scoped), а не весь набор из
+			// устаревшего Get-снимка — иначе конкурентный Update по другому полю
+			// затирается (lost update). Поля, пропущенные из-за условий (silent-ignore),
+			// в changed НЕ добавляются.
+			changed := make([]string, 0, len(updates))
+			for _, f := range updates {
+				switch f {
+				case "name":
+					in.Name = req.Name
+					changed = append(changed, "name")
+				case "description":
+					in.Description = req.Description
+					changed = append(changed, "description")
+				case "labels":
+					in.Labels = req.Labels
+					labelsInMask = true
+					changed = append(changed, "labels")
+				case "service_account_id":
+					in.ServiceAccountID = req.ServiceAccountID
+					changed = append(changed, "service_account_id")
+				case "placement_policy":
+					in.PlacementPolicy = req.PlacementPolicy
+					changed = append(changed, "placement_policy")
+				case "network_settings":
+					if req.NetworkSettingsType != "" {
+						in.NetworkSettingsType = req.NetworkSettingsType
+						changed = append(changed, "network_settings")
 					}
-					in.Cores, in.Memory, in.CoreFraction, in.GPUs = req.Cores, req.Memory, defaultCoreFraction(req.CoreFraction), req.GPUs
-					changed = append(changed, "resources_spec")
-				}
-			case "platform_id":
-				if !full && req.PlatformID != "" {
-					touchesCompute = true
-					in.PlatformID = req.PlatformID
-					changed = append(changed, "platform_id")
+				case "resources_spec":
+					if !full {
+						touchesCompute = true
+						if err := validateResources(req.Cores, req.Memory, req.CoreFraction); err != nil {
+							return nil, err
+						}
+						in.Cores, in.Memory, in.CoreFraction, in.GPUs = req.Cores, req.Memory, defaultCoreFraction(req.CoreFraction), req.GPUs
+						changed = append(changed, "resources_spec")
+					}
+				case "platform_id":
+					if !full && req.PlatformID != "" {
+						touchesCompute = true
+						in.PlatformID = req.PlatformID
+						changed = append(changed, "platform_id")
+					}
 				}
 			}
-		}
-		if touchesCompute && in.Status != domain.InstanceStatusStopped {
-			return nil, status.Error(codes.FailedPrecondition, "Instance must be stopped")
-		}
-		updated, err := s.repo.Update(ctx, in, labelsInMask, changed)
-		if err != nil {
-			return nil, mapRepoErr(err)
-		}
-		return anypb.New(protoconv.Instance(updated))
-	})
-	return &op, nil
+			if touchesCompute && in.Status != domain.InstanceStatusStopped {
+				return nil, status.Error(codes.FailedPrecondition, "Instance must be stopped")
+			}
+			updated, err := s.repo.Update(ctx, in, labelsInMask, changed)
+			if err != nil {
+				return nil, mapRepoErr(err)
+			}
+			return anypb.New(protoconv.Instance(updated))
+		})
 }
 
 func validateInstanceUpdate(req UpdateInstanceReq) error {
@@ -429,25 +415,18 @@ func (s *InstanceService) UpdateMetadata(ctx context.Context, instanceID string,
 	if instanceID == "" {
 		return nil, status.Error(codes.InvalidArgument, "instance_id required")
 	}
-	op, err := operations.New(ids.PrefixOperationCompute, fmt.Sprintf("Update instance %s metadata", instanceID),
-		&computev1.UpdateInstanceMetadataMetadata{InstanceId: instanceID})
-	if err != nil {
-		return nil, err
-	}
-	if err := s.opsRepo.Create(ctx, op); err != nil {
-		return nil, err
-	}
-	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		// Атомарный delete+upsert merge на DB-уровне (project-rule 10). Прежний
-		// Get→merge-in-Go→SetMetadata(full-overwrite) был read-modify-write вне TX и
-		// терял дельту конкурентного UpdateMetadata (second-writer-wins).
-		updated, err := s.repo.MergeMetadata(ctx, instanceID, del, upsert)
-		if err != nil {
-			return nil, mapRepoErr(err)
-		}
-		return anypb.New(protoconv.Instance(updated))
-	})
-	return &op, nil
+	return runOp(ctx, s.opsRepo, fmt.Sprintf("Update instance %s metadata", instanceID),
+		&computev1.UpdateInstanceMetadataMetadata{InstanceId: instanceID},
+		func(ctx context.Context) (*anypb.Any, error) {
+			// Атомарный delete+upsert merge на DB-уровне (project-rule 10). Прежний
+			// Get→merge-in-Go→SetMetadata(full-overwrite) был read-modify-write вне TX и
+			// терял дельту конкурентного UpdateMetadata (second-writer-wins).
+			updated, err := s.repo.MergeMetadata(ctx, instanceID, del, upsert)
+			if err != nil {
+				return nil, mapRepoErr(err)
+			}
+			return anypb.New(protoconv.Instance(updated))
+		})
 }
 
 // Start/Stop/Restart — state-машина. DB-уровневый CAS (within-service-инвариант
@@ -486,46 +465,25 @@ func (s *InstanceService) Stop(ctx context.Context, id string) (*operations.Oper
 // подтверждает RUNNING (no bricking, no intermediate). RESTARTING enum в proto
 // сохранён — контракт не тронут.
 func (s *InstanceService) Restart(ctx context.Context, id string) (*operations.Operation, error) {
-	if id == "" {
-		return nil, status.Error(codes.InvalidArgument, "instance_id required")
-	}
-	op, err := operations.New(ids.PrefixOperationCompute, fmt.Sprintf("Restart instance %s", id),
-		&computev1.RestartInstanceMetadata{InstanceId: id})
-	if err != nil {
-		return nil, err
-	}
-	if err := s.opsRepo.Create(ctx, op); err != nil {
-		return nil, err
-	}
-	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		updated, err := s.repo.SetStatusCAS(ctx, id, domain.InstanceStatusRunning, domain.InstanceStatusRunning)
-		if err != nil {
-			return nil, mapLifecycleErr(err, "Instance is not running")
-		}
-		return anypb.New(protoconv.Instance(updated))
-	})
-	return &op, nil
+	// RUNNING→RUNNING идёт через общий lifecycle-путь (тот же single-atomic CAS +
+	// mapLifecycleErr + async-обвязка), а не переинлайнит её — единый диспетчер, без
+	// drift относительно Start/Stop.
+	return s.lifecycle(ctx, id, "Restart", domain.InstanceStatusRunning, domain.InstanceStatusRunning,
+		"Instance is not running", &computev1.RestartInstanceMetadata{InstanceId: id})
 }
 
 func (s *InstanceService) lifecycle(ctx context.Context, id, action string, from, to domain.InstanceStatus, precondMsg string, meta protoreflectMessage) (*operations.Operation, error) {
 	if id == "" {
 		return nil, status.Error(codes.InvalidArgument, "instance_id required")
 	}
-	op, err := operations.New(ids.PrefixOperationCompute, fmt.Sprintf("%s instance %s", action, id), meta)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.opsRepo.Create(ctx, op); err != nil {
-		return nil, err
-	}
-	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		updated, err := s.repo.SetStatusCAS(ctx, id, from, to)
-		if err != nil {
-			return nil, mapLifecycleErr(err, precondMsg)
-		}
-		return anypb.New(protoconv.Instance(updated))
-	})
-	return &op, nil
+	return runOp(ctx, s.opsRepo, fmt.Sprintf("%s instance %s", action, id), meta,
+		func(ctx context.Context) (*anypb.Any, error) {
+			updated, err := s.repo.SetStatusCAS(ctx, id, from, to)
+			if err != nil {
+				return nil, mapLifecycleErr(err, precondMsg)
+			}
+			return anypb.New(protoconv.Instance(updated))
+		})
 }
 
 // mapLifecycleErr маппит ошибку SetStatusCAS в gRPC-status: ErrFailedPrecondition
@@ -547,57 +505,50 @@ func (s *InstanceService) AttachDisk(ctx context.Context, id string, spec DiskSo
 	if spec.DiskID == "" {
 		return nil, invalidArg("attached_disk_spec.disk_id", "disk_id is required (inline disk_spec not supported on AttachDisk)")
 	}
-	op, err := operations.New(ids.PrefixOperationCompute, fmt.Sprintf("Attach disk to instance %s", id),
-		&computev1.AttachInstanceDiskMetadata{InstanceId: id, DiskId: spec.DiskID})
-	if err != nil {
-		return nil, err
-	}
-	if err := s.opsRepo.Create(ctx, op); err != nil {
-		return nil, err
-	}
-	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		in, err := s.repo.Get(ctx, id)
-		if err != nil {
-			return nil, mapRepoErr(err)
-		}
-		if in.Status != domain.InstanceStatusRunning && in.Status != domain.InstanceStatusStopped {
-			return nil, status.Error(codes.FailedPrecondition, "Instance is not running or stopped")
-		}
-		for _, ad := range in.AttachedDisks {
-			if ad.DiskID == spec.DiskID {
+	return runOp(ctx, s.opsRepo, fmt.Sprintf("Attach disk to instance %s", id),
+		&computev1.AttachInstanceDiskMetadata{InstanceId: id, DiskId: spec.DiskID},
+		func(ctx context.Context) (*anypb.Any, error) {
+			in, err := s.repo.Get(ctx, id)
+			if err != nil {
+				return nil, mapRepoErr(err)
+			}
+			if in.Status != domain.InstanceStatusRunning && in.Status != domain.InstanceStatusStopped {
+				return nil, status.Error(codes.FailedPrecondition, "Instance is not running or stopped")
+			}
+			for _, ad := range in.AttachedDisks {
+				if ad.DiskID == spec.DiskID {
+					return nil, status.Errorf(codes.FailedPrecondition, "Disk %s is already attached", spec.DiskID)
+				}
+				if spec.DeviceName != "" && ad.DeviceName == spec.DeviceName {
+					return nil, status.Errorf(codes.FailedPrecondition, "device_name %s is already in use", spec.DeviceName)
+				}
+			}
+			d, err := s.diskRepo.Get(ctx, spec.DiskID)
+			if err != nil {
+				return nil, mapRefErr(err, "Disk", spec.DiskID)
+			}
+			if d.Status != domain.DiskStatusReady {
+				return nil, status.Errorf(codes.FailedPrecondition, "Disk %s is not READY", spec.DiskID)
+			}
+			if d.ZoneID != in.ZoneID {
+				return nil, status.Errorf(codes.InvalidArgument, "Disk %s is in zone %s, instance zone is %s", spec.DiskID, d.ZoneID, in.ZoneID)
+			}
+			attached, err := s.diskRepo.IsAttached(ctx, spec.DiskID)
+			if err != nil {
+				return nil, mapRepoErr(err)
+			}
+			if attached {
 				return nil, status.Errorf(codes.FailedPrecondition, "Disk %s is already attached", spec.DiskID)
 			}
-			if spec.DeviceName != "" && ad.DeviceName == spec.DeviceName {
-				return nil, status.Errorf(codes.FailedPrecondition, "device_name %s is already in use", spec.DeviceName)
+			updated, err := s.repo.AttachDisk(ctx, id, domain.AttachedDisk{
+				DiskID: spec.DiskID, IsBoot: false, Mode: domain.AttachedDiskMode(spec.Mode),
+				DeviceName: spec.DeviceName, AutoDelete: spec.AutoDelete, AttachedAt: time.Now().UTC(),
+			})
+			if err != nil {
+				return nil, mapRepoErr(err)
 			}
-		}
-		d, err := s.diskRepo.Get(ctx, spec.DiskID)
-		if err != nil {
-			return nil, mapRefErr(err, "Disk", spec.DiskID)
-		}
-		if d.Status != domain.DiskStatusReady {
-			return nil, status.Errorf(codes.FailedPrecondition, "Disk %s is not READY", spec.DiskID)
-		}
-		if d.ZoneID != in.ZoneID {
-			return nil, status.Errorf(codes.InvalidArgument, "Disk %s is in zone %s, instance zone is %s", spec.DiskID, d.ZoneID, in.ZoneID)
-		}
-		attached, err := s.diskRepo.IsAttached(ctx, spec.DiskID)
-		if err != nil {
-			return nil, mapRepoErr(err)
-		}
-		if attached {
-			return nil, status.Errorf(codes.FailedPrecondition, "Disk %s is already attached", spec.DiskID)
-		}
-		updated, err := s.repo.AttachDisk(ctx, id, domain.AttachedDisk{
-			DiskID: spec.DiskID, IsBoot: false, Mode: domain.AttachedDiskMode(spec.Mode),
-			DeviceName: spec.DeviceName, AutoDelete: spec.AutoDelete, AttachedAt: time.Now().UTC(),
+			return anypb.New(protoconv.Instance(updated))
 		})
-		if err != nil {
-			return nil, mapRepoErr(err)
-		}
-		return anypb.New(protoconv.Instance(updated))
-	})
-	return &op, nil
 }
 
 // DetachDisk отвязывает диск (по disk_id или device_name; не boot).
@@ -608,40 +559,33 @@ func (s *InstanceService) DetachDisk(ctx context.Context, id, diskID, deviceName
 	if diskID == "" && deviceName == "" {
 		return nil, invalidArg("disk", "one of disk_id or device_name is required")
 	}
-	op, err := operations.New(ids.PrefixOperationCompute, fmt.Sprintf("Detach disk from instance %s", id),
-		&computev1.DetachInstanceDiskMetadata{InstanceId: id, DiskId: diskID})
-	if err != nil {
-		return nil, err
-	}
-	if err := s.opsRepo.Create(ctx, op); err != nil {
-		return nil, err
-	}
-	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		in, err := s.repo.Get(ctx, id)
-		if err != nil {
-			return nil, mapRepoErr(err)
-		}
-		var target *domain.AttachedDisk
-		for i := range in.AttachedDisks {
-			ad := &in.AttachedDisks[i]
-			if (diskID != "" && ad.DiskID == diskID) || (deviceName != "" && ad.DeviceName == deviceName) {
-				target = ad
-				break
+	return runOp(ctx, s.opsRepo, fmt.Sprintf("Detach disk from instance %s", id),
+		&computev1.DetachInstanceDiskMetadata{InstanceId: id, DiskId: diskID},
+		func(ctx context.Context) (*anypb.Any, error) {
+			in, err := s.repo.Get(ctx, id)
+			if err != nil {
+				return nil, mapRepoErr(err)
 			}
-		}
-		if target == nil {
-			return nil, status.Error(codes.FailedPrecondition, "Disk is not attached to the instance")
-		}
-		if target.IsBoot {
-			return nil, status.Error(codes.FailedPrecondition, "Cannot detach boot disk")
-		}
-		updated, err := s.repo.DetachDisk(ctx, id, target.DiskID)
-		if err != nil {
-			return nil, mapRepoErr(err)
-		}
-		return anypb.New(protoconv.Instance(updated))
-	})
-	return &op, nil
+			var target *domain.AttachedDisk
+			for i := range in.AttachedDisks {
+				ad := &in.AttachedDisks[i]
+				if (diskID != "" && ad.DiskID == diskID) || (deviceName != "" && ad.DeviceName == deviceName) {
+					target = ad
+					break
+				}
+			}
+			if target == nil {
+				return nil, status.Error(codes.FailedPrecondition, "Disk is not attached to the instance")
+			}
+			if target.IsBoot {
+				return nil, status.Error(codes.FailedPrecondition, "Cannot detach boot disk")
+			}
+			updated, err := s.repo.DetachDisk(ctx, id, target.DiskID)
+			if err != nil {
+				return nil, mapRepoErr(err)
+			}
+			return anypb.New(protoconv.Instance(updated))
+		})
 }
 
 // SimulateMaintenanceEvent — no-op (control-plane: возвращает done-операцию с самой ВМ).
@@ -649,22 +593,15 @@ func (s *InstanceService) SimulateMaintenanceEvent(ctx context.Context, id strin
 	if id == "" {
 		return nil, status.Error(codes.InvalidArgument, "instance_id required")
 	}
-	op, err := operations.New(ids.PrefixOperationCompute, fmt.Sprintf("Simulate maintenance event for instance %s", id),
-		&computev1.SimulateInstanceMaintenanceEventMetadata{InstanceId: id})
-	if err != nil {
-		return nil, err
-	}
-	if err := s.opsRepo.Create(ctx, op); err != nil {
-		return nil, err
-	}
-	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		in, err := s.repo.Get(ctx, id)
-		if err != nil {
-			return nil, mapRepoErr(err)
-		}
-		return anypb.New(protoconv.Instance(in))
-	})
-	return &op, nil
+	return runOp(ctx, s.opsRepo, fmt.Sprintf("Simulate maintenance event for instance %s", id),
+		&computev1.SimulateInstanceMaintenanceEventMetadata{InstanceId: id},
+		func(ctx context.Context) (*anypb.Any, error) {
+			in, err := s.repo.Get(ctx, id)
+			if err != nil {
+				return nil, mapRepoErr(err)
+			}
+			return anypb.New(protoconv.Instance(in))
+		})
 }
 
 // Delete инициирует удаление ВМ (auto-delete диски удаляются, остальные detach'атся CASCADE).
@@ -672,31 +609,17 @@ func (s *InstanceService) Delete(ctx context.Context, id string) (*operations.Op
 	if id == "" {
 		return nil, status.Error(codes.InvalidArgument, "instance_id required")
 	}
-	op, err := operations.New(ids.PrefixOperationCompute, fmt.Sprintf("Delete instance %s", id),
-		&computev1.DeleteInstanceMetadata{InstanceId: id})
-	if err != nil {
-		return nil, err
-	}
-	if err := s.opsRepo.Create(ctx, op); err != nil {
-		return nil, err
-	}
-	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		in, err := s.repo.Get(ctx, id)
-		if err != nil {
-			return nil, mapRepoErr(err)
-		}
-		var autoDelete []string
-		for _, ad := range in.AttachedDisks {
-			if ad.AutoDelete {
-				autoDelete = append(autoDelete, ad.DiskID)
+	return runOp(ctx, s.opsRepo, fmt.Sprintf("Delete instance %s", id),
+		&computev1.DeleteInstanceMetadata{InstanceId: id},
+		func(ctx context.Context) (*anypb.Any, error) {
+			// auto-delete множество вычисляет repo.Delete ВНУТРИ своей TX из текущих
+			// attached_disks (project-rule 10) — здесь его больше НЕ снимаем out-of-tx,
+			// иначе конкурентный AttachDisk(auto_delete) оставил бы orphan-диск.
+			if err := s.repo.Delete(ctx, id); err != nil {
+				return nil, mapRepoErr(err)
 			}
-		}
-		if err := s.repo.Delete(ctx, id, autoDelete); err != nil {
-			return nil, mapRepoErr(err)
-		}
-		return anypb.New(&emptypb.Empty{})
-	})
-	return &op, nil
+			return anypb.New(&emptypb.Empty{})
+		})
 }
 
 // GetSerialPortOutput — sync RPC: синтетический текст (control-plane).

@@ -182,7 +182,7 @@ func TestInstance_SEC_D_03_UnregisterIntentOnDelete(t *testing.T) {
 	_, err = instRepo.Insert(ctx, in, []*domain.Disk{inlineBoot})
 	require.NoError(t, err)
 
-	require.NoError(t, instRepo.Delete(ctx, inID, []string{bootDiskID}))
+	require.NoError(t, instRepo.Delete(ctx, inID))
 
 	rows := queryFGARegisterRows(ctx, t, pool, inID)
 	// register (from Create) + unregister (from Delete).
