@@ -52,8 +52,9 @@ func seedDiskForAttach(t *testing.T, ctx context.Context, diskRepo *repo.DiskRep
 // TestIntegration_AttachedDisksDeviceUniq_Negative — negative-кейс инварианта
 // (миграция 0001 attached_disks_device_uniq): два разных диска, прикреплённые к
 // ОДНОМУ instance с ОДНИМ И ТЕМ ЖЕ непустым device_name, должны отбиваться на
-// DB-уровне (SQLSTATE 23505). Пустой device_name ('') под partial-UNIQUE
-// `WHERE device_name <> ''` не участвует — множественные '' допускаются.
+// DB-уровне (SQLSTATE 23505). Пустое значение device_name под partial-UNIQUE
+// с предикатом, исключающим пустую строку, не подпадает — несколько пустых
+// device_name допускаются.
 func TestIntegration_AttachedDisksDeviceUniq_Negative(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")

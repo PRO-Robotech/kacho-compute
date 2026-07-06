@@ -38,6 +38,7 @@ import (
 //   - →20 первым: диск=20; затем →15 видит size(20) ≤ 15 == false → 0 строк →
 //     FailedPrecondition (усадка отбита).
 //   - →15 первым: диск=15; затем →20 видит size(15) ≤ 20 == true → диск=20.
+//
 // Software check-then-act этот инвариант нарушает (при порядке «→20, затем →15»
 // итог = 15).
 func TestIntegration_Disk_Resize_ConcurrentMonotonic(t *testing.T) {
