@@ -319,7 +319,7 @@ func TestValidateAuthMode_Production_RequiresDBSSL(t *testing.T) {
 // warn-not-reject; существующий TestValidateAuthMode_ProductionStrict_
 // BreakglassDropsAuthzEdge подтверждает, что gate его пропускает). НО он не должен
 // быть МОЛЧАЛИВЫМ: boot ОБЯЗАН громко предупредить, что per-RPC authz Check
-// целиком обойдён. Finding r9b#1: «production gate silently disables all authz».
+// целиком обойдён. Finding r9b-1: «production gate silently disables all authz».
 func TestValidateAuthMode_Production_BreakglassEmitsLoudWarn(t *testing.T) {
 	for _, mode := range []string{"production", "production-strict"} {
 		t.Run(mode, func(t *testing.T) {

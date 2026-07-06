@@ -505,7 +505,7 @@ func validateAuthMode(cfg config.Config, logger *slog.Logger) (productionMode bo
 	// оцениваются, остаётся только AuthN) — нарушение инварианта security.md
 	// «AuthN+AuthZ ВЕЗДЕ». Громкий boot-WARN делает обход наблюдаемым (leftover
 	// после инцидента не проходит незамеченным). Rationale — docs/architecture/
-	// 07-known-divergences.md §"breakglass в production".
+	// 07-known-divergences.md, section "breakglass в production".
 	if productionMode && cfg.AuthZBreakglass {
 		logger.Warn("KACHO_COMPUTE_AUTHZ_BREAKGLASS=true in production mode: ALL per-RPC authz Check is BYPASSED "+
 			"— every RPC on both listeners is allowed without IAM authorization; emergency use only",
