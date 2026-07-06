@@ -415,18 +415,53 @@ func (r *InstanceRepo) MergeMetadata(ctx context.Context, id string, del []strin
 	})
 }
 
-// Delete удаляет ВМ; autoDeleteDiskIDs — диски с auto_delete=true (удаляются до
-// DELETE instance; остальные строки attached_disks чистит FK CASCADE).
-func (r *InstanceRepo) Delete(ctx context.Context, id string, autoDeleteDiskIDs []string) error {
+// Delete удаляет ВМ. Множество auto-delete дисков вычисляется ВНУТРИ этой TX из
+// строк attached_disks (не из snapshot вызывающего) — иначе конкурентный
+// AttachDisk(auto_delete=true), закоммиченный между out-of-tx Get вызывающего и
+// этой TX, оставил бы orphan-диск: его attached_disks-строку унёс бы CASCADE, а
+// сам диск не удалился бы (стейл-снимок его не содержал). Within-service-инвариант
+// на DB-уровне (project-rule 10), не cross-tx read-modify-write. Остальные строки
+// attached_disks (auto_delete=false) чистит FK CASCADE на DELETE instance.
+func (r *InstanceRepo) Delete(ctx context.Context, id string) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return ports.ErrInternal
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	// detach all disks first (чтобы FK attached_disks.disk_id RESTRICT не блокировал
-	// удаление auto-delete дисков; CASCADE на instance_id уберёт строки при DELETE instance,
-	// но мы делаем явный DELETE строк перед DELETE дисков).
-	if _, err := tx.Exec(ctx, `DELETE FROM attached_disks WHERE instance_id = $1`, id); err != nil {
+	// Блокируем row инстанса: конкурентный AttachDisk при INSERT в attached_disks
+	// берёт FK KEY-SHARE lock на instances(id); наш FOR UPDATE конфликтует с ним и
+	// сериализует — новая привязка не может закоммититься в окне между sweep'ом
+	// attached_disks и DELETE instance (иначе — orphan auto_delete диск). NotFound,
+	// если инстанс уже удалён (в т.ч. конкурентным Delete, ждавшим на этом lock'е).
+	var projectID string
+	err = tx.QueryRow(ctx, `SELECT project_id FROM instances WHERE id = $1 FOR UPDATE`, id).Scan(&projectID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("%w: Instance %s not found", ports.ErrNotFound, id)
+		}
+		return wrapPgErr(err, "Instance", id)
+	}
+	// Detach всех дисков + вычисление auto-delete множества из ТЕКУЩИХ строк одной
+	// DELETE … RETURNING (FK attached_disks.disk_id RESTRICT не блокирует удаление
+	// auto-delete дисков — строки уже сняты этим DELETE).
+	adRows, err := tx.Query(ctx, `DELETE FROM attached_disks WHERE instance_id = $1 RETURNING disk_id, auto_delete`, id)
+	if err != nil {
+		return wrapPgErr(err, "Instance", id)
+	}
+	var autoDeleteDiskIDs []string
+	for adRows.Next() {
+		var diskID string
+		var autoDelete bool
+		if err := adRows.Scan(&diskID, &autoDelete); err != nil {
+			adRows.Close()
+			return wrapPgErr(err, "Instance", id)
+		}
+		if autoDelete {
+			autoDeleteDiskIDs = append(autoDeleteDiskIDs, diskID)
+		}
+	}
+	adRows.Close()
+	if err := adRows.Err(); err != nil {
 		return wrapPgErr(err, "Instance", id)
 	}
 	// DELETE … RETURNING project_id (auto-delete disks share the instance's
@@ -454,12 +489,9 @@ func (r *InstanceRepo) Delete(ctx context.Context, id string, autoDeleteDiskIDs 
 			return ports.ErrInternal
 		}
 	}
-	var projectID string
-	err = tx.QueryRow(ctx, `DELETE FROM instances WHERE id = $1 RETURNING project_id`, id).Scan(&projectID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("%w: Instance %s not found", ports.ErrNotFound, id)
-		}
+	// Инстанс уже залочен FOR UPDATE выше и гарантированно существует → plain DELETE
+	// (project_id взят из того же locked-row снимка).
+	if _, err := tx.Exec(ctx, `DELETE FROM instances WHERE id = $1`, id); err != nil {
 		return wrapPgErr(err, "Instance", id)
 	}
 	if err := emitCompute(ctx, tx, "Instance", id, "DELETED", map[string]any{"id": id}); err != nil {

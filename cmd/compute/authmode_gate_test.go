@@ -35,6 +35,9 @@ func allEdgesSecured() config.Config {
 		IAMAuthzMTLS:              grpcclient.TLSClient{Enable: true},
 		IAMRegisterMTLS:           grpcclient.TLSClient{Enable: true},
 		AuthZTrustedForwarderSANs: []string{"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-api-gateway"},
+		// per-object FGA List-filter active (production fail-closed gate).
+		ListFilterEnabled: true,
+		AuthZIAMGRPCAddr:  "kacho-iam.kacho.svc.cluster.local:9091",
 	}
 }
 
@@ -177,6 +180,57 @@ func TestValidateAuthMode_ProductionStrict_RequiresTrustedForwarders(t *testing.
 	}
 }
 
+// production ОБЯЗАН отказать в старте, если per-object FGA List-фильтр можно
+// молча выключить: KACHO_COMPUTE_LIST_FILTER_ENABLED=false ИЛИ пустой
+// KACHO_COMPUTE_AUTHZ_IAM_GRPC_ADDR (→ authzConn nil → handler bypass'ит фильтр).
+// Без фильтра principal с project-tier viewer видит ВСЕ Disk/Image/Snapshot/
+// Instance проекта, включая объекты без per-object v_get (over-show / BOLA-lite,
+// CWE-862 / OWASP A01). Fail-closed зеркалит requireDBSSLMode /
+// requireTrustedForwarders.
+func TestValidateAuthMode_Production_RequiresListFilter(t *testing.T) {
+	// master-switch off → отказ.
+	cfg := securedProduction()
+	cfg.ListFilterEnabled = false
+	if _, err := validateAuthMode(cfg, discardLogger()); err == nil {
+		t.Fatalf("production must reject LIST_FILTER_ENABLED=false (public List bypasses per-object FGA filter)")
+	} else if !strings.Contains(err.Error(), "LIST_FILTER_ENABLED") {
+		t.Errorf("gate error must name the disabled list-filter switch; got: %v", err)
+	}
+
+	// authz endpoint unset → authzConn nil → фильтр не строится → отказ.
+	cfg = securedProduction()
+	cfg.AuthZIAMGRPCAddr = ""
+	if _, err := validateAuthMode(cfg, discardLogger()); err == nil {
+		t.Fatalf("production must reject empty AUTHZ_IAM_GRPC_ADDR (authzConn nil → List filter disabled)")
+	} else if !strings.Contains(err.Error(), "AUTHZ_IAM_GRPC_ADDR") {
+		t.Errorf("gate error must name the missing authz endpoint; got: %v", err)
+	}
+
+	// enabled + endpoint set → стартует.
+	if _, err := validateAuthMode(securedProduction(), discardLogger()); err != nil {
+		t.Fatalf("production with list-filter enabled + authz endpoint must pass; got: %v", err)
+	}
+}
+
+// production-strict — тот же fail-closed list-filter гейт.
+func TestValidateAuthMode_ProductionStrict_RequiresListFilter(t *testing.T) {
+	cfg := allEdgesSecured()
+	cfg.ListFilterEnabled = false
+	if _, err := validateAuthMode(cfg, discardLogger()); err == nil {
+		t.Fatalf("production-strict must reject LIST_FILTER_ENABLED=false")
+	} else if !strings.Contains(err.Error(), "LIST_FILTER_ENABLED") {
+		t.Errorf("gate error must name the disabled list-filter switch; got: %v", err)
+	}
+
+	cfg = allEdgesSecured()
+	cfg.AuthZIAMGRPCAddr = ""
+	if _, err := validateAuthMode(cfg, discardLogger()); err == nil {
+		t.Fatalf("production-strict must reject empty AUTHZ_IAM_GRPC_ADDR")
+	} else if !strings.Contains(err.Error(), "AUTHZ_IAM_GRPC_ADDR") {
+		t.Errorf("gate error must name the missing authz endpoint; got: %v", err)
+	}
+}
+
 // dev не требует ни mTLS, ни SSL (insecure dev-defaults только логируются).
 func TestValidateAuthMode_DevNoGate(t *testing.T) {
 	prod, err := validateAuthMode(config.Config{AuthMode: "dev"}, discardLogger())
@@ -198,6 +252,9 @@ func securedProduction() config.Config {
 		PublicServerMTLS:          grpcsrv.TLSServer{Enable: true},
 		InternalServerMTLS:        grpcsrv.TLSServer{Enable: true},
 		AuthZTrustedForwarderSANs: []string{"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-api-gateway"},
+		// per-object FGA List-filter active (production fail-closed gate).
+		ListFilterEnabled: true,
+		AuthZIAMGRPCAddr:  "kacho-iam.kacho.svc.cluster.local:9091",
 	}
 }
 

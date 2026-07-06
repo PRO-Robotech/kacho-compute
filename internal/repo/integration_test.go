@@ -190,7 +190,7 @@ func TestIntegration_InstanceRepo_AttachFKCascade(t *testing.T) {
 	require.ErrorIs(t, err, service.ErrFailedPrecondition)
 
 	// Delete instance with auto-delete boot disk → attached_disks cleaned via CASCADE, boot disk deleted.
-	require.NoError(t, instRepo.Delete(ctx, inID, []string{bootDiskID}))
+	require.NoError(t, instRepo.Delete(ctx, inID))
 	_, err = instRepo.Get(ctx, inID)
 	require.ErrorIs(t, err, service.ErrNotFound)
 	_, err = diskRepo.Get(ctx, bootDiskID)

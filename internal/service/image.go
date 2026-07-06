@@ -142,18 +142,11 @@ func (s *ImageService) Create(ctx context.Context, req CreateImageReq) (*operati
 	}
 
 	imageID := ids.NewID(ids.PrefixImage)
-	op, err := operations.New(ids.PrefixOperationCompute, fmt.Sprintf("Create image %s", req.Name),
-		&computev1.CreateImageMetadata{ImageId: imageID})
-	if err != nil {
-		return nil, err
-	}
-	if err := s.opsRepo.Create(ctx, op); err != nil {
-		return nil, err
-	}
-	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		return s.doCreate(ctx, imageID, req)
-	})
-	return &op, nil
+	return runOp(ctx, s.opsRepo, fmt.Sprintf("Create image %s", req.Name),
+		&computev1.CreateImageMetadata{ImageId: imageID},
+		func(ctx context.Context) (*anypb.Any, error) {
+			return s.doCreate(ctx, imageID, req)
+		})
 }
 
 func (s *ImageService) doCreate(ctx context.Context, imageID string, req CreateImageReq) (*anypb.Any, error) {
@@ -240,56 +233,49 @@ func (s *ImageService) Update(ctx context.Context, req UpdateImageReq) (*operati
 	if err := validateImageUpdate(req); err != nil {
 		return nil, err
 	}
-	op, err := operations.New(ids.PrefixOperationCompute, fmt.Sprintf("Update image %s", req.ImageID),
-		&computev1.UpdateImageMetadata{ImageId: req.ImageID})
-	if err != nil {
-		return nil, err
-	}
-	if err := s.opsRepo.Create(ctx, op); err != nil {
-		return nil, err
-	}
-	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		i, err := s.repo.Get(ctx, req.ImageID)
-		if err != nil {
-			return nil, mapRepoErr(err)
-		}
-		updates := req.UpdateMask
-		if len(updates) == 0 {
-			updates = []string{"name", "description", "labels", "min_disk_size"}
-		}
-		// labelsInMask (parity с InstanceService.Update): triggers an FGA
-		// register-intent refresh (mirror.upsert) so label-scoped grants revoke on
-		// label-remove/change. Empty mask = full-PATCH includes labels.
-		labelsInMask := false
-		// changed — фактически изменённые колонки (column-scoped UPDATE, no lost update).
-		changed := make([]string, 0, len(updates))
-		for _, f := range updates {
-			switch f {
-			case "name":
-				i.Name = req.Name
-				changed = append(changed, "name")
-			case "description":
-				i.Description = req.Description
-				changed = append(changed, "description")
-			case "labels":
-				i.Labels = req.Labels
-				labelsInMask = true
-				changed = append(changed, "labels")
-			case "min_disk_size":
-				if len(req.UpdateMask) == 0 && req.MinDiskSize == 0 {
-					continue
-				}
-				i.MinDiskSize = req.MinDiskSize
-				changed = append(changed, "min_disk_size")
+	return runOp(ctx, s.opsRepo, fmt.Sprintf("Update image %s", req.ImageID),
+		&computev1.UpdateImageMetadata{ImageId: req.ImageID},
+		func(ctx context.Context) (*anypb.Any, error) {
+			i, err := s.repo.Get(ctx, req.ImageID)
+			if err != nil {
+				return nil, mapRepoErr(err)
 			}
-		}
-		updated, err := s.repo.Update(ctx, i, labelsInMask, changed)
-		if err != nil {
-			return nil, mapRepoErr(err)
-		}
-		return anypb.New(protoconv.Image(updated))
-	})
-	return &op, nil
+			updates := req.UpdateMask
+			if len(updates) == 0 {
+				updates = []string{"name", "description", "labels", "min_disk_size"}
+			}
+			// labelsInMask (parity с InstanceService.Update): triggers an FGA
+			// register-intent refresh (mirror.upsert) so label-scoped grants revoke on
+			// label-remove/change. Empty mask = full-PATCH includes labels.
+			labelsInMask := false
+			// changed — фактически изменённые колонки (column-scoped UPDATE, no lost update).
+			changed := make([]string, 0, len(updates))
+			for _, f := range updates {
+				switch f {
+				case "name":
+					i.Name = req.Name
+					changed = append(changed, "name")
+				case "description":
+					i.Description = req.Description
+					changed = append(changed, "description")
+				case "labels":
+					i.Labels = req.Labels
+					labelsInMask = true
+					changed = append(changed, "labels")
+				case "min_disk_size":
+					if len(req.UpdateMask) == 0 && req.MinDiskSize == 0 {
+						continue
+					}
+					i.MinDiskSize = req.MinDiskSize
+					changed = append(changed, "min_disk_size")
+				}
+			}
+			updated, err := s.repo.Update(ctx, i, labelsInMask, changed)
+			if err != nil {
+				return nil, mapRepoErr(err)
+			}
+			return anypb.New(protoconv.Image(updated))
+		})
 }
 
 func validateImageUpdate(req UpdateImageReq) error {
@@ -323,21 +309,14 @@ func (s *ImageService) Delete(ctx context.Context, id string) (*operations.Opera
 	if id == "" {
 		return nil, status.Error(codes.InvalidArgument, "image_id required")
 	}
-	op, err := operations.New(ids.PrefixOperationCompute, fmt.Sprintf("Delete image %s", id),
-		&computev1.DeleteImageMetadata{ImageId: id})
-	if err != nil {
-		return nil, err
-	}
-	if err := s.opsRepo.Create(ctx, op); err != nil {
-		return nil, err
-	}
-	operations.Run(ctx, s.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		if err := s.repo.Delete(ctx, id); err != nil {
-			return nil, mapRepoErr(err)
-		}
-		return anypb.New(&emptypb.Empty{})
-	})
-	return &op, nil
+	return runOp(ctx, s.opsRepo, fmt.Sprintf("Delete image %s", id),
+		&computev1.DeleteImageMetadata{ImageId: id},
+		func(ctx context.Context) (*anypb.Any, error) {
+			if err := s.repo.Delete(ctx, id); err != nil {
+				return nil, mapRepoErr(err)
+			}
+			return anypb.New(&emptypb.Empty{})
+		})
 }
 
 // ListOperations возвращает операции для Image.

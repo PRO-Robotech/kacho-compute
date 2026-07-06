@@ -553,7 +553,7 @@ func (r *InstanceRepo) MergeMetadata(_ context.Context, id string, del []string,
 }
 
 // Delete удаляет ВМ + auto-delete диски.
-func (r *InstanceRepo) Delete(_ context.Context, id string, autoDeleteDiskIDs []string) error {
+func (r *InstanceRepo) Delete(_ context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	in, ok := r.data[id]
@@ -561,11 +561,14 @@ func (r *InstanceRepo) Delete(_ context.Context, id string, autoDeleteDiskIDs []
 		return ports.ErrNotFound
 	}
 	if r.diskHook != nil {
+		// auto-delete множество определяется из ТЕКУЩИХ attached-дисков (flag
+		// AutoDelete), а не из snapshot вызывающего — зеркалит in-tx вычисление
+		// repo.InstanceRepo.Delete (project-rule 10, no stale-snapshot orphan).
 		for _, ad := range in.AttachedDisks {
 			r.diskHook.SetAttached(ad.DiskID, false)
-		}
-		for _, did := range autoDeleteDiskIDs {
-			_ = r.diskHook.Delete(context.Background(), did)
+			if ad.AutoDelete {
+				_ = r.diskHook.Delete(context.Background(), ad.DiskID)
+			}
 		}
 	}
 	delete(r.data, id)
