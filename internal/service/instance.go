@@ -415,8 +415,8 @@ func (s *InstanceService) Update(ctx context.Context, req UpdateInstanceReq) (*o
 func validateInstanceUpdate(req UpdateInstanceReq) error {
 	known := map[string]struct{}{
 		"name": {}, "description": {}, "labels": {}, "service_account_id": {},
-		"placement_policy": {}, "network_settings": {}, "scheduling_policy": {},
-		"resources_spec": {}, "platform_id": {}, "metadata_options": {},
+		"placement_policy": {}, "network_settings": {},
+		"resources_spec": {}, "platform_id": {},
 	}
 	// Immutable-check ПЕРЕД UpdateMask: known-set не содержит immutable-полей,
 	// поэтому UpdateMask вернул бы generic "unknown field" вместо конвенционного
@@ -425,6 +425,13 @@ func validateInstanceUpdate(req UpdateInstanceReq) error {
 		switch f {
 		case "zone_id", "boot_disk", "metadata":
 			return invalidArg(f, f+" is immutable after Instance.Create (use AttachDisk/UpdateMetadata/Relocate)")
+		case "scheduling_policy", "metadata_options":
+			// Присутствуют в UpdateInstanceRequest, но НЕ применяются на generic
+			// Update-пути (нет column-write в repo.Update, нет в full-mask наборе) —
+			// фиксируются на Create. Ранее сидели в known-set → masked-мутация
+			// «успешно» проходила без эффекта (silent no-op). Отвергаем конвенционным
+			// immutable-сообщением вместо тихого no-op.
+			return invalidArg(f, f+" is immutable after Instance.Create")
 		}
 	}
 	if err := corevalidate.UpdateMask("update_mask", req.UpdateMask, known); err != nil {
