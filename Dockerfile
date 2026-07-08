@@ -15,7 +15,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /kacho-compu
  && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /kacho-migrator ./cmd/migrator
 
 FROM mirror.gcr.io/library/alpine:3.20
-RUN apk add --no-cache ca-certificates
+RUN apk upgrade --no-cache && apk add --no-cache ca-certificates
 COPY --from=builder /kacho-compute /usr/local/bin/kacho-compute
 COPY --from=builder /kacho-migrator /usr/local/bin/kacho-migrator
 USER 65532
