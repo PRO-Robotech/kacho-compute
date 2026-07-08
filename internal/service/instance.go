@@ -731,7 +731,7 @@ func defaultCoreFraction(cf int64) int64 {
 
 func fqdn(id, hostname string) string {
 	if hostname != "" {
-		return hostname + ".ru-central1.internal"
+		return hostname + ".kacho.internal"
 	}
 	return id + ".auto.internal"
 }

@@ -73,6 +73,22 @@ func TestInstance_Create_OK(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestInstance_Create_Fqdn_HostnameSuffix_NoForeignCloudToken — Fqdn built from
+// an explicit Hostname must use a Kachō-native internal DNS suffix, never a
+// foreign-cloud region token (non-negotiable #2). This is the public
+// Instance.Fqdn field, serialized on every Get/List/Create.
+func TestInstance_Create_Fqdn_HostnameSuffix_NoForeignCloudToken(t *testing.T) {
+	svc, _, _, _, ops := newInstanceSvc(t, true)
+	req := baseCreateReq()
+	req.Hostname = "web1"
+	op, err := svc.Create(context.Background(), req)
+	require.NoError(t, err)
+	done := portmock.AwaitOpDone(t, ops, op.ID)
+	in := instanceFromOp(t, done)
+	require.Equal(t, "web1.kacho.internal", in.Fqdn)
+	require.NotContains(t, in.Fqdn, "ru-central1", "Fqdn must not leak a foreign-cloud region token")
+}
+
 func TestInstance_Create_SyncValidation(t *testing.T) {
 	svc, _, _, _, _ := newInstanceSvc(t, true)
 	missing := baseCreateReq()

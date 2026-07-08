@@ -182,8 +182,10 @@ func TestInterceptor_Unary_UnmappedInternalRPC_FailClosed(t *testing.T) {
 	// больше не делает name-based исключений (молчаливый пропуск по имени
 	// "Internal*" был fail-open вектором на internal-периметре). Exempt-RPC
 	// обязан явно стоять в PermissionMap (Public либо relation-gated).
-	// InternalWatchService/Watch в Map отсутствует, поэтому запрос отклоняется
-	// с PermissionDenied (rpc not mapped): ни handler, ни Check не вызываются.
+	// InternalDiskTypeService/List — намеренно не зарегистрированный (нет
+	// такого метода в этом сервисе) fully-qualified путь, используем его как
+	// синтетический "ещё не замаплен" пример: запрос отклоняется с
+	// PermissionDenied (rpc not mapped), ни handler, ни Check не вызываются.
 	intr, calls := newTestInterceptor(t, func(_ context.Context, _, _, _ string) (bool, error) {
 		t.Fatal("Check не должен вызываться для unmapped Internal* RPC")
 		return false, nil
@@ -194,7 +196,7 @@ func TestInterceptor_Unary_UnmappedInternalRPC_FailClosed(t *testing.T) {
 		called = true
 		return "ok", nil
 	}
-	info := &grpc.UnaryServerInfo{FullMethod: "/kacho.cloud.compute.v1.InternalWatchService/Watch"}
+	info := &grpc.UnaryServerInfo{FullMethod: "/kacho.cloud.compute.v1.InternalDiskTypeService/SomeFutureUnmappedMethod"}
 	ctx := principalCtx("user", "usr_alice")
 
 	_, err := uIntr(ctx, struct{}{}, info, handler)
@@ -205,6 +207,42 @@ func TestInterceptor_Unary_UnmappedInternalRPC_FailClosed(t *testing.T) {
 	require.False(t, called)
 	require.Equal(t, 0, *calls)
 }
+
+func TestInterceptor_Stream_InternalWatch_PublicExempt(t *testing.T) {
+	// InternalWatchService/Watch runs on the internal :9091 listener behind the
+	// SAME authzIntr.Stream() as every other internal RPC (cmd/compute/main.go).
+	// It must be reachable — no per-call Check, handler invoked — because it is
+	// mapped Public=true in PermissionMap, not because of a name-based
+	// "methodIsInternal" fallback (which does not exist in the pinned corelib:
+	// an unmapped stream RPC fails closed with PermissionDenied, see
+	// TestInterceptor_Unary_UnmappedInternalRPC_FailClosed above).
+	intr, calls := newTestInterceptor(t, func(_ context.Context, _, _, _ string) (bool, error) {
+		t.Fatal("Check must not be called for Public-exempt Watch RPC")
+		return false, nil
+	})
+	sIntr := intr.Stream()
+	called := false
+	handler := func(srv any, ss grpc.ServerStream) error {
+		called = true
+		return nil
+	}
+	info := &grpc.StreamServerInfo{FullMethod: "/kacho.cloud.compute.v1.InternalWatchService/Watch"}
+	ss := &fakeServerStream{ctx: context.Background()}
+
+	err := sIntr(nil, ss, info, handler)
+	require.NoError(t, err)
+	require.True(t, called, "Watch handler must be invoked (Public exempt), not fail-closed as unmapped")
+	require.Equal(t, 0, *calls, "Public entry must skip the Check call entirely")
+}
+
+// fakeServerStream — minimal grpc.ServerStream fake carrying only a Context();
+// Stream() reads no other method before delegating to handler.
+type fakeServerStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (f *fakeServerStream) Context() context.Context { return f.ctx }
 
 func TestInterceptor_Unary_CacheHit(t *testing.T) {
 	intr, calls := newTestInterceptor(t, func(_ context.Context, _, _, _ string) (bool, error) {
