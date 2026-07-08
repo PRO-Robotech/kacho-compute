@@ -29,10 +29,23 @@ import (
 // projectExistsTTL — TTL положительного результата Exists.
 const projectExistsTTL = 30 * time.Second
 
+// defaultProjectCallTimeout — per-call deadline applied to EVERY
+// iam.ProjectService.Get attempt (audit-r6 P1). Mirrors defaultZoneCallTimeout's
+// rationale: retry.OnUnavailable only classifies codes.Unavailable, so an
+// app-slow (not down) iam peer that never responds would hang the caller for the
+// lifetime of the inbound ctx (LRO worker opTimeout) on every Create/Move
+// hot-path call. Package default const (no configurable knob exists for this
+// edge yet), per architecture.md's documented fallback.
+const defaultProjectCallTimeout = 5 * time.Second
+
 // ProjectClient реализует service.ProjectClient через gRPC к kacho-iam
 // с TTL-кешем для Exists (hot path: каждый Create/Move).
 type ProjectClient struct {
 	cli iamv1.ProjectServiceClient
+	// timeout — per-call deadline applied to every Get attempt
+	// (defaultProjectCallTimeout unless overridden, e.g. test seam via direct
+	// field assignment).
+	timeout time.Duration
 
 	mu     sync.RWMutex
 	exists map[string]time.Time
@@ -41,8 +54,20 @@ type ProjectClient struct {
 // NewProjectClient создаёт ProjectClient.
 func NewProjectClient(conn *grpc.ClientConn) *ProjectClient {
 	return &ProjectClient{
-		cli:    iamv1.NewProjectServiceClient(conn),
-		exists: make(map[string]time.Time),
+		cli:     iamv1.NewProjectServiceClient(conn),
+		exists:  make(map[string]time.Time),
+		timeout: defaultProjectCallTimeout,
+	}
+}
+
+// NewProjectClientWith создаёт ProjectClient поверх готового
+// iamv1.ProjectServiceClient (seam для unit-тестов с fake-клиентом), паритет с
+// clients.NewGeoClientWith.
+func NewProjectClientWith(cli iamv1.ProjectServiceClient) *ProjectClient {
+	return &ProjectClient{
+		cli:     cli,
+		exists:  make(map[string]time.Time),
+		timeout: defaultProjectCallTimeout,
 	}
 }
 
@@ -50,6 +75,10 @@ func NewProjectClient(conn *grpc.ClientConn) *ProjectClient {
 // Положительный результат кешируется на projectExistsTTL (убирает gRPC RTT
 // из hot-path при burst-нагрузке). NotFound НЕ кешируется (свеже-созданный
 // project быстро становится виден).
+//
+// Каждая попытка (в т.ч. каждый retry.OnUnavailable-повтор) несёт собственный
+// context.WithTimeout(c.timeout) — app-slow iam (peer жив, но не отвечает) бьётся
+// per-call deadline'ом, а не висит до inbound ctx (worker opTimeout), см. audit-r6 P1.
 func (c *ProjectClient) Exists(ctx context.Context, projectID string) (bool, error) {
 	c.mu.RLock()
 	exp, ok := c.exists[projectID]
@@ -60,7 +89,9 @@ func (c *ProjectClient) Exists(ctx context.Context, projectID string) (bool, err
 
 	var exists bool
 	err := retry.OnUnavailable(ctx, func(ctx context.Context) error {
-		_, rerr := c.cli.Get(auth.PropagateOutgoing(ctx), &iamv1.GetProjectRequest{ProjectId: projectID})
+		callCtx, cancel := context.WithTimeout(ctx, c.timeout)
+		defer cancel()
+		_, rerr := c.cli.Get(auth.PropagateOutgoing(callCtx), &iamv1.GetProjectRequest{ProjectId: projectID})
 		if rerr != nil {
 			st, ok := status.FromError(rerr)
 			if ok && st.Code() == codes.NotFound {
