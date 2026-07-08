@@ -35,7 +35,7 @@ jobs:
         target:
           - FuzzInstanceSpecValidate
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with: { path: kacho-compute }
       - uses: actions/setup-go@v6
         with: { go-version-file: kacho-compute/go.mod }
