@@ -29,6 +29,13 @@ func TestUpdateMask_ImmutableFieldMessage(t *testing.T) {
 		{"instance_zone_id", "zone_id", "Instance", validateInstanceUpdate(UpdateInstanceReq{UpdateMask: []string{"zone_id"}})},
 		{"instance_boot_disk", "boot_disk", "Instance", validateInstanceUpdate(UpdateInstanceReq{UpdateMask: []string{"boot_disk"}})},
 		{"instance_metadata", "metadata", "Instance", validateInstanceUpdate(UpdateInstanceReq{UpdateMask: []string{"metadata"}})},
+		// scheduling_policy / metadata_options are declared on UpdateInstanceRequest
+		// but never applied on the generic Update path (no repo column-write, absent
+		// from the full-mask set). They used to sit in the known-set, so a masked
+		// mutation silently succeeded with no effect; they are now rejected with the
+		// convention immutable message instead of a silent no-op.
+		{"instance_scheduling_policy", "scheduling_policy", "Instance", validateInstanceUpdate(UpdateInstanceReq{UpdateMask: []string{"scheduling_policy"}})},
+		{"instance_metadata_options", "metadata_options", "Instance", validateInstanceUpdate(UpdateInstanceReq{UpdateMask: []string{"metadata_options"}})},
 		{"disk_type_id", "type_id", "Disk", validateDiskUpdate(UpdateDiskReq{UpdateMask: []string{"type_id"}})},
 		{"disk_block_size", "block_size", "Disk", validateDiskUpdate(UpdateDiskReq{UpdateMask: []string{"block_size"}})},
 		{"image_family", "family", "Image", validateImageUpdate(UpdateImageReq{UpdateMask: []string{"family"}})},
