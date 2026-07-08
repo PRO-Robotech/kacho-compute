@@ -185,13 +185,20 @@ func (s *SnapshotService) Update(ctx context.Context, req UpdateSnapshotReq) (*o
 
 func validateSnapshotUpdate(req UpdateSnapshotReq) error {
 	known := map[string]struct{}{"name": {}, "description": {}, "labels": {}}
+	// Immutable-check ПЕРЕД UpdateMask: known-set не содержит immutable-полей,
+	// поэтому UpdateMask вернул бы generic "unknown field" вместо конвенционного
+	// "<field> is immutable after Snapshot.Create" (api-conventions: update_mask).
+	for _, f := range req.UpdateMask {
+		switch f {
+		case "source_disk_id", "disk_size", "storage_size":
+			return invalidArg(f, f+" is immutable after Snapshot.Create")
+		}
+	}
 	if err := corevalidate.UpdateMask("update_mask", req.UpdateMask, known); err != nil {
 		return err
 	}
 	for _, f := range req.UpdateMask {
 		switch f {
-		case "source_disk_id", "disk_size", "storage_size":
-			return invalidArg(f, f+" is immutable after Snapshot.Create")
 		case "name":
 			if err := corevalidate.NameCompute("name", req.Name); err != nil {
 				return err

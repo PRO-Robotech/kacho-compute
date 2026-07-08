@@ -292,13 +292,20 @@ func (s *ImageService) Update(ctx context.Context, req UpdateImageReq) (*operati
 
 func validateImageUpdate(req UpdateImageReq) error {
 	known := map[string]struct{}{"name": {}, "description": {}, "labels": {}, "min_disk_size": {}}
+	// Immutable-check ПЕРЕД UpdateMask: known-set не содержит immutable-полей,
+	// поэтому UpdateMask вернул бы generic "unknown field" вместо конвенционного
+	// "<field> is immutable after Image.Create" (api-conventions: update_mask).
+	for _, f := range req.UpdateMask {
+		switch f {
+		case "family", "os", "product_ids", "pooled":
+			return invalidArg(f, f+" is immutable after Image.Create")
+		}
+	}
 	if err := corevalidate.UpdateMask("update_mask", req.UpdateMask, known); err != nil {
 		return err
 	}
 	for _, f := range req.UpdateMask {
 		switch f {
-		case "family", "os", "product_ids", "pooled":
-			return invalidArg(f, f+" is immutable after Image.Create")
 		case "name":
 			if err := corevalidate.NameCompute("name", req.Name); err != nil {
 				return err
