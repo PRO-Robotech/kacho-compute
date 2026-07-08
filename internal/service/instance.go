@@ -418,13 +418,20 @@ func validateInstanceUpdate(req UpdateInstanceReq) error {
 		"placement_policy": {}, "network_settings": {}, "scheduling_policy": {},
 		"resources_spec": {}, "platform_id": {}, "metadata_options": {},
 	}
+	// Immutable-check ПЕРЕД UpdateMask: known-set не содержит immutable-полей,
+	// поэтому UpdateMask вернул бы generic "unknown field" вместо конвенционного
+	// "<field> is immutable after Instance.Create" (api-conventions: update_mask).
+	for _, f := range req.UpdateMask {
+		switch f {
+		case "zone_id", "boot_disk", "metadata":
+			return invalidArg(f, f+" is immutable after Instance.Create (use AttachDisk/UpdateMetadata/Relocate)")
+		}
+	}
 	if err := corevalidate.UpdateMask("update_mask", req.UpdateMask, known); err != nil {
 		return err
 	}
 	for _, f := range req.UpdateMask {
 		switch f {
-		case "zone_id", "boot_disk", "metadata":
-			return invalidArg(f, f+" is immutable after Instance.Create (use AttachDisk/UpdateMetadata/Relocate)")
 		case "name":
 			if err := corevalidate.NameCompute("name", req.Name); err != nil {
 				return err

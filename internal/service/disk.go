@@ -285,13 +285,20 @@ func validateDiskUpdate(req UpdateDiskReq) error {
 	known := map[string]struct{}{
 		"name": {}, "description": {}, "labels": {}, "size": {}, "disk_placement_policy": {},
 	}
+	// Immutable-check ПЕРЕД UpdateMask: known-set не содержит immutable-полей,
+	// поэтому UpdateMask вернул бы generic "unknown field" вместо конвенционного
+	// "<field> is immutable after Disk.Create" (api-conventions: update_mask).
+	for _, f := range req.UpdateMask {
+		switch f {
+		case "type_id", "zone_id", "block_size", "source":
+			return invalidArg(f, f+" is immutable after Disk.Create")
+		}
+	}
 	if err := corevalidate.UpdateMask("update_mask", req.UpdateMask, known); err != nil {
 		return err
 	}
 	for _, f := range req.UpdateMask {
 		switch f {
-		case "type_id", "zone_id", "block_size", "source":
-			return invalidArg(f, f+" is immutable after Disk.Create")
 		case "name":
 			if err := corevalidate.NameCompute("name", req.Name); err != nil {
 				return err
