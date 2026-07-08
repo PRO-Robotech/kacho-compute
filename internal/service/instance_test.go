@@ -75,8 +75,9 @@ func TestInstance_Create_OK(t *testing.T) {
 
 // TestInstance_Create_Fqdn_HostnameSuffix_NoForeignCloudToken — Fqdn built from
 // an explicit Hostname must use a Kachō-native internal DNS suffix, never a
-// foreign-cloud region token (non-negotiable #2). This is the public
-// Instance.Fqdn field, serialized on every Get/List/Create.
+// foreign-cloud region token (own-product naming non-negotiable: no other-cloud
+// names in code or output). This is the public Instance.Fqdn field, serialized
+// on every Get/List/Create.
 func TestInstance_Create_Fqdn_HostnameSuffix_NoForeignCloudToken(t *testing.T) {
 	svc, _, _, _, ops := newInstanceSvc(t, true)
 	req := baseCreateReq()
