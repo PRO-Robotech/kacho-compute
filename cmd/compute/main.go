@@ -234,8 +234,10 @@ func runServe(cfg config.Config) error {
 	// Catalog-admin internal RPC (InternalDiskTypeService mutations) relation-gated
 	// (`system_admin on cluster:cluster_kacho_root`, internal/check/permission_map.go);
 	// без verified cert'а / вне allow-list форвардеров их principal снимается →
-	// Check fail-closed. InternalWatchService/Watch — <exempt> (нет в PermissionMap),
-	// пропускается methodIsInternal; dev-mode (mTLS off) работает как раньше.
+	// Check fail-closed. InternalWatchService/Watch — explicit `Public: true` entry
+	// в PermissionMap (нет methodIsInternal-фолбэка в pinned corelib: незамапленный
+	// RPC, unary или stream, fail-closed'ится PermissionDenied); dev-mode (mTLS off)
+	// работает как раньше.
 	internalUnary := []grpc.UnaryServerInterceptor{
 		grpcsrv.UnaryCertIdentityExtract(),
 		grpcsrv.UnaryTrustedPrincipalExtract(grpcsrv.WithTrustedForwarders(forwarders...)),

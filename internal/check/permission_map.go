@@ -366,12 +366,15 @@ func PermissionMap() authz.RPCMap {
 		// =========================
 		// InternalDiskTypeService — kacho-only catalog admin CRUD
 		// (Create/Update/Delete) on the cluster-internal listener (:9091). The
-		// internal listener runs the same per-RPC FGA Check as public, so
-		// these relation-gated RPCs MUST be mapped (else methodIsInternal-фолбэк
-		// would silently bypass them). Each requires `system_admin on
-		// cluster:cluster_kacho_root` — mirrors proto `required_relation=system_admin`,
-		// object_type=cluster. InternalWatchService/Watch is proto `<exempt>` and is
-		// intentionally NOT mapped (stays exempt via methodIsInternal).
+		// internal listener runs the same per-RPC FGA Check as public and the
+		// pinned corelib authz.Interceptor has NO name-based "methodIsInternal"
+		// fallback — every RPC absent from this map fails closed with
+		// PermissionDenied ("rpc not mapped"), unary AND stream alike. So every
+		// internal RPC MUST have an explicit entry: relation-gated (like the
+		// three below, `system_admin on cluster:cluster_kacho_root` — mirrors
+		// proto `required_relation=system_admin`, object_type=cluster) or
+		// Public=true for an explicit exempt (like InternalWatchService/Watch
+		// further down, and OperationService.Get/Cancel above).
 		"/kacho.cloud.compute.v1.InternalDiskTypeService/Create": {
 			Relation: relationSystemAdmin,
 			Extract:  staticClusterCatalog(),
@@ -384,6 +387,17 @@ func PermissionMap() authz.RPCMap {
 			Relation: relationSystemAdmin,
 			Extract:  staticClusterCatalog(),
 		},
+
+		// InternalWatchService/Watch — internal server-stream over compute_outbox
+		// (LISTEN/NOTIFY; see internal/handler/internal_watch_handler.go), registered
+		// on the same internal :9091 listener/authzIntr.Stream() chain as the
+		// catalog-admin RPCs above (cmd/compute/main.go). It carries no proto
+		// required_relation and there is no natural per-object FGA target for a
+		// cursor-based outbox tail, so it is explicitly exempt via Public=true —
+		// the same documented mechanism as OperationService.Get/Cancel below, NOT
+		// a name-based "methodIsInternal" skip (the pinned corelib has none: an
+		// unmapped stream RPC fails closed with PermissionDenied).
+		"/kacho.cloud.compute.v1.InternalWatchService/Watch": {Public: true},
 
 		// =========================
 		// OperationService (LRO; viewer на operation-id).

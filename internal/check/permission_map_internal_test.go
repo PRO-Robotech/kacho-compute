@@ -68,12 +68,20 @@ func TestPermissionMap_CatalogAdmin_EnforcedByInterceptor(t *testing.T) {
 	require.Equal(t, 1, *calls, "catalog mutation must trigger exactly one Check, not be bypassed")
 }
 
-// TestPermissionMap_InternalWatch_NotMapped — InternalWatchService/Watch is
-// proto-annotated `<exempt>` (no required_relation). It MUST stay out of the
-// PermissionMap and remain exempt via methodIsInternal — adding it would gate an
-// intentionally-ungated stream.
-func TestPermissionMap_InternalWatch_NotMapped(t *testing.T) {
+// TestPermissionMap_InternalWatch_MappedPublic — InternalWatchService/Watch is
+// a real, registered internal stream handler (cmd/compute/main.go wires
+// computev1.RegisterInternalWatchServiceServer; internal/handler/internal_watch_handler.go
+// streams compute_outbox via LISTEN/NOTIFY) served on the SAME internal :9091
+// listener that runs authzIntr.Stream(). The pinned corelib authz.Interceptor
+// has no name-based "methodIsInternal" fallback: any RPC absent from
+// PermissionMap resolves to DecisionUnmapped -> PermissionDenied (fail-closed),
+// for streams too (see authz.Interceptor.Stream()). Watch therefore MUST carry
+// an explicit PermissionMap entry with Public=true (the same documented exempt
+// mechanism as OperationService.Get/Cancel above) or every Watch call is
+// dead-on-arrival in production.
+func TestPermissionMap_InternalWatch_MappedPublic(t *testing.T) {
 	m := check.PermissionMap()
-	_, ok := m["/kacho.cloud.compute.v1.InternalWatchService/Watch"]
-	require.False(t, ok, "InternalWatchService/Watch is <exempt> — must NOT be in PermissionMap")
+	entry, ok := m["/kacho.cloud.compute.v1.InternalWatchService/Watch"]
+	require.True(t, ok, "InternalWatchService/Watch must be present in PermissionMap (no methodIsInternal fallback exists in the pinned corelib)")
+	require.True(t, entry.Public, "InternalWatchService/Watch must be Public — the exempt mechanism is an explicit PermissionMap entry, not name-based skip")
 }
