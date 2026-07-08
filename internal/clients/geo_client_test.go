@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -81,6 +82,40 @@ func TestGeoClient_GetZone_Unavailable(t *testing.T) {
 	err := c.GetZone(ctx, "ru-central1-a")
 	require.Error(t, err, "geo-down must propagate an error, never silent success")
 	require.False(t, errors.Is(err, ports.ErrNotFound), "transport error must NOT be treated as not-found (fail-closed)")
+}
+
+// TestGeoClient_GetZone_BlockingPeer_TimesOut — audit-r6 P1 regression: an
+// app-slow geo peer (alive, TCP connected, never responds — NOT codes.Unavailable)
+// must be bounded by GeoClient's own per-call timeout, not hang for the life of
+// the caller's ctx. Before the fix, c.zones.Get carried the raw ctx with no
+// deadline of its own, so with an un-deadlined caller ctx (as here) the call
+// would block forever; only retry.OnUnavailable's ctx.Done()-select would ever
+// unblock it, and that never fires without an outer deadline.
+func TestGeoClient_GetZone_BlockingPeer_TimesOut(t *testing.T) {
+	unblock := make(chan struct{})
+	defer close(unblock)
+	fake := &fakeGeoZoneClient{getFn: func(ctx context.Context, _ *geov1.GetZoneRequest) (*geov1.Zone, error) {
+		select {
+		case <-ctx.Done():
+			// Mirrors real grpc-go behaviour: an expired per-call deadline surfaces
+			// as codes.DeadlineExceeded, not a hang.
+			return nil, status.Error(codes.DeadlineExceeded, ctx.Err().Error())
+		case <-unblock:
+			t.Error("peer must never observe unblock — GetZone should return via its own per-call timeout first")
+			return nil, status.Error(codes.Unavailable, "unreachable")
+		}
+	}}
+	c := NewGeoClientWith(fake)
+	c.timeout = 20 * time.Millisecond // shrink for a fast, deterministic test
+
+	start := time.Now()
+	err := c.GetZone(context.Background(), "ru-central1-a") // caller ctx has NO deadline
+	elapsed := time.Since(start)
+
+	require.Error(t, err, "blocking peer must yield an error, never a silent success")
+	require.False(t, errors.Is(err, ports.ErrNotFound), "timeout must NOT be treated as not-found (fail-closed)")
+	require.Less(t, elapsed, 2*time.Second,
+		"GetZone must return around its own configured per-call timeout, not hang on the caller's undeadlined ctx")
 }
 
 // staticAssertGeoClientPort — GeoClient должен реализовывать service.ZoneRegistry
