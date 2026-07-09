@@ -5,6 +5,7 @@ package clients
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -92,6 +93,34 @@ func TestProjectClient_Exists_Unavailable(t *testing.T) {
 
 	_, err := c.Exists(ctx, "prj_x")
 	require.Error(t, err, "iam-down must propagate an error, never silent success")
+}
+
+// TestProjectClient_Exists_PositiveCacheBounded — audit-r3 leak regression: the
+// positive-cache must stay bounded by maxEntries. Before the fix, every distinct
+// projectID that passed Exists() wrote c.exists[projectID] and was never removed
+// (TTL was consulted only on read, never triggering a delete) → a long-running
+// control-plane process with project churn accumulated entries forever (unbounded
+// memory growth on the Create/Move hot-path). The bounded putExists evicts an
+// arbitrary entry at the cap, mirroring authzfilter.FGAFilter.putCache.
+func TestProjectClient_Exists_PositiveCacheBounded(t *testing.T) {
+	fake := &fakeProjectServiceClient{getFn: func(_ context.Context, in *iamv1.GetProjectRequest) (*iamv1.Project, error) {
+		return &iamv1.Project{Id: in.GetProjectId()}, nil
+	}}
+	c := NewProjectClientWith(fake)
+	c.maxEntries = 8 // shrink the bound for a fast, deterministic test
+
+	const distinct = 100
+	for i := 0; i < distinct; i++ {
+		exists, err := c.Exists(context.Background(), fmt.Sprintf("prj_%03d", i))
+		require.NoError(t, err)
+		require.True(t, exists)
+	}
+
+	c.mu.RLock()
+	size := len(c.exists)
+	c.mu.RUnlock()
+	require.LessOrEqual(t, size, c.maxEntries,
+		"positive cache must stay bounded by maxEntries; unbounded growth on distinct-projectID churn leaks memory")
 }
 
 // TestProjectClient_Exists_BlockingPeer_TimesOut — audit-r6 P1 regression: an

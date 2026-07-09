@@ -29,6 +29,14 @@ import (
 // projectExistsTTL — TTL положительного результата Exists.
 const projectExistsTTL = 30 * time.Second
 
+// projectExistsCacheMaxEntries — bound на размер positive-cache Exists. TTL
+// (projectExistsTTL) — первичный механизм вытеснения; при достижении bound
+// putExists сбрасывает одну произвольную запись (Go map iteration order, не LRU —
+// short TTL делает выбор жертвы несущественным), паритет с
+// authzfilter.FGAFilter.putCache. Без bound distinct-projectID churn на hot-path
+// Create/Move аккумулирует записи навсегда (unbounded memory growth, audit-r3 leak).
+const projectExistsCacheMaxEntries = 10000
+
 // defaultProjectCallTimeout — per-call deadline applied to EVERY
 // iam.ProjectService.Get attempt (audit-r6 P1). Mirrors defaultZoneCallTimeout's
 // rationale: retry.OnUnavailable only classifies codes.Unavailable, so an
@@ -46,6 +54,9 @@ type ProjectClient struct {
 	// (defaultProjectCallTimeout unless overridden, e.g. test seam via direct
 	// field assignment).
 	timeout time.Duration
+	// maxEntries — bound на размер positive-cache (projectExistsCacheMaxEntries
+	// unless overridden, e.g. test seam via direct field assignment).
+	maxEntries int
 
 	mu     sync.RWMutex
 	exists map[string]time.Time
@@ -54,9 +65,10 @@ type ProjectClient struct {
 // NewProjectClient создаёт ProjectClient.
 func NewProjectClient(conn *grpc.ClientConn) *ProjectClient {
 	return &ProjectClient{
-		cli:     iamv1.NewProjectServiceClient(conn),
-		exists:  make(map[string]time.Time),
-		timeout: defaultProjectCallTimeout,
+		cli:        iamv1.NewProjectServiceClient(conn),
+		exists:     make(map[string]time.Time),
+		timeout:    defaultProjectCallTimeout,
+		maxEntries: projectExistsCacheMaxEntries,
 	}
 }
 
@@ -65,9 +77,10 @@ func NewProjectClient(conn *grpc.ClientConn) *ProjectClient {
 // clients.NewGeoClientWith.
 func NewProjectClientWith(cli iamv1.ProjectServiceClient) *ProjectClient {
 	return &ProjectClient{
-		cli:     cli,
-		exists:  make(map[string]time.Time),
-		timeout: defaultProjectCallTimeout,
+		cli:        cli,
+		exists:     make(map[string]time.Time),
+		timeout:    defaultProjectCallTimeout,
+		maxEntries: projectExistsCacheMaxEntries,
 	}
 }
 
@@ -107,11 +120,26 @@ func (c *ProjectClient) Exists(ctx context.Context, projectID string) (bool, err
 		return false, err
 	}
 	if exists {
-		c.mu.Lock()
-		c.exists[projectID] = time.Now().Add(projectExistsTTL)
-		c.mu.Unlock()
+		c.putExists(projectID)
 	}
 	return exists, nil
+}
+
+// putExists кеширует положительный результат Exists с bounded-eviction.
+// При достижении maxEntries сбрасывает одну произвольную запись (Go map iteration
+// order, не LRU — short projectExistsTTL делает выбор жертвы несущественным),
+// паритет с authzfilter.FGAFilter.putCache: без bound distinct-projectID churn на
+// hot-path Create/Move аккумулировал бы записи навсегда (unbounded memory growth).
+func (c *ProjectClient) putExists(projectID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, present := c.exists[projectID]; !present && len(c.exists) >= c.maxEntries {
+		for k := range c.exists {
+			delete(c.exists, k)
+			break
+		}
+	}
+	c.exists[projectID] = time.Now().Add(projectExistsTTL)
 }
 
 // NoopProjectClient — заглушка для KACHO_COMPUTE_SKIP_PEER_VALIDATION=true
