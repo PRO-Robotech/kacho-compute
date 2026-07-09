@@ -236,7 +236,11 @@ func (f *FGAFilter) getCache(key string) (Decision, bool) {
 func (f *FGAFilter) putCache(key string, d Decision) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if len(f.cache) >= f.cfg.CacheMaxEntries {
+	// Only evict when inserting a NEW key at capacity — refreshing an
+	// already-present key must not drop a different subject's live decision
+	// (net map shrink → victim re-incurs an iam RTT / fail-closed). Parity with
+	// sibling ProjectClient.putExists (!present && len>=max).
+	if _, present := f.cache[key]; !present && len(f.cache) >= f.cfg.CacheMaxEntries {
 		// Naive eviction: drop a random pre-existing entry (Go map iteration order).
 		// Acceptable for short TTL — entries expire within 5s anyway.
 		for k := range f.cache {
