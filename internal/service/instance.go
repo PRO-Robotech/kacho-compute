@@ -33,14 +33,14 @@ var validCoreFractions = map[int64]struct{}{0: {}, 5: {}, 20: {}, 50: {}, 100: {
 // DiskSourceSpec — оборачивает либо ссылку на существующий диск, либо параметры
 // inline-создания нового диска (ровно одно поле непусто).
 type DiskSourceSpec struct {
-	DiskID         string
-	NewDiskSizeGiB int64
-	NewDiskTypeID  string
-	NewSourceImage string
-	NewSourceSnap  string
-	DeviceName     string
-	AutoDelete     bool
-	Mode           int32 // computev1.AttachedDiskSpec_Mode
+	DiskID           string
+	NewDiskSizeBytes int64
+	NewDiskTypeID    string
+	NewSourceImage   string
+	NewSourceSnap    string
+	DeviceName       string
+	AutoDelete       bool
+	Mode             int32 // computev1.AttachedDiskSpec_Mode
 }
 
 // CreateInstanceReq — запрос на создание ВМ.
@@ -91,6 +91,7 @@ type InstanceService struct {
 	diskRepo     DiskRepo
 	imageRepo    ImageRepo
 	snapshotRepo SnapshotRepo
+	diskTypeRepo DiskTypeRepo
 	// zones — existence-check zone_id. Авторитетный источник — kacho-geo
 	// (geo.v1.ZoneService.Get; Geography принадлежит kacho-geo); при
 	// SKIP_PEER_VALIDATION — no-op. Wiring — cmd/compute/main.go.
@@ -100,10 +101,10 @@ type InstanceService struct {
 }
 
 // NewInstanceService создаёт InstanceService.
-func NewInstanceService(repo InstanceRepo, diskRepo DiskRepo, imageRepo ImageRepo, snapshotRepo SnapshotRepo, zones ZoneRegistry, projectClient ProjectClient, opsRepo operations.Repo) *InstanceService {
+func NewInstanceService(repo InstanceRepo, diskRepo DiskRepo, imageRepo ImageRepo, snapshotRepo SnapshotRepo, diskTypeRepo DiskTypeRepo, zones ZoneRegistry, projectClient ProjectClient, opsRepo operations.Repo) *InstanceService {
 	return &InstanceService{
 		repo: repo, diskRepo: diskRepo, imageRepo: imageRepo, snapshotRepo: snapshotRepo,
-		zones: zones, projectClient: projectClient, opsRepo: opsRepo,
+		diskTypeRepo: diskTypeRepo, zones: zones, projectClient: projectClient, opsRepo: opsRepo,
 	}
 }
 
@@ -285,11 +286,23 @@ func (s *InstanceService) resolveDiskSource(ctx context.Context, projectID, zone
 			DeviceName: spec.DeviceName, AutoDelete: spec.AutoDelete, AttachedAt: time.Now().UTC(),
 		}, nil, nil
 	}
-	// inline disk_spec → create a new READY disk in the same TX.
+	// inline disk_spec → create a new READY disk in the same TX. Materialization
+	// runs the SAME within-service invariants as the standalone DiskService.Create
+	// path (disk-type existence, size bounds, source min-size) — disks.type_id has
+	// no cross-table FK, so skipping these here would persist an invalid/undersized
+	// disk row that CreateDisk itself would reject (parity of enforcement across
+	// both creation paths).
 	newDiskID := ids.NewID(ids.PrefixDisk)
-	size := spec.NewDiskSizeGiB
+	size := spec.NewDiskSizeBytes
 	if size == 0 {
 		size = diskSizeMin
+	}
+	if size < diskSizeMin || size > diskSizeMaxCreate {
+		return domain.AttachedDisk{}, nil, invalidArg("disk_spec.size", fmt.Sprintf("size must be in range [%d, %d] bytes", diskSizeMin, diskSizeMaxCreate))
+	}
+	typeID := orDefault(spec.NewDiskTypeID, defaultDiskType)
+	if _, err := s.diskTypeRepo.Get(ctx, typeID); err != nil {
+		return domain.AttachedDisk{}, nil, mapRefErr(err, "Disk type", typeID)
 	}
 	if spec.NewSourceImage != "" {
 		img, err := s.imageRepo.Get(ctx, spec.NewSourceImage)
@@ -302,6 +315,9 @@ func (s *InstanceService) resolveDiskSource(ctx context.Context, projectID, zone
 		if img.ProjectID != projectID {
 			return domain.AttachedDisk{}, nil, crossProjectNotFound("Image", spec.NewSourceImage)
 		}
+		if img.MinDiskSize > 0 && size < img.MinDiskSize {
+			return domain.AttachedDisk{}, nil, status.Errorf(codes.InvalidArgument, "Disk size %d is less than image min_disk_size %d", size, img.MinDiskSize)
+		}
 	}
 	if spec.NewSourceSnap != "" {
 		snap, err := s.snapshotRepo.Get(ctx, spec.NewSourceSnap)
@@ -311,12 +327,15 @@ func (s *InstanceService) resolveDiskSource(ctx context.Context, projectID, zone
 		if snap.ProjectID != projectID {
 			return domain.AttachedDisk{}, nil, crossProjectNotFound("Snapshot", spec.NewSourceSnap)
 		}
+		if snap.DiskSize > 0 && size < snap.DiskSize {
+			return domain.AttachedDisk{}, nil, status.Errorf(codes.InvalidArgument, "Disk size %d is less than snapshot disk_size %d", size, snap.DiskSize)
+		}
 	}
 	d := &domain.Disk{
 		ID:               newDiskID,
 		ProjectID:        projectID,
 		CreatedAt:        time.Now().UTC(),
-		TypeID:           orDefault(spec.NewDiskTypeID, defaultDiskType),
+		TypeID:           typeID,
 		ZoneID:           zoneID,
 		Size:             size,
 		BlockSize:        defaultBlockSize,
@@ -715,7 +734,7 @@ func validateResources(cores, memory, coreFraction int64) error {
 
 func validateDiskSourceSpec(field string, spec DiskSourceSpec) error {
 	hasRef := spec.DiskID != ""
-	hasInline := spec.NewDiskSizeGiB != 0 || spec.NewDiskTypeID != "" || spec.NewSourceImage != "" || spec.NewSourceSnap != ""
+	hasInline := spec.NewDiskSizeBytes != 0 || spec.NewDiskTypeID != "" || spec.NewSourceImage != "" || spec.NewSourceSnap != ""
 	if hasRef == hasInline {
 		return invalidArg(field, "exactly one of disk_id or disk_spec must be set")
 	}

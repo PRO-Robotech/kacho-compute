@@ -25,7 +25,7 @@ func newInstanceSvc(t *testing.T, folderOK bool) (*InstanceService, *portmock.In
 	snapRepo := portmock.NewSnapshotRepo()
 	instanceRepo := portmock.NewInstanceRepo().WithDiskRepo(diskRepo)
 	ops := portmock.NewOpsRepo()
-	svc := NewInstanceService(instanceRepo, diskRepo, imgRepo, snapRepo, portmock.NewZoneRegistry(),
+	svc := NewInstanceService(instanceRepo, diskRepo, imgRepo, snapRepo, portmock.NewDiskTypeRepo(), portmock.NewZoneRegistry(),
 		&portmock.ProjectClient{OK: folderOK}, ops)
 	return svc, instanceRepo, diskRepo, imgRepo, ops
 }
@@ -42,7 +42,7 @@ func baseCreateReq() CreateInstanceReq {
 	return CreateInstanceReq{
 		ProjectID: "f", Name: "vm-1", ZoneID: "ru-central1-a", PlatformID: "standard-v3",
 		Cores: 2, Memory: 2 << 30, CoreFraction: 100,
-		BootDisk: DiskSourceSpec{NewDiskSizeGiB: diskSizeMin, NewSourceImage: ""},
+		BootDisk: DiskSourceSpec{NewDiskSizeBytes: diskSizeMin, NewSourceImage: ""},
 	}
 }
 
@@ -103,7 +103,7 @@ func TestInstance_Create_SyncValidation(t *testing.T) {
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 
 	bothBoot := baseCreateReq()
-	bothBoot.BootDisk = DiskSourceSpec{DiskID: "d1", NewDiskSizeGiB: diskSizeMin}
+	bothBoot.BootDisk = DiskSourceSpec{DiskID: "d1", NewDiskSizeBytes: diskSizeMin}
 	_, err = svc.Create(context.Background(), bothBoot)
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
@@ -330,7 +330,7 @@ func TestInstance_Create_ZoneFromSource(t *testing.T) {
 	ops := portmock.NewOpsRepo()
 	zoneSrc := portmock.NewZoneRegistry("ru-central1-a")
 	svc := NewInstanceService(instanceRepo, diskRepo, portmock.NewImageRepo(), portmock.NewSnapshotRepo(),
-		zoneSrc, &portmock.ProjectClient{OK: true}, ops)
+		portmock.NewDiskTypeRepo(), zoneSrc, &portmock.ProjectClient{OK: true}, ops)
 
 	// known zone → success.
 	op, err := svc.Create(context.Background(), baseCreateReq())

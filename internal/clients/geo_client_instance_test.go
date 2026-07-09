@@ -41,7 +41,7 @@ func newInstanceSvcGeo(t *testing.T, geoZones fakeGeoZoneCli) (*service.Instance
 	geoReg := clients.NewGeoClientWith(geoZones) // GeoClient implements service.ZoneRegistry
 	svc := service.NewInstanceService(
 		instanceRepo, diskRepo, portmock.NewImageRepo(), portmock.NewSnapshotRepo(),
-		geoReg, &portmock.ProjectClient{OK: true}, ops,
+		portmock.NewDiskTypeRepo(), geoReg, &portmock.ProjectClient{OK: true}, ops,
 	)
 	return svc, ops
 }
@@ -50,7 +50,7 @@ func geoInstanceReq() service.CreateInstanceReq {
 	return service.CreateInstanceReq{
 		ProjectID: "f", Name: "vm-geo", ZoneID: "ru-central1-a", PlatformID: "standard-v3",
 		Cores: 2, Memory: 2 << 30, CoreFraction: 100,
-		BootDisk: service.DiskSourceSpec{NewDiskSizeGiB: 4194304, NewSourceImage: ""},
+		BootDisk: service.DiskSourceSpec{NewDiskSizeBytes: 4194304, NewSourceImage: ""},
 	}
 }
 
