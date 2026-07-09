@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"sync"
 	"time"
@@ -112,6 +113,11 @@ type FGAFilter struct {
 	cli AuthorizeClient
 	cfg Config
 
+	// logger — sink для audit-warn при fail-open degraded-mode. Инъектируется
+	// (default slog.Default(), выставленный в cmd/compose composition root) —
+	// перекрывается в white-box тестах для перехвата WARN, как и now.
+	logger *slog.Logger
+
 	// now — источник времени для TTL-логики кеша. Инъектируется (default
 	// time.Now) чтобы TTL-expiry можно было проверять детерминированно, продвигая
 	// фейковые часы, а не через time.Sleep + wall-clock (flaky под нагрузкой CI).
@@ -142,10 +148,11 @@ func NewFGAFilter(cli AuthorizeClient, cfg Config) *FGAFilter {
 		cfg.MaxResults = defaultListMaxResults
 	}
 	return &FGAFilter{
-		cli:   cli,
-		cfg:   cfg,
-		now:   time.Now,
-		cache: make(map[string]cacheEntry, cfg.CacheMaxEntries),
+		cli:    cli,
+		cfg:    cfg,
+		logger: slog.Default(),
+		now:    time.Now,
+		cache:  make(map[string]cacheEntry, cfg.CacheMaxEntries),
 	}
 }
 
@@ -196,6 +203,13 @@ func (f *FGAFilter) ListAllowedIDs(ctx context.Context, subject, resourceType, a
 // handleErr — выбор reaction по fail-open / fail-closed.
 func (f *FGAFilter) handleErr(err error) (Decision, error) {
 	if f.cfg.FailOpen {
+		// Degraded mode: FGA unreachable but the operator opted into fail-open, so
+		// the per-object allow-list is bypassed (every row in the project becomes
+		// visible). This is the exact over-show class list-filtering defends
+		// against — it MUST be loud, not a silent authz-degradation. err is a peer
+		// gRPC status (no pgx/SQL text), logged server-side only, never returned.
+		f.logger.Warn("list filter fail-open: iam.ListObjects unreachable, bypassing per-object authz (returning ALL ids)",
+			"error", err)
 		return Decision{BypassAll: true, FailOpen: true}, nil
 	}
 	if errors.Is(err, context.DeadlineExceeded) {

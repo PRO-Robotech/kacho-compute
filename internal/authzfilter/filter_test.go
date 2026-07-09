@@ -4,8 +4,11 @@
 package authzfilter
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -120,6 +123,42 @@ func TestFGAFilter_FailOpen(t *testing.T) {
 	}
 	if !d.IsBypass() || !d.FailOpen {
 		t.Fatalf("fail-open: expected BypassAll=true + FailOpen=true, got %+v", d)
+	}
+}
+
+// Regression: fail-open degraded-mode MUST emit an audit WARN. handleErr returns
+// BypassAll (every row in the project becomes visible, bypassing the per-object
+// allow-list) — doc.go and the Config.FailOpen godoc both promise an audit-warn.
+// Without an emitted WARN an operator who enabled fail-open gets a silently
+// authz-degraded mode with zero observability. Lock the observable (a WARN is
+// produced), not just the returned Decision.
+func TestFGAFilter_FailOpenEmitsAuditWarn(t *testing.T) {
+	mock := &mockAuthClient{err: status.Error(codes.Unavailable, "iam down")}
+	cfg := DefaultConfig()
+	cfg.FailOpen = true
+	f := NewFGAFilter(mock, cfg)
+
+	// White-box capture of the audit sink, mirroring the f.now injection used by
+	// the TTL tests. Level threshold WARN so an accidental Info would not pass.
+	var buf bytes.Buffer
+	f.logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	d, err := f.ListAllowedIDs(context.Background(), "user:usr_alice", ResourceTypeInstance, ActionInstanceRead)
+	if err != nil {
+		t.Fatalf("fail-open: must not return error, got: %v", err)
+	}
+	if !d.IsBypass() || !d.FailOpen {
+		t.Fatalf("fail-open: expected BypassAll=true + FailOpen=true, got %+v", d)
+	}
+	logged := buf.String()
+	if logged == "" {
+		t.Fatalf("fail-open: expected an audit WARN, got no log output (degraded authz mode is silent)")
+	}
+	if !strings.Contains(logged, "level=WARN") {
+		t.Fatalf("fail-open: audit log must be WARN level, got: %q", logged)
+	}
+	if !strings.Contains(logged, "fail-open") {
+		t.Fatalf("fail-open: audit log must identify the fail-open bypass, got: %q", logged)
 	}
 }
 
