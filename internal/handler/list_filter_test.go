@@ -34,9 +34,68 @@ import (
 	iamv1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kacho-compute/internal/authzfilter"
+	"github.com/PRO-Robotech/kacho-compute/internal/domain"
 	"github.com/PRO-Robotech/kacho-compute/internal/ports/portmock"
 	"github.com/PRO-Robotech/kacho-compute/internal/service"
 )
+
+// newImageHandlerWithFilter — Image handler over portmock repos + given filter.
+func newImageHandlerWithFilter(t *testing.T, filter authzfilter.Filter) (*ImageHandler, *portmock.ImageRepo) {
+	t.Helper()
+	imgRepo := portmock.NewImageRepo()
+	svc := service.NewImageService(imgRepo, portmock.NewDiskRepo(), portmock.NewSnapshotRepo(),
+		&portmock.ProjectClient{OK: true}, portmock.NewOpsRepo())
+	return NewImageHandler(svc, filter), imgRepo
+}
+
+// GLBF-01 (leak fix): a caller holding only project-tier `viewer` but WITHOUT the
+// per-object `v_get` grant on the newest image in a family must NOT read that
+// image via GetLatestByFamily. Interceptor gates this RPC only on project-tier
+// viewer (the image id is unknown until the family is resolved), so — like public
+// List — the handler must narrow to the per-object allow-list on the RESOLVED
+// image. Without it a project viewer over-shows the image contents whenever it is
+// newest in its family (BOLA-lite / over-show, CWE-863). The denial must hide
+// existence (NotFound "Image <family> not found") — indistinguishable from a
+// genuinely empty family — not over-show and not a 403 existence-oracle.
+func TestImageHandler_GetLatestByFamily_GLBF01_Denied_NoLeak(t *testing.T) {
+	cli := &mockAuthCli{allowedByKey: map[string][]string{}} // empty grant
+	h, imgRepo := newImageHandlerWithFilter(t, newFilter(t, cli))
+	imgRepo.Seed(&domain.Image{ID: "epdimgx", ProjectID: "proj", Name: "i", Family: "ubuntu", Status: domain.ImageStatusReady})
+
+	resp, err := h.GetLatestByFamily(ctxWithSubject("user:usr_nobody"),
+		&computev1.GetImageLatestByFamilyRequest{ProjectId: "proj", Family: "ubuntu"})
+	require.Nil(t, resp, "LEAK: unauthorized caller must NOT receive the resolved image")
+	require.Error(t, err)
+	require.Equal(t, codes.NotFound, status.Code(err),
+		"unauthorized resolved image must hide existence (NotFound), not over-show")
+	require.Equal(t, "Image ubuntu not found", status.Convert(err).Message(),
+		"denial must be indistinguishable from a genuinely empty family (no existence oracle)")
+}
+
+// GLBF-02: a caller granted `v_get` on the resolved image (id in the allow-list)
+// receives it.
+func TestImageHandler_GetLatestByFamily_GLBF02_Granted(t *testing.T) {
+	cli := &mockAuthCli{allowedByKey: map[string][]string{}}
+	h, imgRepo := newImageHandlerWithFilter(t, newFilter(t, cli))
+	imgRepo.Seed(&domain.Image{ID: "epdimgy", ProjectID: "proj", Name: "i", Family: "ubuntu", Status: domain.ImageStatusReady})
+	cli.allowedByKey["user:usr_alice|compute_image|compute.images.list"] = []string{"epdimgy"}
+
+	resp, err := h.GetLatestByFamily(ctxWithSubject("user:usr_alice"),
+		&computev1.GetImageLatestByFamilyRequest{ProjectId: "proj", Family: "ubuntu"})
+	require.NoError(t, err)
+	require.Equal(t, "epdimgy", resp.Id)
+}
+
+// GLBF-03: filter == nil (FGA disabled config-gate / dev) → bypass, back-compat.
+func TestImageHandler_GetLatestByFamily_GLBF03_FilterNil_Bypass(t *testing.T) {
+	h, imgRepo := newImageHandlerWithFilter(t, nil)
+	imgRepo.Seed(&domain.Image{ID: "epdimgz", ProjectID: "proj", Name: "i", Family: "ubuntu", Status: domain.ImageStatusReady})
+
+	resp, err := h.GetLatestByFamily(ctxWithSubject("user:usr_nobody"),
+		&computev1.GetImageLatestByFamilyRequest{ProjectId: "proj", Family: "ubuntu"})
+	require.NoError(t, err)
+	require.Equal(t, "epdimgz", resp.Id)
+}
 
 // mockAuthCli — handler-test mirror of authzfilter.mockAuthClient (private there).
 type mockAuthCli struct {

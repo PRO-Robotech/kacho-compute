@@ -5,6 +5,7 @@ package handler
 
 import (
 	"context"
+	"slices"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -47,6 +48,16 @@ func (h *ImageHandler) Get(ctx context.Context, req *computev1.GetImageRequest) 
 }
 
 // GetLatestByFamily возвращает самый новый Image в family.
+//
+// Per-object authz: interceptor гейтит этот RPC лишь на project-tier `viewer`
+// (target image-id неизвестен до резолва family, поэтому per-object gate на
+// interceptor'е невозможен). Как public List, после резолва образа сужаем до
+// per-object `v_get` allow-list на РАЗРЕШЁННОМ образе — иначе project-member с
+// одним `viewer on project` (но без `v_get` на образе X) прочитал бы содержимое X
+// (name/description/labels/min_disk_size/product_ids/os), когда X — новейший в
+// своей family (BOLA-lite / over-show, CWE-863). Зеркалит per-object v_get gate у
+// Get. Отказ прячет существование (NotFound "Image <family> not found",
+// неотличимо от пустой family), а не 403-oracle.
 func (h *ImageHandler) GetLatestByFamily(ctx context.Context, req *computev1.GetImageLatestByFamilyRequest) (*computev1.Image, error) {
 	if err := AssertProjectOwnership(ctx, req.ProjectId); err != nil {
 		return nil, err
@@ -54,6 +65,13 @@ func (h *ImageHandler) GetLatestByFamily(ctx context.Context, req *computev1.Get
 	i, err := h.svc.GetLatestByFamily(ctx, req.ProjectId, req.Family)
 	if err != nil {
 		return nil, err
+	}
+	dec, err := resolveListFilter(ctx, h.listFilter, authzfilter.ResourceTypeImage, authzfilter.ActionImageRead)
+	if err != nil {
+		return nil, err
+	}
+	if !dec.IsBypass() && !slices.Contains(dec.IDs(), i.ID) {
+		return nil, status.Errorf(codes.NotFound, "Image %s not found", req.Family)
 	}
 	return protoconv.Image(i), nil
 }

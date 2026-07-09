@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 // Package clients содержит gRPC-адаптеры к peer-сервисам (Clean Architecture
-// outbound adapters): kacho-iam (ProjectService) и kacho-vpc
-// (Subnet/SecurityGroup/Address). Реализуют port-интерфейсы из internal/ports.
+// outbound adapters): kacho-iam (ProjectService) для project-existence-check и
+// kacho-geo (ZoneService) для zone-валидации, плюс fgaproxy owner-tuple адаптеры
+// (iam_register_applier, fga_reconcile_adapter). Реализуют port-интерфейсы из
+// internal/ports.
 //
-// peer для project-existence-check — kacho-iam.ProjectService.Get.
+// peer для project-existence-check — kacho-iam.ProjectService.Get; peer для
+// zone-валидации — kacho-geo.ZoneService.Get (см. geo_client.go).
 //
 // outgoing ctx обёрнут `auth.PropagateOutgoing` — peer-call несёт
 // `x-kacho-principal-*` MD, чтобы iam-side scope-filter увидел реального caller'а
