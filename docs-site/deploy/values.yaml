@@ -1,0 +1,17 @@
+name: compute-docs
+replicas: 1
+image: kacho-compute-docs:dev
+imagePullPolicy: IfNotPresent
+port: 8080
+
+ingress:
+  enabled: true
+  host: compute-docs.kacho.local
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 32Mi
+  limits:
+    cpu: 100m
+    memory: 128Mi
