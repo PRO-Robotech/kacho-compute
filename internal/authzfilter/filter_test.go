@@ -320,6 +320,44 @@ func TestFGAFilter_GenericErrWrapsUnavailable(t *testing.T) {
 	}
 }
 
+// Regression: refreshing an already-present cache key while at capacity must NOT
+// evict a *different* subject's live decision. The prior putCache evicted
+// unconditionally on len>=max, so re-inserting an existing key dropped a random
+// live entry (net map shrink → that victim re-incurs an iam.ListObjects RTT, and
+// fail-closed Unavailable if iam is momentarily slow). Guard parity with the
+// sibling ProjectClient.putExists (!present && len>=max). Run many independent
+// trials because Go map iteration picks a random victim — under the bug at least
+// one trial evicts a non-refreshed key with overwhelming probability.
+func TestFGAFilter_RefreshPresentKeyDoesNotEvictLiveEntry(t *testing.T) {
+	const max = 3
+	keys := []string{"user:usr_a|t|r", "user:usr_b|t|r", "user:usr_c|t|r"}
+	for trial := 0; trial < 64; trial++ {
+		cfg := DefaultConfig()
+		cfg.CacheMaxEntries = max
+		cfg.CacheTTL = time.Hour // entries must not expire during the trial
+		f := NewFGAFilter(nil, cfg)
+
+		for _, k := range keys {
+			f.putCache(k, Decision{})
+		}
+		if got := f.Size(); got != max {
+			t.Fatalf("trial %d: setup size=%d, want %d", trial, got, max)
+		}
+
+		// Refresh an already-present key at capacity — must be a no-op for size.
+		f.putCache(keys[0], Decision{})
+
+		if got := f.Size(); got != max {
+			t.Fatalf("trial %d: refresh of present key shrank cache: size=%d, want %d", trial, got, max)
+		}
+		for _, k := range keys {
+			if _, ok := f.getCache(k); !ok {
+				t.Fatalf("trial %d: live entry %q evicted by refresh of present key", trial, k)
+			}
+		}
+	}
+}
+
 // fakeClock — детерминированный источник времени для TTL-тестов кеша.
 // Заменяет f.now, чтобы TTL-expiry продвигался логически (advance), а не через
 // time.Sleep + wall-clock (flaky под нагрузкой CI).
