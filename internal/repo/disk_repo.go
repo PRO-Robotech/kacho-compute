@@ -119,10 +119,11 @@ func (r *DiskRepo) List(ctx context.Context, f ports.DiskFilter, p ports.Paginat
 		nextToken = encodePageToken(last.CreatedAt, last.ID)
 		result = result[:pageSize]
 	}
-	for _, d := range result {
-		if err := r.fillInstanceIDs(ctx, d); err != nil {
-			return nil, "", err
-		}
+	// Batch instance-id fetch: ONE attached_disks query over all page ids
+	// (WHERE disk_id = ANY(...)) instead of a per-row SELECT (N+1 storm that held a
+	// pool conn for up to page_size serial round-trips).
+	if err := r.fillInstanceIDsBatch(ctx, result); err != nil {
+		return nil, "", err
 	}
 	return result, nextToken, nil
 }
@@ -345,6 +346,37 @@ func (r *DiskRepo) IsAttached(ctx context.Context, id string) (bool, error) {
 		return false, wrapPgErr(err, "Disk", id)
 	}
 	return exists, nil
+}
+
+// fillInstanceIDsBatch loads attached_disks instance_ids for a whole page of disks
+// in a single round-trip (WHERE disk_id = ANY($1)) and groups them in memory,
+// keeping the per-disk instance_id ordering via the ORDER BY. Same result as calling
+// fillInstanceIDs per row, but O(1) queries instead of O(len(disks)).
+func (r *DiskRepo) fillInstanceIDsBatch(ctx context.Context, disks []*domain.Disk) error {
+	if len(disks) == 0 {
+		return nil
+	}
+	byID := make(map[string]*domain.Disk, len(disks))
+	ids := make([]string, 0, len(disks))
+	for _, d := range disks {
+		byID[d.ID] = d
+		ids = append(ids, d.ID)
+	}
+	rows, err := r.pool.Query(ctx, `SELECT disk_id, instance_id FROM attached_disks WHERE disk_id = ANY($1) ORDER BY disk_id, instance_id`, ids)
+	if err != nil {
+		return wrapPgErr(err, "Disk", "")
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var diskID, iid string
+		if err := rows.Scan(&diskID, &iid); err != nil {
+			return wrapPgErr(err, "Disk", diskID)
+		}
+		if d, ok := byID[diskID]; ok {
+			d.InstanceIDs = append(d.InstanceIDs, iid)
+		}
+	}
+	return wrapPgErr(rows.Err(), "Disk", "")
 }
 
 func (r *DiskRepo) fillInstanceIDs(ctx context.Context, d *domain.Disk) error {
