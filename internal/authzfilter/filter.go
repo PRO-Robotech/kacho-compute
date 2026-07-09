@@ -69,17 +69,30 @@ type Config struct {
 	// произвольную запись (не LRU — см. putCache; TTL-short делает выбор жертвы
 	// несущественным).
 	CacheMaxEntries int
+	// MaxResults — hard cap on the number of authorized resource ids requested from
+	// iam.ListObjects per (subject, resourceType, action). This is the tenant List
+	// allow-list size — deliberately DECOUPLED from CacheMaxEntries so that tuning
+	// cache memory never silently truncates a tenant's visible resources. iam clamps
+	// to the FGA hard cap (10000) regardless, so the default requests that maximum.
+	MaxResults int
 	// FailOpen — на FGA error: true → BypassAll=true + audit-warn; false → Unavailable.
 	FailOpen bool
 }
 
-// DefaultConfig — sane defaults: filter включён, 500ms timeout, 5s TTL, 10000 entries, fail-closed.
+// defaultListMaxResults — FGA hard cap on ListObjects results (proto:
+// max_results <= 10000; iam clamps to this). Used as the default allow-list result
+// cap, independent of cache sizing.
+const defaultListMaxResults = 10000
+
+// DefaultConfig — sane defaults: filter включён, 500ms timeout, 5s TTL, 10000 cache
+// entries, 10000 allow-list result cap, fail-closed.
 func DefaultConfig() Config {
 	return Config{
 		Enabled:         true,
 		Timeout:         500 * time.Millisecond,
 		CacheTTL:        5 * time.Second,
 		CacheMaxEntries: 10000,
+		MaxResults:      defaultListMaxResults,
 		FailOpen:        false,
 	}
 }
@@ -125,6 +138,9 @@ func NewFGAFilter(cli AuthorizeClient, cfg Config) *FGAFilter {
 	if cfg.CacheMaxEntries <= 0 {
 		cfg.CacheMaxEntries = 10000
 	}
+	if cfg.MaxResults <= 0 {
+		cfg.MaxResults = defaultListMaxResults
+	}
 	return &FGAFilter{
 		cli:   cli,
 		cfg:   cfg,
@@ -160,7 +176,7 @@ func (f *FGAFilter) ListAllowedIDs(ctx context.Context, subject, resourceType, a
 		Subject:      subject,
 		ResourceType: resourceType,
 		Action:       action,
-		MaxResults:   int64(f.cfg.CacheMaxEntries),
+		MaxResults:   int64(f.cfg.MaxResults),
 	})
 	if err != nil {
 		return f.handleErr(err)

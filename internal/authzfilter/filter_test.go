@@ -20,13 +20,14 @@ import (
 
 // mockAuthClient — captures calls and returns programmed responses.
 type mockAuthClient struct {
-	calls       atomic.Int64
-	responses   []*iamv1.ListObjectsResponse
-	err         error
-	sleep       time.Duration
-	lastSubject string
-	lastResType string
-	lastAction  string
+	calls          atomic.Int64
+	responses      []*iamv1.ListObjectsResponse
+	err            error
+	sleep          time.Duration
+	lastSubject    string
+	lastResType    string
+	lastAction     string
+	lastMaxResults int64
 }
 
 func (m *mockAuthClient) ListObjects(ctx context.Context, in *iamv1.ListObjectsRequest, _ ...grpc.CallOption) (*iamv1.ListObjectsResponse, error) {
@@ -34,6 +35,7 @@ func (m *mockAuthClient) ListObjects(ctx context.Context, in *iamv1.ListObjectsR
 	m.lastSubject = in.GetSubject()
 	m.lastResType = in.GetResourceType()
 	m.lastAction = in.GetAction()
+	m.lastMaxResults = in.GetMaxResults()
 	if m.sleep > 0 {
 		select {
 		case <-time.After(m.sleep):
@@ -265,6 +267,30 @@ func TestFGAFilter_CacheBounded(t *testing.T) {
 	}
 	if size := f.Size(); size > cfg.CacheMaxEntries {
 		t.Fatalf("cache bound violated: size=%d > max=%d", size, cfg.CacheMaxEntries)
+	}
+}
+
+// Result cap MUST be decoupled from cache sizing: an operator lowering
+// CacheMaxEntries (memory tuning) must NOT silently truncate the tenant List
+// allow-list. The FGA ListObjects MaxResults is the number of authorized ids the
+// filter will ever return — capping it to the cache bound drops the tail ids,
+// making an owner's own resources invisible on every page with no error surfaced.
+func TestFGAFilter_ResultCapDecoupledFromCacheSize(t *testing.T) {
+	mock := &mockAuthClient{
+		responses: []*iamv1.ListObjectsResponse{{ResourceIds: []string{"epd-instance-1"}}},
+	}
+	cfg := DefaultConfig()
+	cfg.CacheMaxEntries = 3 // operator tuned cache down for memory
+	f := NewFGAFilter(mock, cfg)
+
+	if _, err := f.ListAllowedIDs(context.Background(), "user:usr_alice", ResourceTypeInstance, ActionInstanceRead); err != nil {
+		t.Fatalf("list err: %v", err)
+	}
+	if mock.lastMaxResults == int64(cfg.CacheMaxEntries) {
+		t.Fatalf("FGA MaxResults tied to CacheMaxEntries (%d): allow-list silently truncated to cache size", mock.lastMaxResults)
+	}
+	if got, want := mock.lastMaxResults, int64(defaultListMaxResults); got != want {
+		t.Fatalf("FGA MaxResults = %d, want dedicated result cap %d (independent of cache)", got, want)
 	}
 }
 
