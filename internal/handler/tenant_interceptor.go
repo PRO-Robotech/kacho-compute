@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 // Package handler — tenant_interceptor.go: gRPC unary/stream interceptor
-// который извлекает caller-folder identity из metadata и кладёт в context.
+// который извлекает caller-project identity из metadata и кладёт в context.
 //
 // Это **scaffolding** под AuthZ: сейчас метаданные читаются как plaintext (нет
 // AuthN, нет токенов). Когда будет IAM — вместо metadata будут claims из
-// validated JWT/IAM-token, но downstream API (TenantFromCtx, AssertFolderOwnership)
+// validated JWT/IAM-token, но downstream API (TenantFromCtx, AssertProjectOwnership)
 // не изменится. Зеркалит kacho-vpc/internal/handler/tenant_interceptor.go.
 package handler
 
@@ -26,9 +26,9 @@ import (
 type tenantCtxKey struct{}
 
 // TenantCtx — caller identity. Сейчас populated из gRPC metadata
-// (`x-kacho-folder-id`, `x-kacho-actor`); future — из validated IAM token.
+// (`x-kacho-project-id`, `x-kacho-actor`); future — из validated IAM token.
 type TenantCtx struct {
-	// ProjectIDs — folders которые caller'у разрешено читать/писать.
+	// ProjectIDs — projects которые caller'у разрешено читать/писать.
 	// Empty = full access (admin / cluster-scoped) — backward-compat без AuthN.
 	ProjectIDs map[string]struct{}
 	// Actor — для audit log (admin@kacho, или sub-claim из JWT).
@@ -37,12 +37,12 @@ type TenantCtx struct {
 	Admin bool
 }
 
-// HasFolderAccess — может ли caller трогать ресурс из folder'а.
-func (t TenantCtx) HasFolderAccess(folderID string) bool {
+// HasProjectAccess — может ли caller трогать ресурс из project'а.
+func (t TenantCtx) HasProjectAccess(projectID string) bool {
 	if t.Admin || len(t.ProjectIDs) == 0 {
 		return true
 	}
-	_, ok := t.ProjectIDs[folderID]
+	_, ok := t.ProjectIDs[projectID]
 	return ok
 }
 
@@ -63,20 +63,20 @@ func TenantFromCtx(ctx context.Context) TenantCtx {
 	return TenantCtx{}
 }
 
-// ErrCrossTenant — sentinel для cross-folder access denied.
+// ErrCrossTenant — sentinel для cross-project access denied.
 var ErrCrossTenant = errors.New("permission denied")
 
-// AssertFolderOwnership — handler-side AuthZ check. PermissionDenied если caller
-// не имеет доступа к folder'у. Вызывается в Get/Update/Delete/List после repo.Get.
-func AssertFolderOwnership(ctx context.Context, folderID string) error {
+// AssertProjectOwnership — handler-side AuthZ check. PermissionDenied если caller
+// не имеет доступа к project'у. Вызывается в Get/Update/Delete/List после repo.Get.
+func AssertProjectOwnership(ctx context.Context, projectID string) error {
 	t := TenantFromCtx(ctx)
-	if t.HasFolderAccess(folderID) {
+	if t.HasProjectAccess(projectID) {
 		return nil
 	}
 	return status.Error(codes.PermissionDenied, "Permission denied")
 }
 
-// TenantUnaryInterceptor — gRPC unary interceptor. Извлекает caller-folder
+// TenantUnaryInterceptor — gRPC unary interceptor. Извлекает caller-project
 // identity из metadata и кладёт в ctx как TenantCtx.
 //
 // requireAdmin=true (internal :9091) — отвергает caller'а без admin-flag.
@@ -145,10 +145,10 @@ func (w *wrappedStream) Context() context.Context { return w.ctx }
 // trusted — решение trust-aware principal-extract'а (grpcsrv.TrustedPrincipalFromContext):
 // на mTLS-листенере метадата доверяется ⟺ peer предъявил verified client-cert
 // trusted forwarder'а (api-gateway); insecure-листенер = back-compat trusted.
-// authz-влияющие заголовки (x-kacho-admin → Admin, x-kacho-folder-id → ProjectIDs)
+// authz-влияющие заголовки (x-kacho-admin → Admin, x-kacho-project-id → ProjectIDs)
 // читаются ТОЛЬКО от trusted peer'а — иначе peer, дотянувшийся до листенера напрямую
 // (TLS без verified cert), мог бы подделать `x-kacho-admin: true` и пройти admin-gate
-// / folder-ownership, т.к. эти заголовки не связаны с verified peer-identity
+// / project-ownership, т.к. эти заголовки не связаны с verified peer-identity
 // (в отличие от principal, который trust-gated). x-kacho-actor — audit-only, не
 // влияет на authz → читается всегда.
 func tenantFromMetadata(ctx context.Context, trusted bool) TenantCtx {
@@ -170,11 +170,11 @@ func tenantFromMetadata(ctx context.Context, trusted bool) TenantCtx {
 	if v := md.Get("x-kacho-admin"); len(v) > 0 && v[0] == "true" {
 		t.Admin = true
 	}
-	if folders := md.Get("x-kacho-folder-id"); len(folders) > 0 {
-		t.ProjectIDs = make(map[string]struct{}, len(folders))
-		for _, f := range folders {
-			if f != "" {
-				t.ProjectIDs[f] = struct{}{}
+	if projects := md.Get("x-kacho-project-id"); len(projects) > 0 {
+		t.ProjectIDs = make(map[string]struct{}, len(projects))
+		for _, p := range projects {
+			if p != "" {
+				t.ProjectIDs[p] = struct{}{}
 			}
 		}
 	}

@@ -40,7 +40,7 @@ func (h *SnapshotHandler) Get(ctx context.Context, req *computev1.GetSnapshotReq
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, snap.ProjectID); err != nil {
+	if err := AssertProjectOwnership(ctx, snap.ProjectID); err != nil {
 		return nil, err
 	}
 	return protoconv.Snapshot(snap), nil
@@ -51,7 +51,7 @@ func (h *SnapshotHandler) Get(ctx context.Context, req *computev1.GetSnapshotReq
 // Вызов фильтруется через iam.AuthorizeService.ListObjects
 // (caller subject → allowed snapshot_ids).
 func (h *SnapshotHandler) List(ctx context.Context, req *computev1.ListSnapshotsRequest) (*computev1.ListSnapshotsResponse, error) {
-	if err := AssertFolderOwnership(ctx, req.ProjectId); err != nil {
+	if err := AssertProjectOwnership(ctx, req.ProjectId); err != nil {
 		return nil, err
 	}
 	dec, err := resolveListFilter(ctx, h.listFilter, authzfilter.ResourceTypeSnapshot, authzfilter.ActionSnapshotRead)
@@ -79,7 +79,7 @@ func (h *SnapshotHandler) List(ctx context.Context, req *computev1.ListSnapshots
 
 // Create инициирует создание Snapshot.
 func (h *SnapshotHandler) Create(ctx context.Context, req *computev1.CreateSnapshotRequest) (*operationpb.Operation, error) {
-	if err := AssertFolderOwnership(ctx, req.ProjectId); err != nil {
+	if err := AssertProjectOwnership(ctx, req.ProjectId); err != nil {
 		return nil, err
 	}
 	op, err := h.svc.Create(ctx, svc.CreateSnapshotReq{
@@ -105,7 +105,7 @@ func (h *SnapshotHandler) Update(ctx context.Context, req *computev1.UpdateSnaps
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, snap.ProjectID); err != nil {
+	if err := AssertProjectOwnership(ctx, snap.ProjectID); err != nil {
 		return nil, err
 	}
 	var mask []string
@@ -134,7 +134,7 @@ func (h *SnapshotHandler) Delete(ctx context.Context, req *computev1.DeleteSnaps
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, snap.ProjectID); err != nil {
+	if err := AssertProjectOwnership(ctx, snap.ProjectID); err != nil {
 		return nil, err
 	}
 	op, err := h.svc.Delete(ctx, req.SnapshotId)
@@ -153,7 +153,7 @@ func (h *SnapshotHandler) ListOperations(ctx context.Context, req *computev1.Lis
 	if err != nil {
 		return nil, err
 	}
-	if err := AssertFolderOwnership(ctx, snap.ProjectID); err != nil {
+	if err := AssertProjectOwnership(ctx, snap.ProjectID); err != nil {
 		return nil, err
 	}
 	ops, nextToken, err := h.svc.ListOperations(ctx, req.SnapshotId, svc.Pagination{PageToken: req.PageToken, PageSize: req.PageSize})

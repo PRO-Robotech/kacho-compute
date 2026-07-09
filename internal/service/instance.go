@@ -254,7 +254,7 @@ func (s *InstanceService) doCreate(ctx context.Context, instanceID string, req C
 
 // resolveDiskSource резолвит DiskSourceSpec в AttachedDisk + (опционально) новый
 // диск для inline-вставки. Для существующего диска проверяет READY + zone + not-attached.
-func (s *InstanceService) resolveDiskSource(ctx context.Context, folderID, zoneID string, spec DiskSourceSpec, isBoot bool) (domain.AttachedDisk, *domain.Disk, error) {
+func (s *InstanceService) resolveDiskSource(ctx context.Context, projectID, zoneID string, spec DiskSourceSpec, isBoot bool) (domain.AttachedDisk, *domain.Disk, error) {
 	if spec.DiskID != "" {
 		d, err := s.diskRepo.Get(ctx, spec.DiskID)
 		if err != nil {
@@ -264,7 +264,7 @@ func (s *InstanceService) resolveDiskSource(ctx context.Context, folderID, zoneI
 		// caller must not attach a disk owned by another project to their own
 		// instance (cross-project takeover + auto_delete destruction). Reject
 		// with NotFound (no existence oracle) BEFORE any state leak.
-		if d.ProjectID != folderID {
+		if d.ProjectID != projectID {
 			return domain.AttachedDisk{}, nil, crossProjectNotFound("Disk", spec.DiskID)
 		}
 		if d.Status != domain.DiskStatusReady {
@@ -299,7 +299,7 @@ func (s *InstanceService) resolveDiskSource(ctx context.Context, folderID, zoneI
 		// Cross-project BOLA guard: an inline boot/secondary disk must not be
 		// seeded from a source image owned by another project (data exfiltration
 		// into the caller's project). Reject with NotFound (no existence oracle).
-		if img.ProjectID != folderID {
+		if img.ProjectID != projectID {
 			return domain.AttachedDisk{}, nil, crossProjectNotFound("Image", spec.NewSourceImage)
 		}
 	}
@@ -308,13 +308,13 @@ func (s *InstanceService) resolveDiskSource(ctx context.Context, folderID, zoneI
 		if err != nil {
 			return domain.AttachedDisk{}, nil, mapRefErr(err, "Snapshot", spec.NewSourceSnap)
 		}
-		if snap.ProjectID != folderID {
+		if snap.ProjectID != projectID {
 			return domain.AttachedDisk{}, nil, crossProjectNotFound("Snapshot", spec.NewSourceSnap)
 		}
 	}
 	d := &domain.Disk{
 		ID:               newDiskID,
-		ProjectID:        folderID,
+		ProjectID:        projectID,
 		CreatedAt:        time.Now().UTC(),
 		TypeID:           orDefault(spec.NewDiskTypeID, defaultDiskType),
 		ZoneID:           zoneID,
