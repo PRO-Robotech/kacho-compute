@@ -1,0 +1,154 @@
+---
+id: disk-type
+sidebar_position: 6
+title: DiskType
+---
+
+import { DICTIONARY } from '@site/src/constants/dictionary'
+import { TYPES } from '@site/src/constants/types'
+import { RESTRICTIONS } from '@site/src/constants/restrictions'
+import { Restrictions } from '@site/src/components/commonBlocks/Restrictions'
+import { Codes } from '@site/src/components/commonBlocks/Codes'
+import { ApiOperation } from '@site/src/components/commonBlocks/ApiOperation'
+import CodeBlock from '@theme/CodeBlock'
+import dedent from 'ts-dedent'
+
+# DiskType
+
+**DiskType** — справочник классов дискового хранилища: он отвечает на вопрос «какие типы
+дисков доступны и в каких зонах». При создании диска вы указываете `typeId` — идентификатор
+типа из этого справочника; тип задаёт характеристики хранилища (например, HDD против SSD) и
+перечень зон, где он предлагается.
+
+`DiskType` — **read-only** для пользователя: типы задаёт администратор платформы, а tenant
+только читает список, чтобы выбрать подходящий `typeId` для [Disk](/api/disk). В отличие от
+остальных ресурсов, id типа — человекочитаемый **литерал** (`network-ssd`), а не сгенерированный
+префиксный id.
+
+:::info Read-only на публичной поверхности
+На публичном API доступны только `Get` и `List`. Создание, изменение и удаление типов —
+admin-функция на cluster-internal listener (`:9091`), недоступная на external endpoint. Это
+защищает каталог от изменения tenant-клиентами. Подробнее — [Авторизация](/architecture/authz).
+:::
+
+## Поля ресурса
+
+<table>
+  <thead><tr><th>Поле</th><th>Тип</th><th>Описание</th></tr></thead>
+  <tbody>
+    <tr><td><code>id</code></td><td><code>{TYPES.string}</code></td><td>Идентификатор типа (литерал, напр. <code>network-ssd</code>)</td></tr>
+    <tr><td><code>description</code></td><td><code>{TYPES.string}</code></td><td>{DICTIONARY.description.short}</td></tr>
+    <tr><td><code>zoneIds</code></td><td><code>{TYPES.repeatedString}</code></td><td>{DICTIONARY.diskTypeZoneIds.short}</td></tr>
+  </tbody>
+</table>
+
+:::note Предустановленные типы
+Каталог предзаполнен типовыми классами хранилища (например, `network-hdd`, `network-ssd`,
+`network-ssd-nonreplicated`, `network-ssd-io-m3`). Конкретный набор определяется
+администратором стенда.
+:::
+
+---
+
+## Get
+
+<ApiOperation method="GET" endpoint="/compute/v1/diskTypes/{diskTypeId}">
+
+Возвращает тип диска по идентификатору-литералу.
+
+#### Пример запроса
+
+<CodeBlock language="bash">
+  {dedent`
+    curl http://localhost:18080/compute/v1/diskTypes/network-ssd \\
+      -H 'Authorization: Bearer <JWT>'
+  `}
+</CodeBlock>
+
+#### Пример ответа
+
+<CodeBlock language="json">
+  {dedent`
+    {
+      "id": "network-ssd",
+      "description": "Сетевой SSD",
+      "zoneIds": ["region-1-a", "region-1-b"]
+    }
+  `}
+</CodeBlock>
+
+<Codes codes={['invalidArgument', 'notFound', 'permissionDenied', 'internal']} />
+
+</ApiOperation>
+
+---
+
+## List
+
+<ApiOperation method="GET" endpoint="/compute/v1/diskTypes">
+
+Список всех типов дисков с cursor-пагинацией. `projectId` не требуется — каталог глобальный.
+
+#### Параметры запроса
+
+<table>
+  <thead><tr><th>Параметр</th><th>Обязательность</th><th>Тип</th><th>Описание</th></tr></thead>
+  <tbody>
+    <tr><td><code>pageSize</code></td><td>нет</td><td><code>{TYPES.int64}</code></td><td>{DICTIONARY.pageSize.short}</td></tr>
+    <tr><td><code>pageToken</code></td><td>нет</td><td><code>{TYPES.string}</code></td><td>{DICTIONARY.pageToken.short}</td></tr>
+  </tbody>
+</table>
+
+#### Пример запроса
+
+<CodeBlock language="bash">
+  {dedent`
+    curl http://localhost:18080/compute/v1/diskTypes \\
+      -H 'Authorization: Bearer <JWT>'
+  `}
+</CodeBlock>
+
+#### Пример ответа
+
+<CodeBlock language="json">
+  {dedent`
+    {
+      "diskTypes": [
+        { "id": "network-hdd", "description": "Стандартный сетевой HDD", "zoneIds": ["region-1-a", "region-1-b"] },
+        { "id": "network-ssd", "description": "Сетевой SSD", "zoneIds": ["region-1-a", "region-1-b"] }
+      ],
+      "nextPageToken": ""
+    }
+  `}
+</CodeBlock>
+
+<Restrictions items={[{ label: 'pagination', rules: RESTRICTIONS.pagination }]} />
+<Codes codes={['invalidArgument', 'permissionDenied', 'internal']} />
+
+</ApiOperation>
+
+---
+
+## Администрирование каталога
+
+Управление типами (создание / изменение / удаление) выполняется через `InternalDiskTypeService`
+на cluster-internal listener (`:9091`) — эти RPC **не публикуются** на external endpoint. Их
+REST-проекция доступна только на internal mux `api-gateway` (`POST` / `PATCH` / `DELETE`
+`/compute/v1/diskTypes`). Администратор задаёт `id` типа явно (это PK, immutable). Полномочия —
+admin-tier; подробнее — [Авторизация](/architecture/authz).
+
+---
+
+## Сценарии использования
+
+- **Выбор класса хранилища.** Перед `Disk.Create` прочитайте `List` и подберите `typeId` под
+  требования (пропускная способность, стоимость, репликация).
+- **Доступность по зонам.** `zoneIds` подсказывает, в каких зонах тип предлагается — согласуйте
+  `Disk.zoneId` с этим списком.
+
+## Подводные камни
+
+:::caution Тип — не CRUD для tenant
+Публичный API `DiskType` — только чтение. Попытка создать/изменить тип через публичную
+поверхность невозможна (метода нет); управление каталогом — admin-функция на internal-порту.
+:::

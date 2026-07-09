@@ -1,0 +1,5 @@
+apiVersion: v2
+name: compute-docs
+version: 0.1.0
+appVersion: 0.1.0
+description: Kachō Compute docs — Docusaurus (AntD-flavored) static site, nginx-served

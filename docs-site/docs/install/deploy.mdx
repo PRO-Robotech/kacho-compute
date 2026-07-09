@@ -1,0 +1,93 @@
+---
+id: deploy
+sidebar_position: 1
+title: Развёртывание
+---
+
+import CodeBlock from '@theme/CodeBlock'
+import dedent from 'ts-dedent'
+
+# Развёртывание
+
+kacho-compute — gRPC-сервис на Go с хранилищем PostgreSQL. Эта страница описывает, как поднять
+сервис: локальный dev-стенд, отдельный запуск и порядок применения миграций. Полный список
+параметров — [Конфигурация](/install/configuration).
+
+## Компоненты
+
+Для работы kacho-compute нужны:
+
+| Компонент | Роль |
+|---|---|
+| PostgreSQL 16 | Хранилище схемы `kacho_compute` |
+| kacho-iam | authz-Check, `ProjectService.Get`, регистрация owner-tuple |
+| kacho-geo | валидация `zoneId` (`ZoneService.Get`) |
+| kacho-vpc | валидация NIC-spec (при работе с сетевыми интерфейсами) |
+| kacho-api-gateway | REST-проекция и маршрутизация операций (для tenant-клиентов) |
+
+Peer-валидацию можно отключить в изолированных сценариях (`KACHO_COMPUTE_SKIP_PEER_VALIDATION=true`)
+— тогда existence-check project/zone/vpc становится no-op (для unit/newman без поднятых peer'ов).
+
+## Локальный dev-стенд
+
+Самый быстрый путь — общий стенд платформы (`kacho-deploy`, kind + helm + Postgres):
+
+<CodeBlock language="bash">
+  {dedent`
+    cd ../kacho-deploy
+    make dev-up                       # поднять стенд (все сервисы + Postgres)
+    make reload-svc SVC=compute       # пересобрать/перезапустить только compute
+    make logs-svc SVC=compute         # логи сервиса
+    make psql SVC=compute             # psql к базе kacho_compute
+  `}
+</CodeBlock>
+
+После `make dev-up` пробросьте api-gateway на локальный порт (например `localhost:18080`) —
+все REST-примеры документации используют этот адрес.
+
+## Порты
+
+| Порт | Listener | Назначение |
+|---|---|---|
+| `:9090` (env `KACHO_COMPUTE_GRPC_PORT`) | public gRPC | Tenant-API (Instance/Disk/Image/Snapshot + read DiskType) |
+| `:9091` (env `KACHO_COMPUTE_INTERNAL_PORT`) | internal gRPC | `InternalDiskTypeService`, `InternalWatchService` (mTLS) |
+| metrics (env `KACHO_COMPUTE_METRICS_ADDR`) | HTTP | Prometheus-метрики, health-пробы |
+
+## Миграции
+
+Схема версионируется goose (встроена в бинарь через embed.FS). При старте сервиса миграции
+применяются к базе `kacho_compute`; `0001_initial.sql` — squashed baseline (все таблицы, FK,
+индексы, seed `disk_types`). Применённые миграции не редактируются — только новые.
+
+:::caution Проверяйте наличие объектов, а не только версию
+При renumbering/hard-cut схемы `goose_db_version` может числить миграцию применённой, хотя
+объекта в базе нет. После нетривиальных изменений схемы сверяйте **фактическое наличие**
+таблиц/колонок (`to_regclass`), а не только `max(version_id)`.
+:::
+
+## Сборка образа docs-site
+
+Документация (этот сайт) собирается отдельным multi-stage образом и отдаётся nginx:
+
+<CodeBlock language="bash">
+  {dedent`
+    cd docs-site
+    docker build -t kacho-compute-docs:dev .   # npm build → nginx (порт 8080)
+  `}
+</CodeBlock>
+
+Helm-чарт docs-site — в `docs-site/deploy/` (`compute-docs`).
+
+## Проверка работоспособности
+
+После старта проверьте доступность через api-gateway (аутентифицированно — unauth-запрос
+отсечёт authz до backend):
+
+<CodeBlock language="bash">
+  {dedent`
+    curl -s http://localhost:18080/compute/v1/diskTypes -H 'Authorization: Bearer <JWT>'
+  `}
+</CodeBlock>
+
+Ответ со списком типов дисков подтверждает, что сервис поднят, база доступна и authz-цепочка
+работает.

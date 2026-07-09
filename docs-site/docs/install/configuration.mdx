@@ -1,0 +1,81 @@
+---
+id: configuration
+sidebar_position: 2
+title: Конфигурация
+---
+
+# Конфигурация
+
+kacho-compute конфигурируется переменными окружения с префиксом `KACHO_COMPUTE_`. Эта страница
+перечисляет ключевые параметры; список отражает конфиг сервиса (`internal/config`).
+
+## Порты и сеть
+
+| Переменная | Назначение |
+|---|---|
+| `KACHO_COMPUTE_GRPC_PORT` | Порт public gRPC-listener'а (tenant-API) |
+| `KACHO_COMPUTE_INTERNAL_PORT` | Порт internal gRPC-listener'а (`Internal*`, mTLS) |
+| `KACHO_COMPUTE_METRICS_ADDR` | Адрес HTTP-эндпоинта метрик и health-проб |
+
+## База данных
+
+| Переменная | Назначение |
+|---|---|
+| `KACHO_COMPUTE_DB_HOST` | Хост PostgreSQL |
+| `KACHO_COMPUTE_DB_PORT` | Порт PostgreSQL |
+| `KACHO_COMPUTE_DB_NAME` | Имя базы (`kacho_compute`) |
+| `KACHO_COMPUTE_DB_USER` | Пользователь БД |
+| `KACHO_COMPUTE_DB_PASSWORD` | Пароль БД |
+| `KACHO_COMPUTE_DB_SSLMODE` | Режим SSL подключения (`require` в проде) |
+| `KACHO_COMPUTE_DB_MAX_CONNS` | Максимум соединений в pgx-пуле |
+
+:::note DSN для миграций
+Пул pgx использует полный DSN, а goose-миграции — отдельный DSN без параметров пула
+(`pool_max_conns` — неизвестный параметр для `database/sql` и вызвал бы FATAL). Это разделение
+уже учтено в конфиге.
+:::
+
+## Peer-сервисы
+
+| Переменная | Назначение |
+|---|---|
+| `KACHO_COMPUTE_IAM_GRPC_ADDR` | Адрес kacho-iam (`ProjectService.Get`, регистрация owner-tuple) |
+| `KACHO_COMPUTE_AUTHZ_IAM_GRPC_ADDR` | Адрес kacho-iam для authz-Check (может отличаться от общего) |
+| `KACHO_COMPUTE_GEO_GRPC_ADDR` | Адрес kacho-geo (`ZoneService.Get`) |
+| `KACHO_COMPUTE_VPC_GRPC_ADDR` | Адрес kacho-vpc (валидация NIC-spec) |
+| `KACHO_COMPUTE_SKIP_PEER_VALIDATION` | `true` → existence-check project/zone/vpc становится no-op (только для локальных тестов) |
+
+## Безопасность (AuthN/AuthZ, mTLS)
+
+| Переменная | Назначение |
+|---|---|
+| `KACHO_COMPUTE_AUTH_MODE` | Режим аутентификации; в проде — production-strict (anonymous fail-closed) |
+| `KACHO_COMPUTE_REQUIRE_IAM` | Boot-gate: требовать доступность kacho-iam при старте (fail-fast) |
+| `KACHO_COMPUTE_AUTHZ_BREAKGLASS` | Аварийный обход authz (используется осознанно; по умолчанию выключен) |
+| `KACHO_COMPUTE_AUTHZ_TRUSTED_FORWARDER_SANS` | Разрешённые SAN доверенного forwarder'а (api-gateway) |
+| `KACHO_COMPUTE_IAM_AUTHZ_MTLS_*` | mTLS для authz-канала к kacho-iam (`ENABLE`/`CERTFILE`/`KEYFILE`/`CAFILES`/`SERVERNAME`) |
+| `KACHO_COMPUTE_IAM_REGISTER_MTLS_*` | mTLS для канала регистрации owner-tuple |
+| `KACHO_COMPUTE_GEO_MTLS_*` | mTLS для канала к kacho-geo |
+
+:::caution Secure-by-default в проде
+Продовый профиль включает mTLS на peer-каналах, production-strict AuthN (anonymous
+fail-closed), `SSLMODE=require` для БД и boot-gate `REQUIRE_IAM`. Плейн-текст/insecure-режимы
+допустимы только для локальной разработки.
+:::
+
+## Фильтрация List и фоновые процессы
+
+| Переменная | Назначение |
+|---|---|
+| `KACHO_COMPUTE_LIST_FILTER_ENABLED` | Включить authz-фильтрацию выдачи `List` (listauthz) |
+| `KACHO_COMPUTE_LIST_FILTER_FAIL_OPEN` | Поведение при недоступности authz во время фильтрации |
+| `KACHO_COMPUTE_LIST_FILTER_TIMEOUT_MS` | Таймаут фильтрации |
+| `KACHO_COMPUTE_LIST_FILTER_CACHE_TTL_MS` / `..._MAX_ENTRIES` | Кэш решений фильтрации |
+| `KACHO_COMPUTE_FGA_REGISTER_DRAINER_ENABLED` | Включить drainer outbox регистрации owner-tuple |
+| `KACHO_COMPUTE_WATCH_MAX_STREAMS` | Лимит одновременных стримов `InternalWatchService.Watch` |
+
+:::note List-filter — CI-гейт
+Публичный `List<Resource>` обязан фильтровать выдачу через listauthz; в проде фильтрация
+включена. `FAIL_OPEN` управляет поведением при недоступности authz-сервиса — в проде выбирайте
+fail-closed для приватности выдачи.
+:::
