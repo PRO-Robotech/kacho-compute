@@ -147,7 +147,7 @@ func TestInstance_Create_CrossProjectInlineImage_NotFound(t *testing.T) {
 	svc, _, _, imgRepo, ops := newInstanceSvc(t, true)
 	imgRepo.Seed(&domain.Image{ID: "ivic", ProjectID: "victim", MinDiskSize: diskSizeMin})
 	req := baseCreateReq() // project "f"
-	req.BootDisk = DiskSourceSpec{NewDiskSizeGiB: diskSizeMin, NewSourceImage: "ivic"}
+	req.BootDisk = DiskSourceSpec{NewDiskSizeBytes: diskSizeMin, NewSourceImage: "ivic"}
 	op, err := svc.Create(context.Background(), req)
 	require.NoError(t, err)
 	done := portmock.AwaitOpDone(t, ops, op.ID)
@@ -163,11 +163,11 @@ func TestInstance_Create_CrossProjectInlineSnapshot_NotFound(t *testing.T) {
 	snapRepo := portmock.NewSnapshotRepo()
 	instanceRepo := portmock.NewInstanceRepo().WithDiskRepo(diskRepo)
 	ops := portmock.NewOpsRepo()
-	svc := NewInstanceService(instanceRepo, diskRepo, imgRepo, snapRepo, portmock.NewZoneRegistry(),
+	svc := NewInstanceService(instanceRepo, diskRepo, imgRepo, snapRepo, portmock.NewDiskTypeRepo(), portmock.NewZoneRegistry(),
 		&portmock.ProjectClient{OK: true}, ops)
 	snapRepo.Seed(&domain.Snapshot{ID: "svic", ProjectID: "victim", DiskSize: diskSizeMin})
 	req := baseCreateReq()
-	req.BootDisk = DiskSourceSpec{NewDiskSizeGiB: diskSizeMin, NewSourceSnap: "svic"}
+	req.BootDisk = DiskSourceSpec{NewDiskSizeBytes: diskSizeMin, NewSourceSnap: "svic"}
 	op, err := svc.Create(context.Background(), req)
 	require.NoError(t, err)
 	done := portmock.AwaitOpDone(t, ops, op.ID)
@@ -180,7 +180,7 @@ func TestInstance_Create_SameProjectInlineImage_OK(t *testing.T) {
 	svc, _, _, imgRepo, ops := newInstanceSvc(t, true)
 	imgRepo.Seed(&domain.Image{ID: "iok", ProjectID: "f", MinDiskSize: diskSizeMin})
 	req := baseCreateReq() // project "f"
-	req.BootDisk = DiskSourceSpec{NewDiskSizeGiB: diskSizeMin, NewSourceImage: "iok"}
+	req.BootDisk = DiskSourceSpec{NewDiskSizeBytes: diskSizeMin, NewSourceImage: "iok"}
 	op, err := svc.Create(context.Background(), req)
 	require.NoError(t, err)
 	done := portmock.AwaitOpDone(t, ops, op.ID)

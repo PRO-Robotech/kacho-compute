@@ -368,7 +368,7 @@ func diskSourceFromSpec(s *computev1.AttachedDiskSpec) svc.DiskSourceSpec {
 		return out
 	}
 	if ds := s.GetDiskSpec(); ds != nil {
-		out.NewDiskSizeGiB = ds.GetSize()
+		out.NewDiskSizeBytes = ds.GetSize()
 		out.NewDiskTypeID = ds.GetTypeId()
 		out.NewSourceImage = ds.GetImageId()
 		out.NewSourceSnap = ds.GetSnapshotId()

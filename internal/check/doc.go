@@ -5,7 +5,8 @@
 //
 // Состав:
 //   - permission_map.go   — RPCMap для всех публичных RPC kacho-compute
-//     (Disk, Image, Snapshot, Instance, DiskType, Zone, Region + Operation).
+//     (Disk, Image, Snapshot, Instance, DiskType + Operation). Region/Zone
+//     serving снят — Geography принадлежит kacho-geo (миграция 0011).
 //     Reference/SetAccessBindings RPC опущены: их аутентификация делается
 //     самой kacho-iam, не повторяем здесь. access-bindings handler-ы в compute
 //     сейчас — no-op скелет.
