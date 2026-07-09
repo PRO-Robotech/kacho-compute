@@ -12,7 +12,6 @@ package handler
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	"google.golang.org/grpc"
@@ -62,9 +61,6 @@ func TenantFromCtx(ctx context.Context) TenantCtx {
 	}
 	return TenantCtx{}
 }
-
-// ErrCrossTenant — sentinel для cross-project access denied.
-var ErrCrossTenant = errors.New("permission denied")
 
 // AssertProjectOwnership — handler-side AuthZ check. PermissionDenied если caller
 // не имеет доступа к project'у. Вызывается в Get/Update/Delete/List после repo.Get.
