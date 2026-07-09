@@ -11,7 +11,7 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
-// TestTenantFromMetadata_ReadsProjectIDHeader locks the post-KAC-106 wire
+// TestTenantFromMetadata_ReadsProjectIDHeader locks the post-project-rename wire
 // contract: caller project-scope is carried by the canonical `x-kacho-project-id`
 // header (matching the renamed project_id model and the kacho-vpc sibling), NOT
 // the vestigial `x-kacho-folder-id`. Reading the wrong header name silently drops
