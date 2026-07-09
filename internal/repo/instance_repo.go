@@ -120,10 +120,11 @@ func (r *InstanceRepo) List(ctx context.Context, f ports.InstanceFilter, p ports
 		nextToken = encodePageToken(last.CreatedAt, last.ID)
 		result = result[:pageSize]
 	}
-	for _, in := range result {
-		if err := r.fillChildren(ctx, r.pool, in); err != nil {
-			return nil, "", err
-		}
+	// Batch children fetch: ONE attached_disks query over all page ids
+	// (WHERE instance_id = ANY(...)) instead of a per-row SELECT (N+1 storm that
+	// held a pool conn for up to page_size serial round-trips).
+	if err := r.fillChildrenBatch(ctx, r.pool, result); err != nil {
+		return nil, "", err
 	}
 	return result, nextToken, nil
 }
@@ -577,6 +578,39 @@ func (r *InstanceRepo) fillChildren(ctx context.Context, q querier, in *domain.I
 
 func (r *InstanceRepo) fillChildrenTx(ctx context.Context, tx pgx.Tx, in *domain.Instance) error {
 	return r.fillChildrenGeneric(ctx, tx, in)
+}
+
+// fillChildrenBatch loads attached_disks for a whole page of instances in a single
+// round-trip (WHERE instance_id = ANY($1)) and groups them in memory, keeping the
+// per-instance ordering (is_boot DESC, attached_at) via the ORDER BY. Same result as
+// calling fillChildren per row, but O(1) queries instead of O(len(instances)).
+func (r *InstanceRepo) fillChildrenBatch(ctx context.Context, q querier, instances []*domain.Instance) error {
+	if len(instances) == 0 {
+		return nil
+	}
+	byID := make(map[string]*domain.Instance, len(instances))
+	ids := make([]string, 0, len(instances))
+	for _, in := range instances {
+		byID[in.ID] = in
+		ids = append(ids, in.ID)
+	}
+	adRows, err := q.Query(ctx, `SELECT instance_id, disk_id, is_boot, mode, device_name, auto_delete, attached_at FROM attached_disks WHERE instance_id = ANY($1) ORDER BY instance_id, is_boot DESC, attached_at`, ids)
+	if err != nil {
+		return wrapPgErr(err, "Instance", "")
+	}
+	defer adRows.Close()
+	for adRows.Next() {
+		var instanceID, modeName string
+		var ad domain.AttachedDisk
+		if err := adRows.Scan(&instanceID, &ad.DiskID, &ad.IsBoot, &modeName, &ad.DeviceName, &ad.AutoDelete, &ad.AttachedAt); err != nil {
+			return wrapPgErr(err, "Instance", instanceID)
+		}
+		ad.Mode = attachedDiskModeFromName(modeName)
+		if in, ok := byID[instanceID]; ok {
+			in.AttachedDisks = append(in.AttachedDisks, ad)
+		}
+	}
+	return wrapPgErr(adRows.Err(), "Instance", "")
 }
 
 func (r *InstanceRepo) fillChildrenGeneric(ctx context.Context, q querier, in *domain.Instance) error {
