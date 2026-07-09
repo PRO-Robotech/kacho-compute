@@ -21,7 +21,7 @@ import (
 // crossTenantCtx — TenantCtx, scoped к folder "f-other" (НЕ владелец ресурса,
 // который сидируется в "f-owner"). Любой project-scoped single-resource RPC,
 // вызванный с этим ctx на ресурс из "f-owner", ДОЛЖЕН вернуть PermissionDenied
-// (AssertFolderOwnership).
+// (AssertProjectOwnership).
 func crossTenantCtx() context.Context {
 	return context.WithValue(context.Background(), tenantCtxKey{},
 		TenantCtx{ProjectIDs: map[string]struct{}{"f-other": {}}})
@@ -34,7 +34,7 @@ const guardOwnerFolder = "f-owner"
 // всех четырёх ресурсных хендлеров: ресурс сидируется в folder "f-owner",
 // вызов идёт с TenantCtx, scoped к "f-other" → ожидается PermissionDenied.
 //
-// Назначение — не regression на текущее (полное) покрытие AssertFolderOwnership,
+// Назначение — не regression на текущее (полное) покрытие AssertProjectOwnership,
 // а STRUCTURAL closure «нельзя добавить project-scoped single-resource RPC, забыв
 // ownership-guard»: любой новый такой метод ОБЯЗАН быть добавлен в таблицу ниже
 // (иначе cross-tenant-leak пройдёт незамеченным). Если метод здесь отсутствует и
@@ -49,7 +49,7 @@ func TestTenantOwnershipGuard_CrossTenantDenied(t *testing.T) {
 	denied := func(t *testing.T, name string, err error) {
 		t.Helper()
 		assert.Equalf(t, codes.PermissionDenied, status.Code(err),
-			"%s: cross-tenant call must be PermissionDenied (AssertFolderOwnership), got err=%v", name, err)
+			"%s: cross-tenant call must be PermissionDenied (AssertProjectOwnership), got err=%v", name, err)
 	}
 
 	// ---- DiskService ----
