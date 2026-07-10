@@ -20,7 +20,30 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/PRO-Robotech/kacho-corelib/grpcsrv"
+	"github.com/PRO-Robotech/kacho-corelib/operations"
 )
+
+// principalForwarded сообщает, несёт ли ctx реальный forwarded end-user principal.
+// api-gateway форвардит identity как `x-kacho-principal-*` (без legacy
+// `x-kacho-project-id`); UnaryTrustedPrincipalExtract кладёт его в стандартный
+// operations-carrier ТОЛЬКО для доверенного forwarder'а (untrusted → scrub до
+// SystemPrincipal). Поэтому запрос с реальным principal тут = trusted principal и
+// НЕ anonymous, даже если tenant-headers пусты. Project-scoping энфорсится ниже —
+// per-object authz-интерсептором (FGA Check) + listFilter, а не этим guard'ом.
+// Зеркалит kacho-iam `authzguard.IsAnonymous` и kacho-vpc `principalForwarded`.
+func principalForwarded(ctx context.Context) bool {
+	p := operations.PrincipalFromContext(ctx)
+	if p.ID == "" || p.Type == "" {
+		return false
+	}
+	if p.Type == "anonymous" || p.ID == "anonymous" {
+		return false
+	}
+	if p.Type == "system" && p.ID == "bootstrap" {
+		return false
+	}
+	return true
+}
 
 type tenantCtxKey struct{}
 
@@ -81,7 +104,7 @@ func TenantUnaryInterceptor(requireAdmin, productionMode bool) grpc.UnaryServerI
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		_, trusted := grpcsrv.TrustedPrincipalFromContext(ctx)
 		t := tenantFromMetadata(ctx, trusted)
-		if productionMode && t.IsAnonymous() {
+		if productionMode && t.IsAnonymous() && !principalForwarded(ctx) {
 			return nil, status.Error(codes.PermissionDenied,
 				"AuthN required (production mode): set x-kacho-* identity headers via gateway")
 		}
@@ -100,7 +123,7 @@ func TenantStreamInterceptor(requireAdmin, productionMode bool) grpc.StreamServe
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		_, trusted := grpcsrv.TrustedPrincipalFromContext(ss.Context())
 		t := tenantFromMetadata(ss.Context(), trusted)
-		if productionMode && t.IsAnonymous() {
+		if productionMode && t.IsAnonymous() && !principalForwarded(ss.Context()) {
 			return status.Error(codes.PermissionDenied,
 				"AuthN required (production mode): set x-kacho-* identity headers via gateway")
 		}
