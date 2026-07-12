@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -32,25 +31,7 @@ import (
 const (
 	insResource = "instance"
 	volResource = "volume"
-	// volumeIDPrefix — 3-char id-prefix storage-Volume ("vol"). Проверяется локально:
-	// compute-пинованный kacho-corelib не знает "vol" в resourceIDPrefixes (Volume —
-	// ресурс kacho-storage), поэтому corevalidate.ResourceID ложно отбил бы валидный
-	// vol-id — используем собственный validateVolumeID (см. ниже).
-	volumeIDPrefix = "vol"
 )
-
-// validateVolumeID — malformed-id гейт storage-Volume (api-conventions: sync
-// InvalidArgument "invalid volume id '<X>'" первым стейтментом RPC). Пустой id —
-// nil (presence гейтится отдельно; DetachDisk использует device_name-arm).
-func validateVolumeID(id string) error {
-	if id == "" {
-		return nil
-	}
-	if !strings.HasPrefix(id, volumeIDPrefix) {
-		return status.Errorf(codes.InvalidArgument, "invalid %s id '%s'", volResource, id)
-	}
-	return nil
-}
 
 // validCoreFractions — допустимые значения core_fraction (конвенция Kachō).
 var validCoreFractions = map[int64]struct{}{0: {}, 5: {}, 20: {}, 50: {}, 100: {}}
@@ -447,7 +428,7 @@ func (s *InstanceService) AttachDisk(ctx context.Context, instanceID string, req
 	if req.VolumeID == "" {
 		return nil, invalidArg("volume_id", "volume_id is required")
 	}
-	if err := validateVolumeID(req.VolumeID); err != nil {
+	if err := corevalidate.ResourceID(volResource, ids.PrefixVolume, req.VolumeID); err != nil {
 		return nil, err
 	}
 	return runOp(ctx, s.opsRepo, fmt.Sprintf("Attach disk to instance %s", instanceID),
@@ -491,7 +472,7 @@ func (s *InstanceService) DetachDisk(ctx context.Context, instanceID, volumeID, 
 	if err := corevalidate.ResourceID(insResource, ids.PrefixInstance, instanceID); err != nil {
 		return nil, err
 	}
-	if err := validateVolumeID(volumeID); err != nil {
+	if err := corevalidate.ResourceID(volResource, ids.PrefixVolume, volumeID); err != nil {
 		return nil, err
 	}
 	return runOp(ctx, s.opsRepo, fmt.Sprintf("Detach disk from instance %s", instanceID),

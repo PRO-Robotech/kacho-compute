@@ -132,6 +132,22 @@ func (f *fakeOwnedOpsRepo) List(_ context.Context, _ operations.ListFilter) ([]o
 	return nil, "", nil
 }
 
+func (f *fakeOwnedOpsRepo) ListOwned(_ context.Context, _ operations.ListFilter, owner operations.Owner) ([]operations.Operation, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.forceErr != nil {
+		return nil, "", f.forceErr
+	}
+	var out []operations.Operation
+	for _, op := range f.ops {
+		if !ownerMatches(op, owner) {
+			continue
+		}
+		out = append(out, *op)
+	}
+	return out, "", nil
+}
+
 func (f *fakeOwnedOpsRepo) MarkDone(_ context.Context, id string, resp *anypb.Any) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

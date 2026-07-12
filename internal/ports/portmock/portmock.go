@@ -993,6 +993,24 @@ func (r *OpsRepo) CancelOwned(_ context.Context, id string, owner operations.Own
 	return &cp, nil
 }
 
+// ListOwned — ownership-scoped листинг: зеркалит List, но AND-ит
+// ownership-предикат (чужие строки не возвращаются, симметрично GetOwned).
+func (r *OpsRepo) ListOwned(_ context.Context, f operations.ListFilter, owner operations.Owner) ([]operations.Operation, string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []operations.Operation
+	for _, op := range r.ops {
+		if !opsOwnerMatches(op, owner) {
+			continue
+		}
+		if f.ResourceID != "" && extractResourceID(op) != f.ResourceID {
+			continue
+		}
+		out = append(out, *op)
+	}
+	return out, "", nil
+}
+
 var _ operations.OwnedOperationRepo = (*OpsRepo)(nil)
 
 // extractResourceID — best-effort извлечение resource_id из metadata

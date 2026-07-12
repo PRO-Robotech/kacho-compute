@@ -87,3 +87,5 @@ require (
 )
 
 replace github.com/PRO-Robotech/kacho-proto => ../kacho-proto
+
+replace github.com/PRO-Robotech/kacho-corelib => ../kacho-corelib
