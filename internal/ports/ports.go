@@ -197,6 +197,72 @@ type NicClient interface {
 	ListByInstance(ctx context.Context, instanceIDs []string) ([]NicAttachment, error)
 }
 
+// VolumeAttachMode — access mode of a volume attachment. Neutral value type
+// (ports imports only domain, never a grpc-stub) mirroring the wire enum
+// storage.v1.VolumeAttachment.Mode by ordinal, so the clients-adapter maps it
+// trivially. UNSPECIFIED(0) → storage defaults to READ_WRITE.
+type VolumeAttachMode int32
+
+const (
+	// VolumeAttachModeUnspecified — mode not set (storage treats as READ_WRITE).
+	VolumeAttachModeUnspecified VolumeAttachMode = 0
+	// VolumeAttachModeReadWrite — read/write attachment.
+	VolumeAttachModeReadWrite VolumeAttachMode = 1
+	// VolumeAttachModeReadOnly — read-only attachment.
+	VolumeAttachModeReadOnly VolumeAttachMode = 2
+)
+
+// VolumeAttachSpec — self-describing volume-attach payload for compute→kacho-storage
+// InternalVolumeService.Attach. compute forwards the instance's zone/name/project +
+// the requested attach parameters so kacho-storage can validate zone/project
+// coherence and perform the atomic attach-CAS against its OWN `volumes` /
+// `volume_attachments` rows — kacho-storage never calls compute back (acyclic edge;
+// the attach-state lives on the storage-side row, compute holds no local attach-state).
+type VolumeAttachSpec struct {
+	VolumeID       string
+	InstanceID     string
+	InstanceName   string
+	InstanceZoneID string
+	ProjectID      string
+	// DeviceName — guest device name, unique within the instance.
+	DeviceName string
+	// IsBoot — whether the volume acts as the persistent root overlay.
+	IsBoot bool
+	// Mode — access mode of the attachment.
+	Mode VolumeAttachMode
+	// AutoDelete — whether the volume is deleted together with the instance.
+	AutoDelete bool
+}
+
+// VolumeAttachmentInfo — a single volume↔Instance attachment (source of truth =
+// kacho-storage Volume / volume_attachments row). Output-only on the compute side;
+// used to build the read-only Instance.attached_disks[] mirror on Get/List and as
+// the confirmed result of Attach. Carries its owning VolumeID (the wire
+// VolumeAttachment sub-record is nested under a Volume; ListAttachments/Attach flatten
+// it with the id attached).
+type VolumeAttachmentInfo struct {
+	VolumeID     string
+	InstanceID   string
+	InstanceName string
+	DeviceName   string
+	IsBoot       bool
+	Mode         VolumeAttachMode
+	AutoDelete   bool
+}
+
+// StorageClient — port for compute→kacho-storage InternalVolumeService (volume↔
+// Instance attach coordination, internal :9091 mTLS). kacho-storage owns the
+// attachment and enforces the atomic attach-CAS + zone/project coherence; compute
+// only forwards a self-describing payload and mirrors the result. Peer unavailable
+// → fail-closed (Unavailable) on the attach/detach mutations. ListAttachments is a
+// best-effort batched read for the Get/List mirror (graceful-degrade — the mirror is
+// omitted when kacho-storage is unreachable, the Instance read itself never fails).
+type StorageClient interface {
+	Attach(ctx context.Context, spec VolumeAttachSpec) (*VolumeAttachmentInfo, error)
+	Detach(ctx context.Context, volumeID, instanceID string) error
+	ListAttachments(ctx context.Context, instanceIDs []string) ([]VolumeAttachmentInfo, error)
+}
+
 // ZoneRegistry — port для existence-check zone_id в Disk.Create / Instance.Create
 // (и Disk.Relocate). Реализуется поверх kacho-geo (geo.v1.ZoneService.Get) через
 // clients.GeoClient — Geography (Region/Zone) принадлежит kacho-geo. GetZone —

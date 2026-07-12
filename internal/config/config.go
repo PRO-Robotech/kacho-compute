@@ -62,6 +62,13 @@ type Config struct {
 	// зеркало опускается).
 	VPCInternalGRPCAddr string `envconfig:"KACHO_COMPUTE_VPC_INTERNAL_GRPC_ADDR" default:"kacho-vpc.kacho.svc.cluster.local:9091"`
 
+	// StorageInternalGRPCAddr — адрес kacho-storage internal listener (:9091) для
+	// InternalVolumeService.Attach/Detach/ListAttachments (volume↔Instance attach-saga).
+	// Internal-only (не external endpoint). Пустое значение → storage-ребро не
+	// сконфигурировано (NoopStorageClient: attach fail-closed Unavailable, зеркало
+	// опускается).
+	StorageInternalGRPCAddr string `envconfig:"KACHO_COMPUTE_STORAGE_INTERNAL_GRPC_ADDR" default:"kacho-storage.kacho.svc.cluster.local:9091"`
+
 	// SkipPeerValidation — отключить cross-service existence-check (folder в
 	// kacho-iam, zone_id в kacho-geo) → no-op. Для unit/newman/load-тестов без
 	// поднятых peer-сервисов.
@@ -183,6 +190,12 @@ type Config struct {
 	// Geo/IAM*MTLS.
 	VPCNicMTLS grpcclient.TLSClient `envconfig:"VPC_NIC_MTLS"`
 
+	// StorageMTLS — client-creds для ребра compute→storage InternalVolumeService
+	// (:9091 internal). Enable=false (default) → insecure (dev backward-compat);
+	// enable=true без валидного cert-trio → startup error (fail-closed) — паритет с
+	// Geo/IAM/VPCNic*MTLS.
+	StorageMTLS grpcclient.TLSClient `envconfig:"STORAGE_MTLS"`
+
 	// PublicServerMTLS — server-creds для публичного listener (:9090, GrpcPort).
 	PublicServerMTLS grpcsrv.TLSServer `envconfig:"PUBLIC_SERVER_MTLS"`
 
@@ -224,6 +237,13 @@ func (c Config) GeoClientCreds() (grpc.DialOption, error) {
 // insecure (dev); enable=true без валидного cert-trio → error (fail-closed).
 func (c Config) VPCNicClientCreds() (grpc.DialOption, error) {
 	return grpcclient.TLSClientCreds(c.VPCNicMTLS)
+}
+
+// StorageClientCreds возвращает grpc.DialOption для ребра compute→storage
+// InternalVolumeService (volume-attach saga, :9091 internal). Enable=false →
+// insecure (dev); enable=true без валидного cert-trio → error (fail-closed).
+func (c Config) StorageClientCreds() (grpc.DialOption, error) {
+	return grpcclient.TLSClientCreds(c.StorageMTLS)
 }
 
 // PublicServerCreds возвращает grpc.ServerOption для публичного listener (:9090).

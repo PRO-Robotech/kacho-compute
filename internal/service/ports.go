@@ -47,4 +47,14 @@ type (
 	NicAttachSpec = ports.NicAttachSpec
 	// NicAttachment — NIC↔Instance binding + addressing mirror.
 	NicAttachment = ports.NicAttachment
+
+	// StorageClient — port для compute→kacho-storage InternalVolumeService
+	// (volume↔Instance attach/detach + batched mirror-read).
+	StorageClient = ports.StorageClient
+	// VolumeAttachSpec — self-describing volume-attach payload.
+	VolumeAttachSpec = ports.VolumeAttachSpec
+	// VolumeAttachmentInfo — volume↔Instance attachment mirror.
+	VolumeAttachmentInfo = ports.VolumeAttachmentInfo
+	// VolumeAttachMode — access mode of a volume attachment.
+	VolumeAttachMode = ports.VolumeAttachMode
 )

@@ -805,6 +805,111 @@ func (c *NicClient) ListByInstance(_ context.Context, instanceIDs []string) ([]p
 	return out, nil
 }
 
+// ---- StorageClient ----
+
+// StorageClient — in-memory fake ports.StorageClient. Models the kacho-storage side
+// of the volume↔Instance attachment: a single-slot-per-volume map with atomic
+// (mutex-serialised) attach — enough to unit-test the compute saga-worker (in-use CAS,
+// idempotent replay, mirror-read) without a live kacho-storage. AttachErrs / Err inject
+// the peer error paths (zone/project-coherence FailedPrecondition, Unavailable fail-closed).
+type StorageClient struct {
+	mu    sync.Mutex
+	byVol map[string]ports.VolumeAttachmentInfo // volumeID → current attachment
+	// AttachErrs — per-volume injected Attach error (zone/project-coherence, in-use, …).
+	AttachErrs map[string]error
+	// Err — global injected error for Attach/Detach/ListAttachments (e.g. Unavailable).
+	Err error
+	// ListErr — injected error for ListAttachments only (mirror graceful-degrade test).
+	ListErr error
+}
+
+// NewStorageClient создаёт пустой fake StorageClient.
+func NewStorageClient() *StorageClient {
+	return &StorageClient{
+		byVol:      make(map[string]ports.VolumeAttachmentInfo),
+		AttachErrs: make(map[string]error),
+	}
+}
+
+// SeedZoneMismatch помечает volume как zone-incoherent — Attach вернёт
+// FailedPrecondition, зеркалит kacho-storage zone-coherence CAS-промах.
+func (c *StorageClient) SeedZoneMismatch(volumeID, msg string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.AttachErrs[volumeID] = grpcstatus.Error(grpccodes.FailedPrecondition, msg)
+}
+
+// Attach атомарно (под mutex) привязывает volume к инстансу: in-use-CAS (чужой
+// инстанс → FailedPrecondition "Volume is in use"), идемпотентный replay
+// (already-ours → OK).
+func (c *StorageClient) Attach(_ context.Context, spec ports.VolumeAttachSpec) (*ports.VolumeAttachmentInfo, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.Err != nil {
+		return nil, c.Err
+	}
+	if e := c.AttachErrs[spec.VolumeID]; e != nil {
+		return nil, e
+	}
+	if ex, ok := c.byVol[spec.VolumeID]; ok {
+		if ex.InstanceID != spec.InstanceID {
+			return nil, grpcstatus.Error(grpccodes.FailedPrecondition, "Volume is in use")
+		}
+		cp := ex
+		return &cp, nil // idempotent replay: already ours
+	}
+	att := ports.VolumeAttachmentInfo{
+		VolumeID:     spec.VolumeID,
+		InstanceID:   spec.InstanceID,
+		InstanceName: spec.InstanceName,
+		DeviceName:   spec.DeviceName,
+		IsBoot:       spec.IsBoot,
+		Mode:         spec.Mode,
+		AutoDelete:   spec.AutoDelete,
+	}
+	c.byVol[spec.VolumeID] = att
+	cp := att
+	return &cp, nil
+}
+
+// Detach идемпотентно снимает привязку volume↔instance (already-free → OK).
+func (c *StorageClient) Detach(_ context.Context, volumeID, instanceID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.Err != nil {
+		return c.Err
+	}
+	if ex, ok := c.byVol[volumeID]; ok && ex.InstanceID == instanceID {
+		delete(c.byVol, volumeID)
+	}
+	return nil
+}
+
+// ListAttachments — batched read volume-привязок по instance-ids.
+func (c *StorageClient) ListAttachments(_ context.Context, instanceIDs []string) ([]ports.VolumeAttachmentInfo, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.ListErr != nil {
+		return nil, c.ListErr
+	}
+	if c.Err != nil {
+		return nil, c.Err
+	}
+	want := make(map[string]struct{}, len(instanceIDs))
+	for _, id := range instanceIDs {
+		want[id] = struct{}{}
+	}
+	var out []ports.VolumeAttachmentInfo
+	for _, a := range c.byVol {
+		if _, ok := want[a.InstanceID]; ok {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+var _ ports.StorageClient = (*StorageClient)(nil)
+
 // ---- operations.Repo ----
 
 // OpsRepo — in-memory реализация kacho-corelib/operations.Repo.
