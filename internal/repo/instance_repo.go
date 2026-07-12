@@ -38,7 +38,8 @@ func NewInstanceRepo(pool *pgxpool.Pool) *InstanceRepo { return &InstanceRepo{po
 const instanceCols = `id, project_id, created_at, name, description, labels, zone_id, platform_id, cores, memory, core_fraction, gpus, ` +
 	`status, metadata, metadata_options, service_account_id, hostname, fqdn, network_settings_type, scheduling_preemptible, ` +
 	`placement_policy, serial_port_ssh_authorization, gpu_cluster_id, hardware_generation, maintenance_policy, ` +
-	`maintenance_grace_period_seconds, reserved_instance_pool_id, host_group_id, host_id, application`
+	`maintenance_grace_period_seconds, reserved_instance_pool_id, host_group_id, host_id, application, ` +
+	`cpu_guarantee_percent, image, image_digest`
 
 // Get возвращает ВМ по id. AttachedDisks НЕ заполняются здесь — это зеркало из
 // kacho-storage, use-case подтягивает его на чтении (graceful-degrade).
@@ -141,7 +142,7 @@ func (r *InstanceRepo) Insert(ctx context.Context, in *domain.Instance) (*domain
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	const qIns = `INSERT INTO instances (` + instanceCols + `)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30) RETURNING ` + instanceCols
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33) RETURNING ` + instanceCols
 	created, err := scanInstance(tx.QueryRow(ctx, qIns, insertArgs...))
 	if err != nil {
 		return nil, wrapPgErr(err, "Instance", in.Name)
@@ -195,6 +196,10 @@ func (r *InstanceRepo) Update(ctx context.Context, in *domain.Instance, emitLabe
 	if _, ok := ch["network_settings"]; ok {
 		us.add("network_settings_type", in.NetworkSettingsType)
 	}
+	if _, ok := ch["image"]; ok {
+		// image (OCI-ref) mutable в любом статусе — re-pin OS-образа не resize.
+		us.add("image", in.Image)
+	}
 	// requireStopped: resize (resources_spec) и replatform (platform_id) разрешены
 	// ТОЛЬКО пока instance STOPPED. Инвариант закрывается на DB-уровне атомарным CAS
 	// `AND status='STOPPED'` в самом UPDATE — НЕ software Get→check→UPDATE.
@@ -204,6 +209,7 @@ func (r *InstanceRepo) Update(ctx context.Context, in *domain.Instance, emitLabe
 		us.add("memory", in.Memory)
 		us.add("core_fraction", in.CoreFraction)
 		us.add("gpus", in.GPUs)
+		us.add("cpu_guarantee_percent", in.CPUGuaranteePercent)
 		requireStopped = true
 	}
 	if _, ok := ch["platform_id"]; ok {
@@ -240,7 +246,7 @@ func (r *InstanceRepo) Update(ctx context.Context, in *domain.Instance, emitLabe
 			if !exists {
 				return nil, fmt.Errorf("%w: Instance %s not found", ports.ErrNotFound, in.ID)
 			}
-			return nil, fmt.Errorf("%w: Instance must be stopped", ports.ErrFailedPrecondition)
+			return nil, fmt.Errorf("%w: Instance must be STOPPED to change sizing", ports.ErrFailedPrecondition)
 		}
 		return nil, wrapPgErr(err, "Instance", in.ID)
 	}
@@ -475,6 +481,7 @@ func instanceInsertArgs(in *domain.Instance) ([]any, error) {
 		instanceStatusName(in.Status), mdJSON, mdOptJSON, in.ServiceAccountID, in.Hostname, in.FQDN, in.NetworkSettingsType, in.SchedulingPreemptible,
 		ppJSON, in.SerialPortSSHAuthorization, in.GPUClusterID, hgJSON, in.MaintenancePolicy,
 		in.MaintenanceGracePeriodSeconds, in.ReservedInstancePoolID, in.HostGroupID, in.HostID, appJSON,
+		in.CPUGuaranteePercent, in.Image, in.ImageDigest,
 	}, nil
 }
 
@@ -487,6 +494,7 @@ func scanInstance(row scannable) (*domain.Instance, error) {
 		&statusName, &mdJSON, &mdOptJSON, &in.ServiceAccountID, &in.Hostname, &in.FQDN, &in.NetworkSettingsType, &in.SchedulingPreemptible,
 		&ppJSON, &in.SerialPortSSHAuthorization, &in.GPUClusterID, &hgJSON, &in.MaintenancePolicy,
 		&in.MaintenanceGracePeriodSeconds, &in.ReservedInstancePoolID, &in.HostGroupID, &in.HostID, &appJSON,
+		&in.CPUGuaranteePercent, &in.Image, &in.ImageDigest,
 	); err != nil {
 		return nil, err
 	}

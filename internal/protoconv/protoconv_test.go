@@ -152,3 +152,21 @@ func TestInstanceMessage_HasNoHostPlacementField(t *testing.T) {
 			"suspicious host-placement field on public Instance: %q", name)
 	}
 }
+
+// TestInstance_ProjectsCPUGuaranteeAndImage — S5-03/05: protoconv проецирует
+// cpu_guarantee_percent / image / image_digest из domain на публичный Instance.
+func TestInstance_ProjectsCPUGuaranteeAndImage(t *testing.T) {
+	in := &domain.Instance{
+		ID:                  "epd0000000000000000",
+		ProjectID:           "prj0000000000000000",
+		Name:                "vm-cpu",
+		Status:              domain.InstanceStatusRunning,
+		CPUGuaranteePercent: 50,
+		Image:               "cr.kacho.cloud/library/ubuntu:24.04",
+		ImageDigest:         "sha256:deadbeef",
+	}
+	out := protoconv.Instance(in)
+	assert.Equal(t, int32(50), out.GetCpuGuaranteePercent())
+	assert.Equal(t, "cr.kacho.cloud/library/ubuntu:24.04", out.GetImage())
+	assert.Equal(t, "sha256:deadbeef", out.GetImageDigest())
+}

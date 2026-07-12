@@ -72,6 +72,8 @@ type CreateInstanceReq struct {
 	Memory              int64
 	CoreFraction        int64
 	GPUs                int64
+	CPUGuaranteePercent int32
+	Image               string
 	Metadata            map[string]string
 	MetadataOptions     *computev1.MetadataOptions
 	Hostname            string
@@ -94,6 +96,8 @@ type UpdateInstanceReq struct {
 	Memory              int64
 	CoreFraction        int64
 	GPUs                int64
+	CPUGuaranteePercent int32
+	Image               string
 	PlatformID          string
 	PlacementPolicy     *computev1.PlacementPolicy
 	NetworkSettingsType string
@@ -183,7 +187,7 @@ func ValidateCreateInstanceReq(req CreateInstanceReq) error {
 	if err := corevalidate.Labels("labels", req.Labels); err != nil {
 		return err
 	}
-	if err := validateResources(req.Cores, req.Memory, req.CoreFraction); err != nil {
+	if err := validateResources(req.Cores, req.Memory, req.CoreFraction, req.CPUGuaranteePercent); err != nil {
 		return err
 	}
 	return nil
@@ -212,18 +216,22 @@ func (s *InstanceService) doCreate(ctx context.Context, instanceID string, req C
 	}
 
 	in := &domain.Instance{
-		ID:                    instanceID,
-		ProjectID:             req.ProjectID,
-		CreatedAt:             time.Now().UTC(),
-		Name:                  req.Name,
-		Description:           req.Description,
-		Labels:                req.Labels,
-		ZoneID:                req.ZoneID,
-		PlatformID:            req.PlatformID,
-		Cores:                 req.Cores,
-		Memory:                req.Memory,
-		CoreFraction:          defaultCoreFraction(req.CoreFraction),
-		GPUs:                  req.GPUs,
+		ID:                  instanceID,
+		ProjectID:           req.ProjectID,
+		CreatedAt:           time.Now().UTC(),
+		Name:                req.Name,
+		Description:         req.Description,
+		Labels:              req.Labels,
+		ZoneID:              req.ZoneID,
+		PlatformID:          req.PlatformID,
+		Cores:               req.Cores,
+		Memory:              req.Memory,
+		CoreFraction:        defaultCoreFraction(req.CoreFraction),
+		GPUs:                req.GPUs,
+		CPUGuaranteePercent: req.CPUGuaranteePercent,
+		Image:               req.Image,
+		// ImageDigest остаётся пустым: registry-resolve отложен (acceptance sec.0.3 —
+		// digest не резолвим на этой фазе; output-only поле заполнит later slice).
 		Status:                domain.InstanceStatusRunning, // control-plane: PROVISIONING→RUNNING instantly
 		Metadata:              req.Metadata,
 		MetadataOptions:       req.MetadataOptions,
@@ -235,6 +243,11 @@ func (s *InstanceService) doCreate(ctx context.Context, instanceID string, req C
 		PlacementPolicy:       req.PlacementPolicy,
 		HardwareGeneration:    req.HardwareGeneration,
 		Application:           req.Application,
+	}
+	// Self-validating domain invariant на persistence-границе (last-line guard;
+	// формат уже проверен sync ValidateCreateInstanceReq).
+	if err := in.Validate(); err != nil {
+		return nil, invalidArg("resources_spec.cpu_guarantee_percent", "Illegal argument cpu_guarantee_percent")
 	}
 	created, err := s.repo.Insert(ctx, in)
 	if err != nil {
@@ -261,7 +274,7 @@ func (s *InstanceService) Update(ctx context.Context, req UpdateInstanceReq) (*o
 			updates := req.UpdateMask
 			full := len(updates) == 0
 			if full {
-				updates = []string{"name", "description", "labels", "service_account_id", "placement_policy", "network_settings"}
+				updates = []string{"name", "description", "labels", "service_account_id", "placement_policy", "network_settings", "image"}
 			}
 			touchesCompute := false
 			labelsInMask := false
@@ -289,13 +302,18 @@ func (s *InstanceService) Update(ctx context.Context, req UpdateInstanceReq) (*o
 						in.NetworkSettingsType = req.NetworkSettingsType
 						changed = append(changed, "network_settings")
 					}
+				case "image":
+					// image (OCI-ref) mutable в любом статусе — re-pin, не sizing.
+					in.Image = req.Image
+					changed = append(changed, "image")
 				case "resources_spec":
 					if !full {
 						touchesCompute = true
-						if err := validateResources(req.Cores, req.Memory, req.CoreFraction); err != nil {
+						if err := validateResources(req.Cores, req.Memory, req.CoreFraction, req.CPUGuaranteePercent); err != nil {
 							return nil, err
 						}
 						in.Cores, in.Memory, in.CoreFraction, in.GPUs = req.Cores, req.Memory, defaultCoreFraction(req.CoreFraction), req.GPUs
+						in.CPUGuaranteePercent = req.CPUGuaranteePercent
 						changed = append(changed, "resources_spec")
 					}
 				case "platform_id":
@@ -307,7 +325,7 @@ func (s *InstanceService) Update(ctx context.Context, req UpdateInstanceReq) (*o
 				}
 			}
 			if touchesCompute && in.Status != domain.InstanceStatusStopped {
-				return nil, status.Error(codes.FailedPrecondition, "Instance must be stopped")
+				return nil, status.Error(codes.FailedPrecondition, "Instance must be STOPPED to change sizing")
 			}
 			updated, err := s.repo.Update(ctx, in, labelsInMask, changed)
 			if err != nil {
@@ -320,14 +338,15 @@ func (s *InstanceService) Update(ctx context.Context, req UpdateInstanceReq) (*o
 func validateInstanceUpdate(req UpdateInstanceReq) error {
 	known := map[string]struct{}{
 		"name": {}, "description": {}, "labels": {}, "service_account_id": {},
-		"placement_policy": {}, "network_settings": {},
+		"placement_policy": {}, "network_settings": {}, "image": {},
 		"resources_spec": {}, "platform_id": {},
 	}
 	for _, f := range req.UpdateMask {
 		switch f {
 		case "zone_id", "boot_disk", "boot_volume", "secondary_volumes", "network_interfaces", "metadata":
 			return invalidArg(f, f+" is immutable after Instance.Create (use AttachDisk/UpdateMetadata/Relocate)")
-		case "scheduling_policy", "metadata_options":
+		case "scheduling_policy", "metadata_options", "image_digest":
+			// image_digest — output-only resolved digest, не принимается на вход Update.
 			return invalidArg(f, f+" is immutable after Instance.Create")
 		}
 	}
@@ -687,7 +706,7 @@ func volumeMirror(atts []VolumeAttachmentInfo) []domain.AttachedDisk {
 // protoreflectMessage — alias для proto.Message (operations.New принимает его).
 type protoreflectMessage = proto.Message
 
-func validateResources(cores, memory, coreFraction int64) error {
+func validateResources(cores, memory, coreFraction int64, cpuGuaranteePercent int32) error {
 	if cores <= 0 {
 		return invalidArg("resources_spec.cores", "cores must be > 0")
 	}
@@ -698,6 +717,9 @@ func validateResources(cores, memory, coreFraction int64) error {
 		if _, ok := validCoreFractions[coreFraction]; !ok {
 			return invalidArg("resources_spec.core_fraction", "core_fraction must be one of 0, 5, 20, 50, 100")
 		}
+	}
+	if !domain.ValidCPUGuaranteePercent(cpuGuaranteePercent) {
+		return invalidArg("resources_spec.cpu_guarantee_percent", "Illegal argument cpu_guarantee_percent")
 	}
 	return nil
 }

@@ -131,9 +131,11 @@ func CreateReqFromProto(req *computev1.CreateInstanceRequest) svc.CreateInstance
 		ServiceAccountID: req.ServiceAccountId,
 		PlacementPolicy:  req.PlacementPolicy,
 		Application:      req.Application,
+		Image:            req.Image,
 	}
 	if rs := req.ResourcesSpec; rs != nil {
 		cr.Cores, cr.Memory, cr.CoreFraction, cr.GPUs = rs.Cores, rs.Memory, rs.CoreFraction, rs.Gpus
+		cr.CPUGuaranteePercent = rs.CpuGuaranteePercent
 	}
 	if sp := req.SchedulingPolicy; sp != nil {
 		cr.Preemptible = sp.Preemptible
@@ -168,10 +170,12 @@ func (h *InstanceHandler) Update(ctx context.Context, req *computev1.UpdateInsta
 		ServiceAccountID: req.ServiceAccountId,
 		PlatformID:       req.PlatformId,
 		PlacementPolicy:  req.PlacementPolicy,
+		Image:            req.Image,
 		UpdateMask:       mask,
 	}
 	if rs := req.ResourcesSpec; rs != nil {
 		ur.Cores, ur.Memory, ur.CoreFraction, ur.GPUs = rs.Cores, rs.Memory, rs.CoreFraction, rs.Gpus
+		ur.CPUGuaranteePercent = rs.CpuGuaranteePercent
 	}
 	if ns := req.NetworkSettings; ns != nil {
 		ur.NetworkSettingsType = ns.Type.String()
