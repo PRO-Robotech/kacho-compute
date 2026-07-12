@@ -4,11 +4,14 @@
 """Case-set для InstanceService (kacho-compute) — самый большой ресурс.
 
 Covered RPCs: Get, List, Create, Update, Delete, Start, Stop, Restart, ListOperations,
-AttachDisk, DetachDisk, UpdateMetadata, GetSerialPortOutput, SimulateMaintenanceEvent.
+AttachDisk, DetachDisk, AttachNetworkInterface, DetachNetworkInterface, UpdateMetadata,
+GetSerialPortOutput, SimulateMaintenanceEvent.
 (AttachFilesystem/DetachFilesystem — blocked:kacho-filesystem; Relocate — blocked;
-Move — removed KAC-266; AttachNetworkInterface/DetachNetworkInterface/UpdateNetworkInterface /
-AddOneToOneNat/RemoveOneToOneNat — NIC binding removed from the Instance lifecycle (KAC-266,
-no auto-NIC): Instance.Create no longer creates or attaches any network interface;
+Move — removed KAC-266. NIC model (S4): Instance.Create no longer creates any NIC
+(no auto-NIC), but AttachNetworkInterface/DetachNetworkInterface BIND/UNBIND an existing
+kacho-vpc NetworkInterface (NIC first-class in kacho-vpc) to the instance — see INST-NIC-*
+cases below. UpdateNetworkInterface/AddOneToOneNat/RemoveOneToOneNat stay Unimplemented
+(NIC addressing/NAT is edited via kacho-vpc directly, not via Instance);
 access-bindings — no-op skip.)
 
 Cross-service: project_id → kacho-iam. При KACHO_COMPUTE_SKIP_PEER_VALIDATION=true cross-service
@@ -127,7 +130,7 @@ CASES.append(Case(
                           "pm.test('platformId matches', () => pm.expect(j.platformId).to.eql(pm.environment.get('existingPlatformId')));",
                           "pm.test('status RUNNING', () => pm.expect(j.status).to.eql('RUNNING'));",
                           "pm.test('fqdn set', () => pm.expect(j.fqdn).to.be.a('string').and.length.greaterThan(0));",
-                          "pm.test('bootDisk present with diskId', () => pm.expect(j.bootDisk && j.bootDisk.diskId).to.be.a('string').and.match(/^epd/));",
+                          "pm.test('bootDisk present with volumeId', () => pm.expect(j.bootDisk && j.bootDisk.volumeId).to.be.a('string').and.match(/^epd/));",
                           "pm.test('resources cores=2', () => pm.expect(String(j.resources && j.resources.cores)).to.eql('2'));",
                           "pm.test('no NIC (auto-NIC removed KAC-266)', () => pm.expect((j.networkInterfaces || []).length).to.eql(0));",
                           *assert_created_at_seconds()]),
@@ -167,13 +170,13 @@ CASES.append(Case(
         # # requires kacho-vpc subnet {{existingSubnetId}}
         *_create_disk_steps("instbootid", save_as="bootDiskId", size=_BOOT_SIZE),
         Step(name="create", method="POST", path=INSTANCES,
-             body=_instance_body("crbd", boot_disk_spec={"autoDelete": False, "diskId": "{{bootDiskId}}"}),
+             body=_instance_body("crbd", boot_disk_spec={"autoDelete": False, "volumeId": "{{bootDiskId}}"}),
              test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
                           *save_from_response("j.metadata && j.metadata.instanceId", "instanceId")]),
         poll_operation_until_done(), assert_op_success(),
         Step(name="get", method="GET", path=f"{INSTANCES}/{{{{instanceId}}}}",
              test_script=[*assert_status(200),
-                          "pm.test('bootDisk.diskId == bootDiskId', () => pm.expect(pm.response.json().bootDisk && pm.response.json().bootDisk.diskId).to.eql(pm.environment.get('bootDiskId')));"]),
+                          "pm.test('bootDisk.volumeId == bootDiskId', () => pm.expect(pm.response.json().bootDisk && pm.response.json().bootDisk.volumeId).to.eql(pm.environment.get('bootDiskId')));"]),
         *_delete_instance_steps(),
         # autoDelete=false → диск остался → почистить
         *_delete_disk_steps(var="bootDiskId", name="cleanup-boot-disk"),
@@ -277,7 +280,7 @@ CASES.append(Case(
     title="Create instance с boot_disk_spec где и disk_id, и disk_spec → 400 InvalidArgument (exactly one of)",
     classes=["VAL", "NEG"], priority="P1",
     steps=[Step(name="cr-both-bootdisk", method="POST", path=INSTANCES,
-                body=_instance_body("bd2", boot_disk_spec={"autoDelete": True, "diskId": "{{garbageComputeId}}",
+                body=_instance_body("bd2", boot_disk_spec={"autoDelete": True, "volumeId": "{{garbageComputeId}}",
                                                            "diskSpec": {"name": "bd-x-{{runId}}", "size": _BOOT_SIZE}}),
                 test_script=[*assert_status(400), *assert_grpc_code(3, "INVALID_ARGUMENT")])],
 ))
@@ -572,16 +575,16 @@ CASES.append(Case(
         *_create_instance_steps("adok"),
         *_create_disk_steps("adok-extra", save_as="extraDiskId"),
         Step(name="attach", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}:attachDisk",
-             body={"attachedDiskSpec": {"autoDelete": False, "diskId": "{{extraDiskId}}"}},
+             body={"attachedDiskSpec": {"autoDelete": False, "volumeId": "{{extraDiskId}}"}},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
-                          "pm.test('metadata has diskId', () => pm.expect(pm.response.json().metadata && pm.response.json().metadata.diskId).to.eql(pm.environment.get('extraDiskId')));"]),
+                          "pm.test('metadata has volumeId', () => pm.expect(pm.response.json().metadata && pm.response.json().metadata.volumeId).to.eql(pm.environment.get('extraDiskId')));"]),
         poll_operation_until_done(), assert_op_success(),
         Step(name="verify", method="GET", path=f"{INSTANCES}/{{{{instanceId}}}}",
              test_script=[*assert_status(200),
-                          "const ids = (pm.response.json().secondaryDisks || []).map(d => d.diskId);",
+                          "const ids = (pm.response.json().secondaryDisks || []).map(d => d.volumeId);",
                           "pm.test('secondaryDisks contains extra disk', () => pm.expect(ids).to.include(pm.environment.get('extraDiskId')));"]),
         # detach before delete (disk autoDelete=false)
-        Step(name="detach", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}:detachDisk", body={"diskId": "{{extraDiskId}}"},
+        Step(name="detach", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}:detachDisk", body={"volumeId": "{{extraDiskId}}"},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
         poll_operation_until_done(),
         *_delete_disk_steps(var="extraDiskId"),
@@ -598,7 +601,7 @@ CASES.append(Case(
         *_create_instance_steps("adwz"),
         *_create_disk_steps("adwz-alt", save_as="extraDiskId", zone="{{existingZoneAltId}}"),
         Step(name="attach-wrong-zone", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}:attachDisk",
-             body={"attachedDiskSpec": {"autoDelete": False, "diskId": "{{extraDiskId}}"}},
+             body={"attachedDiskSpec": {"autoDelete": False, "volumeId": "{{extraDiskId}}"}},
              test_script=["pm.test('rejected (400 sync or 200+op-error)', () => pm.expect(pm.response.code).to.be.oneOf([200, 400]));",
                           *save_from_response("j.id", "opId"),
                           "if (pm.response.code === 400) { pm.test('code 3 or 9', () => pm.expect(pm.response.json().code).to.be.oneOf([3, 9])); }"]),
@@ -622,11 +625,11 @@ CASES.append(Case(
         *_create_instance_steps("adaa"),
         *_create_disk_steps("adaa-extra", save_as="extraDiskId"),
         Step(name="attach-1", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}:attachDisk",
-             body={"attachedDiskSpec": {"autoDelete": False, "diskId": "{{extraDiskId}}"}},
+             body={"attachedDiskSpec": {"autoDelete": False, "volumeId": "{{extraDiskId}}"}},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
         poll_operation_until_done(), assert_op_success(),
         Step(name="attach-2-dup", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}:attachDisk",
-             body={"attachedDiskSpec": {"autoDelete": False, "diskId": "{{extraDiskId}}"}},
+             body={"attachedDiskSpec": {"autoDelete": False, "volumeId": "{{extraDiskId}}"}},
              test_script=["pm.test('rejected (400 sync or 200+op-error)', () => pm.expect(pm.response.code).to.be.oneOf([200, 400]));",
                           *save_from_response("j.id", "opId"),
                           "if (pm.response.code === 400) { pm.test('code 3 or 9', () => pm.expect(pm.response.json().code).to.be.oneOf([3, 9])); }"]),
@@ -636,7 +639,7 @@ CASES.append(Case(
                           "pm.test('done', () => pm.expect(j.done).to.eql(true));",
                           "pm.test('op-error present (rejected)', () => pm.expect(Boolean(j.error), JSON.stringify(j)).to.eql(true));",
                           "pm.test('op-error code 3 or 9', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.be.oneOf([3, 9]));"]),
-        Step(name="detach", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}:detachDisk", body={"diskId": "{{extraDiskId}}"},
+        Step(name="detach", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}:detachDisk", body={"volumeId": "{{extraDiskId}}"},
              test_script=[*save_from_response("j.id", "opId")]),
         poll_operation_until_done(),
         *_delete_disk_steps(var="extraDiskId"),
@@ -653,15 +656,15 @@ CASES.append(Case(
         *_create_instance_steps("ddok"),
         *_create_disk_steps("ddok-extra", save_as="extraDiskId"),
         Step(name="attach", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}:attachDisk",
-             body={"attachedDiskSpec": {"autoDelete": False, "diskId": "{{extraDiskId}}"}},
+             body={"attachedDiskSpec": {"autoDelete": False, "volumeId": "{{extraDiskId}}"}},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
         poll_operation_until_done(), assert_op_success(),
-        Step(name="detach", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}:detachDisk", body={"diskId": "{{extraDiskId}}"},
+        Step(name="detach", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}:detachDisk", body={"volumeId": "{{extraDiskId}}"},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
         poll_operation_until_done(), assert_op_success(),
         Step(name="verify", method="GET", path=f"{INSTANCES}/{{{{instanceId}}}}",
              test_script=[*assert_status(200),
-                          "const ids = (pm.response.json().secondaryDisks || []).map(d => d.diskId);",
+                          "const ids = (pm.response.json().secondaryDisks || []).map(d => d.volumeId);",
                           "pm.test('secondaryDisks no longer contains extra disk', () => pm.expect(ids).to.not.include(pm.environment.get('extraDiskId')));"]),
         *_delete_disk_steps(var="extraDiskId"),
         *_delete_instance_steps(),
@@ -676,8 +679,8 @@ CASES.append(Case(
         # # requires kacho-vpc subnet {{existingSubnetId}}
         *_create_instance_steps("ddboot"),
         Step(name="get-boot-id", method="GET", path=f"{INSTANCES}/{{{{instanceId}}}}",
-             test_script=[*assert_status(200), *save_from_response("pm.response.json().bootDisk && pm.response.json().bootDisk.diskId", "bootDiskId")]),
-        Step(name="detach-boot", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}:detachDisk", body={"diskId": "{{bootDiskId}}"},
+             test_script=[*assert_status(200), *save_from_response("pm.response.json().bootDisk && pm.response.json().bootDisk.volumeId", "bootDiskId")]),
+        Step(name="detach-boot", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}:detachDisk", body={"volumeId": "{{bootDiskId}}"},
              # probe-needed: точный текст "Cannot detach boot disk". Может быть sync 400 или async op-error code 9.
              test_script=["pm.test('rejected (400 sync or 200+op-error)', () => pm.expect(pm.response.code).to.be.oneOf([200, 400]));",
                           *save_from_response("j.id", "opId"),
@@ -689,7 +692,7 @@ CASES.append(Case(
                           "pm.test('op-error present (rejected)', () => pm.expect(Boolean(j.error), JSON.stringify(j)).to.eql(true));",
                           "pm.test('op-error code 9 (FAILED_PRECONDITION)', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(9));"]),
         Step(name="verify-still-running", method="GET", path=f"{INSTANCES}/{{{{instanceId}}}}",
-             test_script=[*assert_status(200), "pm.test('bootDisk still present', () => pm.expect(pm.response.json().bootDisk && pm.response.json().bootDisk.diskId).to.eql(pm.environment.get('bootDiskId')));"]),
+             test_script=[*assert_status(200), "pm.test('bootDisk still present', () => pm.expect(pm.response.json().bootDisk && pm.response.json().bootDisk.volumeId).to.eql(pm.environment.get('bootDiskId')));"]),
         *_delete_instance_steps(),
     ],
 ))
@@ -702,7 +705,7 @@ CASES.append(Case(
         # # requires kacho-vpc subnet {{existingSubnetId}}
         *_create_instance_steps("ddna"),
         *_create_disk_steps("ddna-loose", save_as="extraDiskId"),
-        Step(name="detach-loose", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}:detachDisk", body={"diskId": "{{extraDiskId}}"},
+        Step(name="detach-loose", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}:detachDisk", body={"volumeId": "{{extraDiskId}}"},
              test_script=["pm.test('rejected (400 sync or 200+op-error)', () => pm.expect(pm.response.code).to.be.oneOf([200, 400]));",
                           *save_from_response("j.id", "opId"),
                           "if (pm.response.code === 400) { pm.test('code 3 or 9', () => pm.expect(pm.response.json().code).to.be.oneOf([3, 9])); }"]),
@@ -730,7 +733,7 @@ CASES.append(Case(
         *_create_instance_steps("dkdel"),
         *_create_disk_steps("dkdel-extra", save_as="extraDiskId"),
         Step(name="attach", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}:attachDisk",
-             body={"attachedDiskSpec": {"autoDelete": False, "diskId": "{{extraDiskId}}"}},
+             body={"attachedDiskSpec": {"autoDelete": False, "volumeId": "{{extraDiskId}}"}},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
         poll_operation_until_done(), assert_op_success(),
         # Disk.Delete while attached → FailedPrecondition (FK attached_disks RESTRICT on disk_id)
@@ -748,7 +751,7 @@ CASES.append(Case(
         Step(name="disk-still-there", method="GET", path=f"{DISKS}/{{{{extraDiskId}}}}",
              test_script=[*assert_status(200), "pm.test('disk still exists', () => pm.expect(pm.response.json().id).to.eql(pm.environment.get('extraDiskId')));"]),
         # Detach → Delete OK
-        Step(name="detach", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}:detachDisk", body={"diskId": "{{extraDiskId}}"},
+        Step(name="detach", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}:detachDisk", body={"volumeId": "{{extraDiskId}}"},
              test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
         poll_operation_until_done(), assert_op_success(),
         Step(name="del-disk-now", method="DELETE", path=f"{DISKS}/{{{{extraDiskId}}}}",
@@ -892,7 +895,7 @@ CASES.append(Case(
         # # requires kacho-vpc subnet {{existingSubnetId}}
         *_create_instance_steps("delad"),
         Step(name="get-boot-id", method="GET", path=f"{INSTANCES}/{{{{instanceId}}}}",
-             test_script=[*assert_status(200), *save_from_response("pm.response.json().bootDisk && pm.response.json().bootDisk.diskId", "bootDiskId")]),
+             test_script=[*assert_status(200), *save_from_response("pm.response.json().bootDisk && pm.response.json().bootDisk.volumeId", "bootDiskId")]),
         Step(name="del", method="DELETE", path=f"{INSTANCES}/{{{{instanceId}}}}",
              test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
         poll_operation_until_done(), assert_op_success(),
@@ -909,7 +912,7 @@ CASES.append(Case(
         # # requires kacho-vpc subnet {{existingSubnetId}}
         *_create_disk_steps("delnoad-boot", save_as="bootDiskId", size=_BOOT_SIZE),
         Step(name="create", method="POST", path=INSTANCES,
-             body=_instance_body("delnoad", boot_disk_spec={"autoDelete": False, "diskId": "{{bootDiskId}}"}),
+             body=_instance_body("delnoad", boot_disk_spec={"autoDelete": False, "volumeId": "{{bootDiskId}}"}),
              test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
                           *save_from_response("j.metadata && j.metadata.instanceId", "instanceId")]),
         poll_operation_until_done(), assert_op_success(),
@@ -1041,8 +1044,129 @@ CASES.extend(security_injection_block(
 # CASES.append(...)  # blocked:kacho-filesystem
 # blocked: Relocate — нужен cross-zone disk move + cross-service.
 # CASES.append(...)  # blocked
-# KAC-266: AttachNetworkInterface / DetachNetworkInterface / UpdateNetworkInterface /
-# AddOneToOneNat / RemoveOneToOneNat — NIC binding removed from the Instance lifecycle
-# (no auto-NIC). Instance.Create no longer creates/attaches network interfaces, so the
-# NIC-coupled RPC cases were removed. The proto still declares these RPCs (they are
-# inherited Unimplemented) — proto-level cleanup is tracked separately (see KAC-266 notes).
+# UpdateNetworkInterface / AddOneToOneNat / RemoveOneToOneNat — Unimplemented
+# (NIC addressing/NAT редактируется через kacho-vpc NetworkInterface напрямую, не через
+# Instance). AttachNetworkInterface / DetachNetworkInterface — реализованы (S4), кейсы ниже.
+
+# ===========================================================================
+# INST-NIC — AttachNetworkInterface / DetachNetworkInterface (S4)
+# NIC — first-class kacho-vpc ресурс (prefix "nic"); эти RPC ПРИВЯЗЫВАЮТ существующий
+# NIC к инстансу (несколько NIC на инстанс; авто-slot при index==0). kacho-vpc владеет
+# привязкой и энфорсит zone-coherence; compute держит ноль local attach-state.
+# ===========================================================================
+
+_NICS = "/vpc/v1/networkInterfaces"
+
+
+def _create_nic_steps(suffix, save_as="nicId"):
+    """Создать kacho-vpc NIC в existingSubnetId (zone == existingZoneId), сохранить id."""
+    return [
+        Step(name=f"cr-nic-{suffix}", method="POST", path=_NICS,
+             body={"projectId": "{{_suiteFolderId}}", "name": f"nic-{suffix}-{{{{runId}}}}",
+                   "subnetId": "{{existingSubnetId}}"},
+             test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
+                          *save_from_response("j.metadata && j.metadata.networkInterfaceId", save_as)]),
+        poll_operation_until_done(), assert_op_success(),
+    ]
+
+
+def _delete_nic_steps(var="nicId", name="cleanup-nic"):
+    return [
+        Step(name=name, method="DELETE", path=f"{_NICS}/{{{{{var}}}}}",
+             test_script=[*save_from_response("j.id", "opId")]),
+        poll_operation_until_done(),
+    ]
+
+
+CASES.append(Case(
+    id="INST-NIC-AD-CRUD-OK",
+    title="AttachNetworkInterface: create instance + kacho-vpc NIC → attach → Get networkInterfaces содержит nic (index 0) → detach → зеркало пусто",
+    classes=["CRUD", "STATE"], priority="P0",
+    steps=[
+        # # requires kacho-vpc subnet {{existingSubnetId}} в зоне {{existingZoneId}}
+        *_create_instance_steps("nicad"),
+        *_create_nic_steps("nicad"),
+        Step(name="attach-nic", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}:attachNetworkInterface",
+             body={"attachedNicSpec": {"nicId": "{{nicId}}"}},
+             test_script=[*assert_status(200), *assert_operation_envelope(), *save_from_response("j.id", "opId"),
+                          "pm.test('metadata has nicId', () => pm.expect(pm.response.json().metadata && pm.response.json().metadata.nicId).to.eql(pm.environment.get('nicId')));"]),
+        poll_operation_until_done(), assert_op_success(),
+        Step(name="verify-attached", method="GET", path=f"{INSTANCES}/{{{{instanceId}}}}",
+             test_script=[*assert_status(200),
+                          "const nics = pm.response.json().networkInterfaces || [];",
+                          "pm.test('mirror has 1 NIC', () => pm.expect(nics.length).to.eql(1));",
+                          "pm.test('NIC id matches', () => pm.expect(nics[0] && nics[0].nicId).to.eql(pm.environment.get('nicId')));",
+                          "pm.test('NIC slot index 0', () => pm.expect(String(nics[0] && nics[0].index)).to.eql('0'));"]),
+        Step(name="detach-nic", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}:detachNetworkInterface",
+             body={"nicId": "{{nicId}}"},
+             test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
+        poll_operation_until_done(), assert_op_success(),
+        Step(name="verify-detached", method="GET", path=f"{INSTANCES}/{{{{instanceId}}}}",
+             test_script=[*assert_status(200),
+                          "pm.test('mirror empty after detach', () => pm.expect((pm.response.json().networkInterfaces || []).length).to.eql(0));"]),
+        *_delete_nic_steps(),
+        *_delete_instance_steps(),
+    ],
+))
+
+CASES.append(Case(
+    id="INST-NIC-DD-BYINDEX-IDEMPOTENT-OK",
+    title="DetachNetworkInterface: attach → detach по slot index (alt-arm, эквивалент nic_id) → зеркало пусто; повтор → done no-op",
+    classes=["CRUD", "STATE", "IDM"], priority="P1",
+    steps=[
+        # # requires kacho-vpc subnet {{existingSubnetId}} в зоне {{existingZoneId}}
+        *_create_instance_steps("nicidx"),
+        *_create_nic_steps("nicidx"),
+        Step(name="attach-nic", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}:attachNetworkInterface",
+             body={"attachedNicSpec": {"nicId": "{{nicId}}"}},
+             test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
+        poll_operation_until_done(), assert_op_success(),
+        Step(name="detach-byindex", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}:detachNetworkInterface",
+             body={"index": 0},
+             test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
+        poll_operation_until_done(), assert_op_success(),
+        Step(name="verify-detached", method="GET", path=f"{INSTANCES}/{{{{instanceId}}}}",
+             test_script=[*assert_status(200),
+                          "pm.test('mirror empty', () => pm.expect((pm.response.json().networkInterfaces || []).length).to.eql(0));"]),
+        # идемпотентный повтор detach по несуществующему слоту → done, no-op (без error)
+        Step(name="detach-again-noslot", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}:detachNetworkInterface",
+             body={"index": 0},
+             test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
+        poll_operation_until_done(), assert_op_success(),
+        *_delete_nic_steps(),
+        *_delete_instance_steps(),
+    ],
+))
+
+CASES.append(Case(
+    id="INST-NIC-AD-NEG-MALFORMED-NIC",
+    title="AttachNetworkInterface с malformed nic_id → sync 400 InvalidArgument 'invalid network interface id'",
+    classes=["NEG", "VAL"], priority="P0",
+    steps=[
+        # # requires kacho-vpc subnet {{existingSubnetId}}
+        *_create_instance_steps("nicbad"),
+        Step(name="attach-malformed", method="POST", path=f"{INSTANCES}/{{{{instanceId}}}}:attachNetworkInterface",
+             body={"attachedNicSpec": {"nicId": "bad-nic"}},
+             test_script=[*assert_status(400), *assert_grpc_code(3, "INVALID_ARGUMENT"),
+                          "pm.test('text mentions network interface id', () => pm.expect((pm.response.json().message || '').toLowerCase()).to.include('network interface id'));"]),
+        *_delete_instance_steps(),
+    ],
+))
+
+CASES.append(Case(
+    id="INST-NIC-AD-NEG-INSTANCE-NF",
+    title="AttachNetworkInterface к несуществующему instance → sync 404 NOT_FOUND",
+    classes=["NEG", "AUTHZ"], priority="P1",
+    steps=[Step(name="attach-nx-inst", method="POST", path=f"{INSTANCES}/{{{{garbageComputeId}}}}:attachNetworkInterface",
+                body={"attachedNicSpec": {"nicId": "nic00000000000000000"}},
+                test_script=[*assert_status(404), *assert_grpc_code(5, "NOT_FOUND")])],
+))
+
+CASES.append(Case(
+    id="INST-NIC-DD-NEG-INSTANCE-NF",
+    title="DetachNetworkInterface у несуществующего instance → sync 404 NOT_FOUND",
+    classes=["NEG", "AUTHZ"], priority="P2",
+    steps=[Step(name="detach-nx-inst", method="POST", path=f"{INSTANCES}/{{{{garbageComputeId}}}}:detachNetworkInterface",
+                body={"nicId": "nic00000000000000000"},
+                test_script=[*assert_status(404), *assert_grpc_code(5, "NOT_FOUND")])],
+))

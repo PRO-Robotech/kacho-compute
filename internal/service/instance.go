@@ -556,6 +556,13 @@ func (s *InstanceService) SimulateMaintenanceEvent(ctx context.Context, id strin
 // NB: удаление auto_delete-томов (storage Volume.Delete) вынесено в отдельный
 // storage-side инкремент (acceptance sec.0.3) — здесь привязки лишь СНИМАЮТСЯ
 // (detach), что закрывает найденный go-review NIC/volume-leak.
+//
+// Degraded-path (Noop-клиенты, KACHO_COMPUTE_SKIP_PEER_VALIDATION / несконфигурированное
+// vpc/storage-ребро): NoopNicClient.ListByInstance и NoopStorageClient.ListAttachments
+// возвращают пустой список, поэтому шаги (2)/(3) НЕ находят привязок и ничего не
+// снимают — при неподнятых peer'ах NIC/volume-привязки НЕ освобождаются (их и не
+// отследить без живого owner'а). Освобождение гарантировано только при сконфигурированных
+// реальных клиентах.
 func (s *InstanceService) Delete(ctx context.Context, id string) (*operations.Operation, error) {
 	if id == "" {
 		return nil, status.Error(codes.InvalidArgument, "instance_id required")

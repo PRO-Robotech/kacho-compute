@@ -164,6 +164,41 @@ func TestAttachNIC_UnavailableFailClosed(t *testing.T) {
 	require.NotContains(t, done.Error.Message, "10.1.2.3", "must not leak dial details")
 }
 
+// leak-guard: vpc peer returns a NON-contract code (Internal) carrying raw pgx/driver
+// text → op-error must collapse to fixed opaque Internal "internal error" (no host/db/pgx
+// leak). security.md hardening-invariant N1 applied to the compute→vpc NIC edge.
+func TestAttachNIC_InternalPeerError_Opaque(t *testing.T) {
+	svc, repo, nic, ops := newNicSvc(t)
+	in := seedInstance(repo, domain.InstanceStatusStopped)
+	nic.Err = status.Error(codes.Internal, "host=vpc-db.internal port=5432 pgx: relation \"network_interfaces\" does not exist")
+	enp := ids.NewID(ids.PrefixNetworkInterface)
+
+	op, err := svc.AttachNetworkInterface(context.Background(), in.ID, enp, 0)
+	require.NoError(t, err)
+	done := portmock.AwaitOpDone(t, ops, op.ID)
+	require.NotNil(t, done.Error)
+	require.Equal(t, int32(codes.Internal), done.Error.Code)
+	require.Equal(t, "internal error", done.Error.Message, "non-contract peer code → fixed opaque text")
+	require.NotContains(t, done.Error.Message, "pgx", "driver text must not leak")
+	require.NotContains(t, done.Error.Message, "vpc-db.internal", "db host must not leak")
+	require.NotContains(t, done.Error.Message, "5432", "db port must not leak")
+}
+
+// leak-guard: codes.Unknown (non-contract) likewise collapses to opaque Internal.
+func TestAttachNIC_UnknownPeerError_Opaque(t *testing.T) {
+	svc, repo, nic, ops := newNicSvc(t)
+	in := seedInstance(repo, domain.InstanceStatusStopped)
+	nic.Err = status.Error(codes.Unknown, "panic: nil map write in vpc-worker")
+	enp := ids.NewID(ids.PrefixNetworkInterface)
+
+	op, err := svc.AttachNetworkInterface(context.Background(), in.ID, enp, 0)
+	require.NoError(t, err)
+	done := portmock.AwaitOpDone(t, ops, op.ID)
+	require.NotNil(t, done.Error)
+	require.Equal(t, int32(codes.Internal), done.Error.Code)
+	require.Equal(t, "internal error", done.Error.Message)
+}
+
 // S4-06: DetachNetworkInterface по nic_id + идемпотентный повтор.
 func TestDetachNIC_ByID_Idempotent(t *testing.T) {
 	svc, repo, nic, ops := newNicSvc(t)

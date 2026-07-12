@@ -3,8 +3,9 @@
 Каталог тест-кейсов по ресурсам. Источник истины — `cases/*.py`; коллекции в `collections/`
 **генерируются** `scripts/gen.py`. Здесь — обзорный перечень + уникальные паттерны.
 
-Всего: **286 кейсов** (disk 74, instance 82, image 60, snapshot 52, disk-type 10,
-operation 8). Zone/Region serving removed in Stage S7 (Geography owned by kacho-geo).
+Всего (core-ресурсы, по `gen.py`): **277 кейсов** (disk 70, instance 77, image 60,
+snapshot 52, disk-type 10, operation 8); + authz-deny 186, list-filter 4, sec-d 2.
+Zone/Region serving removed in Stage S7 (Geography owned by kacho-geo).
 
 ## Уникальные паттерны (generic-блоки в gen.py)
 
@@ -58,11 +59,11 @@ operation 8). Zone/Region serving removed in Stage S7 (Geography owned by kacho-
 - **DEL**: CRUD-OK, NEG-NOTFOUND, STATE-DISK-DELETABLE-AFTER (Disk удаляем, Snapshot остаётся).
 - **LOP**: CRUD-OK. **LIFECYCLE-CONF**.
 
-## Instance (82 кейса) — `cases/instance.py` *(многие требуют поднятого kacho-vpc)*
+## Instance (77 кейсов) — `cases/instance.py` *(многие требуют поднятого kacho-vpc)*
 
-- **CR**: CRUD-OK (RUNNING + fqdn + boot_disk + NIC + id-prefix epd + created_at sec),
-  CRUD-FROM-IMAGE-BOOT-OK, CRUD-BOOT-DISK-ID-OK, VAL-MISSING-{ZONE,PLATFORM,RESOURCES,BOOTDISK,NIC,FOLDER},
-  NEG-FOLDER-NOTFOUND, NEG-SUBNET-NOTFOUND, NEG-DUP-NAME, VAL-NAME-UPPERCASE/-DIGIT-START,
+- **CR**: CRUD-OK (RUNNING + fqdn + boot_disk + NO NIC (no auto-NIC) + id-prefix epd + created_at sec),
+  CRUD-FROM-IMAGE-BOOT-OK, CRUD-BOOT-DISK-ID-OK, VAL-MISSING-{ZONE,PLATFORM,RESOURCES,BOOTDISK,FOLDER},
+  NEG-FOLDER-NOTFOUND, NEG-DUP-NAME, VAL-NAME-UPPERCASE/-DIGIT-START,
   VAL-CORE-FRACTION-INVALID, VAL-CORES-ODD-INVALID, VAL-BOOTDISK-EXACTLY-ONE, VAL-EMPTY-BODY,
   VAL-MALFORMED-JSON, CONF-ID-PREFIX-EPD; + security.
 - **GET**: NEG-NOTFOUND, CONF-NF-TEXT. **LST**: CRUD-OK, VAL-FOLDER-REQUIRED, VIEW-BASIC-NO-METADATA; + блоки.
@@ -70,14 +71,18 @@ operation 8). Zone/Region serving removed in Stage S7 (Geography owned by kacho-
   MASK-IMMUTABLE-ZONE, MASK-UNKNOWN-FIELD, AUTHZ-NF-SYNC.
 - **STATE**: START-FROM-RUNNING (→FailedPrec), STOP-OK, START-FROM-STOPPED-OK, STOP-FROM-STOPPED (→FailedPrec),
   RESTART-OK, RESTART-FROM-STOPPED (→FailedPrec); + START/STOP-AUTHZ-NF-SYNC.
-- **AD**: CRUD-OK, NEG-WRONG-ZONE, NEG-ALREADY-ATTACHED. **DD**: CRUD-OK, NEG-BOOT (→FailedPrec), NEG-NOT-ATTACHED.
+- **AD** (attachDisk, body `attachedDiskSpec.volumeId`): CRUD-OK, NEG-WRONG-ZONE, NEG-ALREADY-ATTACHED.
+  **DD** (detachDisk, body `volumeId`): CRUD-OK, NEG-BOOT (→FailedPrec), NEG-NOT-ATTACHED.
+  (bootDisk/secondaryDisks projection field `volumeId`; storage Volume — source of truth.)
 - **DISK-DEL-WHILE-ATTACHED** (Disk.Delete пока attached → FailedPrec "is being used"; Detach→Delete OK).
-- **NAT**: ADD-CRUD-OK, ADD-NEG-ALREADY, REMOVE-CRUD-OK.
-- **UNI**: CRUD-OK, NEG-BAD-INDEX. **UMETA**: CRUD-OK (upsert/delete + FULL-view).
-- **SPO**: CRUD-OK, NEG-NOTFOUND. **SME**: CRUD-OK (no-op).
-- **MV**: CRUD-OK, AUTHZ-NF-SYNC. **LOP**: CRUD-OK, NEG-PARENT-NF.
+- **NIC** (S4, attach/detach existing kacho-vpc NIC, prefix "nic"): AD-CRUD-OK (attach→mirror index 0→detach→empty),
+  DD-BYINDEX-IDEMPOTENT-OK (detach by slot index + no-op replay), AD-NEG-MALFORMED-NIC (sync 400),
+  AD-NEG-INSTANCE-NF / DD-NEG-INSTANCE-NF (sync 404). UpdateNetworkInterface/AddOneToOneNat/RemoveOneToOneNat — Unimplemented.
+- **UMETA**: CRUD-OK (upsert/delete + FULL-view).
+- **SPO**: CRUD-OK, NEG-NOTFOUND. **SME**: CRUD-OK (no-op). (Move — removed KAC-266.)
+- **LOP**: CRUD-OK, NEG-PARENT-NF.
 - **DEL**: CRUD-OK, STATE-AUTODELETE-BOOT-GONE, STATE-NONAUTODELETE-DISK-REMAINS, NEG-NOTFOUND, CONF-RESPONSE-EMPTY.
-- **ANI**: AUTHZ-NF-SYNC. **LIFECYCLE-CONF** (Create→Get→List→Update→Stop→Start→Delete→List→Get-404).
+- **LIFECYCLE-CONF** (Create→Get→List→Update→Stop→Start→Delete→List→Get-404).
 
 ## DiskType (10 кейсов) — `cases/disk-type.py`
 

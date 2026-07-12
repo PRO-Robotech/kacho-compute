@@ -35,11 +35,12 @@ const defaultVolumeCallTimeout = 5 * time.Second
 // Каждая попытка несёт собственный context.WithTimeout(c.timeout);
 // retry.OnUnavailable сглаживает транзиентные обрывы, а outgoing ctx обёрнут
 // auth.PropagateOutgoing, чтобы storage-side per-RPC authz-Check видел реального
-// caller'а (security.md). Транспортная недоступность (Unavailable/DeadlineExceeded)
-// нормализуется в фиксированный opaque Unavailable (leak-guard: сырой dial-текст с
-// host/port peer'а НЕ утекает наружу, security.md hardening-инвариант N1); контрактные
-// коды storage (InvalidArgument/FailedPrecondition/NotFound + их тексты) пробрасываются
-// как есть — это собственный контракт владельца, не transport-leak.
+// caller'а (security.md). Ответная ошибка нормализуется whitelist-контрактом
+// (mapStorageErr, leak-guard N1): контрактные коды владельца storage (InvalidArgument/
+// FailedPrecondition/NotFound/AlreadyExists/PermissionDenied + их тексты) пробрасываются
+// как есть; транспортная недоступность (Unavailable/DeadlineExceeded) → фиксированный
+// opaque Unavailable; всё прочее (Internal/Unknown) → opaque codes.Internal "internal
+// error" (сырой pgx/dial-текст с host/port peer'а НЕ утекает наружу).
 type StorageClient struct {
 	cli     storagev1.InternalVolumeServiceClient
 	timeout time.Duration
@@ -181,12 +182,17 @@ func attachModeFromWire(m storagev1.VolumeAttachment_Mode) ports.VolumeAttachMod
 	}
 }
 
-// mapStorageErr нормализует ошибку компьют→storage-вызова: транспортная
-// недоступность (Unavailable / DeadlineExceeded / не-status ошибка) → фиксированный
-// opaque Unavailable (fail-closed для мутаций, leak-guard: сырой dial-текст с host/port
-// peer'а НЕ утекает наружу). Контрактные коды storage (InvalidArgument /
-// FailedPrecondition / NotFound / AlreadyExists) пробрасываются как есть — это
-// собственный контракт владельца, не transport-leak.
+// mapStorageErr нормализует ошибку компьют→storage-вызова по whitelist-контракту
+// (leak-guard, security.md инвариант N1 — сырой peer-текст наружу не течёт):
+//   - контрактные коды владельца storage (InvalidArgument / FailedPrecondition /
+//     NotFound / AlreadyExists / PermissionDenied) — пробрасываются код+сообщение как
+//     есть (это собственный контракт владельца, а не transport-leak);
+//   - транспортная недоступность (Unavailable / DeadlineExceeded / не-status ошибка) →
+//     фиксированный opaque Unavailable (fail-closed для мутаций; сырой dial-текст с
+//     host/port peer'а НЕ утекает);
+//   - ВСЁ прочее (Internal / Unknown / …) — НЕ форвардим дословно: un-sentineled
+//     Internal может нести pgx/driver/connection-детали storage'а (host/port/db) →
+//     фиксированный opaque codes.Internal "internal error".
 func mapStorageErr(err error) error {
 	if err == nil {
 		return nil
@@ -196,10 +202,13 @@ func mapStorageErr(err error) error {
 		return status.Error(codes.Unavailable, "storage service unavailable")
 	}
 	switch st.Code() {
+	case codes.InvalidArgument, codes.FailedPrecondition, codes.NotFound,
+		codes.AlreadyExists, codes.PermissionDenied:
+		return status.Error(st.Code(), st.Message())
 	case codes.Unavailable, codes.DeadlineExceeded:
 		return status.Error(codes.Unavailable, "storage service unavailable")
 	default:
-		return status.Error(st.Code(), st.Message())
+		return status.Error(codes.Internal, "internal error")
 	}
 }
 

@@ -154,6 +154,64 @@ func TestStorageClient_Detach_Unavailable_FailClosed_LeakGuard(t *testing.T) {
 	require.NotContains(t, status.Convert(err).Message(), "dial tcp")
 }
 
+// TestStorageClient_Attach_InternalPeerError_Opaque — a NON-contract peer code
+// (codes.Internal carrying raw pgx/driver text with host/port/db) must NOT be
+// forwarded as-is: it collapses to a FIXED opaque codes.Internal "internal error"
+// (security.md hardening-invariant N1 — leak-guard on the peer-client's default branch).
+func TestStorageClient_Attach_InternalPeerError_Opaque(t *testing.T) {
+	const rawLeak = "host=storage-db.internal port=5432 user=kacho pgx: relation \"volume_attachments\" does not exist"
+	fake := &fakeStorageClient{attachFn: func(_ context.Context, _ *storagev1.AttachVolumeRequest) (*storagev1.AttachVolumeResponse, error) {
+		return nil, status.Error(codes.Internal, rawLeak)
+	}}
+	c := NewStorageClientWith(fake)
+
+	_, err := c.Attach(context.Background(), ports.VolumeAttachSpec{VolumeID: "vol-abc", InstanceID: "cim-xyz"})
+	require.Error(t, err)
+	require.Equal(t, codes.Internal, status.Code(err))
+	msg := status.Convert(err).Message()
+	require.Equal(t, "internal error", msg, "non-contract peer code must map to fixed opaque text")
+	require.NotContains(t, msg, "pgx", "driver text must not leak")
+	require.NotContains(t, msg, "storage-db.internal", "db host must not leak")
+	require.NotContains(t, msg, "5432", "db port must not leak")
+}
+
+// TestStorageClient_Attach_UnknownPeerError_Opaque — codes.Unknown (another
+// non-contract code) likewise collapses to opaque Internal "internal error".
+func TestStorageClient_Attach_UnknownPeerError_Opaque(t *testing.T) {
+	fake := &fakeStorageClient{attachFn: func(_ context.Context, _ *storagev1.AttachVolumeRequest) (*storagev1.AttachVolumeResponse, error) {
+		return nil, status.Error(codes.Unknown, "panic: runtime error at 0xdeadbeef in storage-worker")
+	}}
+	c := NewStorageClientWith(fake)
+
+	_, err := c.Attach(context.Background(), ports.VolumeAttachSpec{VolumeID: "vol-abc"})
+	require.Error(t, err)
+	require.Equal(t, codes.Internal, status.Code(err))
+	require.Equal(t, "internal error", status.Convert(err).Message())
+}
+
+// TestStorageClient_Attach_ContractCodesPreserved — the whitelist of owner-contract
+// codes (NotFound / AlreadyExists / PermissionDenied / InvalidArgument) passes through
+// with code + message intact (they are the owner's own contract, not a transport leak).
+func TestStorageClient_Attach_ContractCodesPreserved(t *testing.T) {
+	for _, tc := range []struct {
+		code codes.Code
+		msg  string
+	}{
+		{codes.NotFound, "Volume vol-abc not found"},
+		{codes.AlreadyExists, "device_name already in use"},
+		{codes.PermissionDenied, "caller may not attach this volume"},
+		{codes.InvalidArgument, "Illegal argument device_name"},
+	} {
+		fake := &fakeStorageClient{attachFn: func(_ context.Context, _ *storagev1.AttachVolumeRequest) (*storagev1.AttachVolumeResponse, error) {
+			return nil, status.Error(tc.code, tc.msg)
+		}}
+		c := NewStorageClientWith(fake)
+		_, err := c.Attach(context.Background(), ports.VolumeAttachSpec{VolumeID: "vol-abc"})
+		require.Equal(t, tc.code, status.Code(err))
+		require.Equal(t, tc.msg, status.Convert(err).Message(), "owner-contract text must survive")
+	}
+}
+
 // TestStorageClient_ListAttachments_Batched — ListAttachments forwards the instance
 // batch and maps each VolumeAttachmentInfo wire record (with its volume_id) into the
 // compute-side mirror value type.

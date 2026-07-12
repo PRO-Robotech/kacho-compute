@@ -185,20 +185,31 @@ func nicMirror(atts []NicAttachment) []domain.NetworkInterface {
 	return out
 }
 
-// mapNicErr нормализует ошибку compute→vpc NIC-ребра. vpc-контрактные коды
-// (FailedPrecondition "NetworkInterface is in use" / zone-coherence, InvalidArgument,
-// NotFound) пробрасываются дословно — они часть контракта (S4-03/04). Транспортная
-// недоступность / DeadlineExceeded → чистый Unavailable (fail-closed для мутации,
-// без leak dial-деталей — INTERNAL-инвариант). Не-status ошибка → Unavailable.
+// mapNicErr нормализует ошибку compute→vpc NIC-ребра по whitelist-контракту
+// (leak-guard, security.md инвариант N1):
+//   - vpc-контрактные коды (FailedPrecondition "NetworkInterface is in use" /
+//     zone-coherence, InvalidArgument, NotFound, AlreadyExists, PermissionDenied) —
+//     пробрасываются дословно (часть контракта S4-03/04, не transport-leak);
+//   - транспортная недоступность / DeadlineExceeded / не-status ошибка → чистый
+//     opaque Unavailable (fail-closed для мутации, без leak dial-деталей);
+//   - ВСЁ прочее (Internal / Unknown / …) — НЕ форвардим дословно: un-sentineled
+//     Internal может нести pgx/driver/connection-детали vpc (host/port/db) →
+//     фиксированный opaque codes.Internal "internal error".
 func mapNicErr(err error) error {
+	if err == nil {
+		return nil
+	}
 	st, ok := status.FromError(err)
 	if !ok {
 		return status.Error(codes.Unavailable, "network interface service unavailable")
 	}
 	switch st.Code() {
+	case codes.InvalidArgument, codes.FailedPrecondition, codes.NotFound,
+		codes.AlreadyExists, codes.PermissionDenied:
+		return status.Error(st.Code(), st.Message())
 	case codes.Unavailable, codes.DeadlineExceeded:
 		return status.Error(codes.Unavailable, "network interface service unavailable")
 	default:
-		return status.Error(st.Code(), st.Message())
+		return status.Error(codes.Internal, "internal error")
 	}
 }
