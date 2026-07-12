@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -25,25 +27,40 @@ import (
 	"github.com/PRO-Robotech/kacho-compute/internal/protoconv"
 )
 
-// validCoreFractions — допустимые значения core_fraction (конвенция Kachō).
-// Полная per-platform валидация (cores/memory/gpus по платформам standard-v1/v2/v3,
-// gpu-*) живет в platforms.go; здесь — базовая проверка допустимых core_fraction.
-var validCoreFractions = map[int64]struct{}{0: {}, 5: {}, 20: {}, 50: {}, 100: {}}
+// insResource / volResource — human-labels для malformed-id ошибок
+// (`corevalidate.ResourceID`: `invalid <label> id '<X>'`, api-conventions).
+const (
+	insResource = "instance"
+	volResource = "volume"
+	// volumeIDPrefix — 3-char id-prefix storage-Volume ("vol"). Проверяется локально:
+	// compute-пинованный kacho-corelib не знает "vol" в resourceIDPrefixes (Volume —
+	// ресурс kacho-storage), поэтому corevalidate.ResourceID ложно отбил бы валидный
+	// vol-id — используем собственный validateVolumeID (см. ниже).
+	volumeIDPrefix = "vol"
+)
 
-// DiskSourceSpec — оборачивает либо ссылку на существующий диск, либо параметры
-// inline-создания нового диска (ровно одно поле непусто).
-type DiskSourceSpec struct {
-	DiskID           string
-	NewDiskSizeBytes int64
-	NewDiskTypeID    string
-	NewSourceImage   string
-	NewSourceSnap    string
-	DeviceName       string
-	AutoDelete       bool
-	Mode             int32 // computev1.AttachedDiskSpec_Mode
+// validateVolumeID — malformed-id гейт storage-Volume (api-conventions: sync
+// InvalidArgument "invalid volume id '<X>'" первым стейтментом RPC). Пустой id —
+// nil (presence гейтится отдельно; DetachDisk использует device_name-arm).
+func validateVolumeID(id string) error {
+	if id == "" {
+		return nil
+	}
+	if !strings.HasPrefix(id, volumeIDPrefix) {
+		return status.Errorf(codes.InvalidArgument, "invalid %s id '%s'", volResource, id)
+	}
+	return nil
 }
 
+// validCoreFractions — допустимые значения core_fraction (конвенция Kachō).
+var validCoreFractions = map[int64]struct{}{0: {}, 5: {}, 20: {}, 50: {}, 100: {}}
+
 // CreateInstanceReq — запрос на создание ВМ.
+//
+// Storage-split cutover: Instance.Create больше НЕ создаёт inline-диски и НЕ
+// подключает тома (acceptance sec.0.3 — inline-attach out-of-scope). Инстанс создаётся
+// без привязок; boot/secondary тома подключаются явными `AttachDisk` на уже
+// существующих storage-Volume (vol-id).
 type CreateInstanceReq struct {
 	ProjectID           string
 	Name                string
@@ -57,8 +74,6 @@ type CreateInstanceReq struct {
 	GPUs                int64
 	Metadata            map[string]string
 	MetadataOptions     *computev1.MetadataOptions
-	BootDisk            DiskSourceSpec
-	SecondaryDisks      []DiskSourceSpec
 	Hostname            string
 	Preemptible         bool
 	ServiceAccountID    string
@@ -85,49 +100,55 @@ type UpdateInstanceReq struct {
 	UpdateMask          []string
 }
 
-// InstanceService — бизнес-логика управления ВМ + state-машина.
+// AttachDiskReq — параметры подключения существующего storage-Volume к инстансу.
+type AttachDiskReq struct {
+	VolumeID   string
+	DeviceName string
+	Mode       int32 // computev1.AttachedDiskSpec_Mode
+	IsBoot     bool
+	AutoDelete bool
+}
+
+// InstanceService — бизнес-логика управления ВМ + state-машина. Компьют держит
+// НОЛЬ local attach-state: том↔Instance-привязка живёт в kacho-storage
+// (storageClient → InternalVolumeService), NIC↔Instance — в kacho-vpc (nicClient).
 type InstanceService struct {
-	repo         InstanceRepo
-	diskRepo     DiskRepo
-	imageRepo    ImageRepo
-	snapshotRepo SnapshotRepo
-	diskTypeRepo DiskTypeRepo
-	// zones — existence-check zone_id. Авторитетный источник — kacho-geo
-	// (geo.v1.ZoneService.Get; Geography принадлежит kacho-geo); при
-	// SKIP_PEER_VALIDATION — no-op. Wiring — cmd/compute/main.go.
+	repo InstanceRepo
+	// zones — existence-check zone_id (авторитет — kacho-geo).
 	zones         ZoneRegistry
 	projectClient ProjectClient
-	// nicClient — compute→kacho-vpc InternalNetworkInterfaceService (NIC↔Instance
-	// attach/detach + batched mirror-read). Может быть nil (SKIP_PEER_VALIDATION /
-	// vpc-edge не сконфигурирован): mutations fail-closed Unavailable, read-mirror
-	// грациозно опускается.
+	// nicClient — compute→kacho-vpc InternalNetworkInterfaceService. Может быть nil.
 	nicClient NicClient
-	opsRepo   operations.Repo
+	// storageClient — compute→kacho-storage InternalVolumeService (volume-attach
+	// саги + batched mirror-read). Может быть nil (edge не сконфигурирован):
+	// мутации fail-closed Unavailable, read-mirror грациозно опускается.
+	storageClient StorageClient
+	opsRepo       operations.Repo
 }
 
 // NewInstanceService создаёт InstanceService.
-func NewInstanceService(repo InstanceRepo, diskRepo DiskRepo, imageRepo ImageRepo, snapshotRepo SnapshotRepo, diskTypeRepo DiskTypeRepo, zones ZoneRegistry, projectClient ProjectClient, nicClient NicClient, opsRepo operations.Repo) *InstanceService {
+func NewInstanceService(repo InstanceRepo, zones ZoneRegistry, projectClient ProjectClient, nicClient NicClient, storageClient StorageClient, opsRepo operations.Repo) *InstanceService {
 	return &InstanceService{
-		repo: repo, diskRepo: diskRepo, imageRepo: imageRepo, snapshotRepo: snapshotRepo,
-		diskTypeRepo: diskTypeRepo, zones: zones, projectClient: projectClient,
-		nicClient: nicClient, opsRepo: opsRepo,
+		repo: repo, zones: zones, projectClient: projectClient,
+		nicClient: nicClient, storageClient: storageClient, opsRepo: opsRepo,
 	}
 }
 
-// Get возвращает Instance по ID. NIC-зеркало (network_interfaces) подтягивается из
-// kacho-vpc (source of truth) с graceful-degrade — недоступность vpc не роняет Get
-// (consumer грациозно переживает недоступность owner'а).
+// Get возвращает Instance по ID. NIC- и volume-зеркала подтягиваются из kacho-vpc /
+// kacho-storage (source of truth) с graceful-degrade — недоступность owner'а НЕ
+// роняет Get (consumer грациозно переживает недоступность owner'а).
 func (s *InstanceService) Get(ctx context.Context, id string) (*domain.Instance, error) {
 	in, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return nil, mapRepoErr(err)
 	}
 	s.applyNicMirror(ctx, in)
+	s.applyVolumeMirror(ctx, in)
 	return in, nil
 }
 
-// List возвращает список ВМ. project_id обязателен. NIC-зеркало резолвится ОДНИМ
-// batched ListByInstance (не N+1) с graceful-degrade.
+// List возвращает список ВМ. project_id обязателен. NIC- и volume-зеркала
+// резолвятся ОДНИМ batched-вызовом каждый (не N+1) с graceful-degrade.
 func (s *InstanceService) List(ctx context.Context, f InstanceFilter, p Pagination) ([]*domain.Instance, string, error) {
 	if f.ProjectID == "" {
 		return nil, "", status.Error(codes.InvalidArgument, "project_id required")
@@ -137,16 +158,12 @@ func (s *InstanceService) List(ctx context.Context, f InstanceFilter, p Paginati
 		return nil, "", err
 	}
 	s.applyNicMirrorBatch(ctx, out)
+	s.applyVolumeMirrorBatch(ctx, out)
 	return out, next, nil
 }
 
 // ValidateCreateInstanceReq — синхронная pre-flight валидация Create-запроса
-// (формат/диапазоны полей): required-поля, name/description/labels,
-// resources_spec (cores/memory/core_fraction), boot + secondary disk specs.
-// Чистая (без DB/peer-вызовов) — тот же контракт, что энфорсит RPC ДО постановки
-// async-операции. Выделена, чтобы её мог прогонять fuzz (internal/fuzz) на
-// hostile-входах без поднятого сервиса. Возвращает InvalidArgument-status при
-// нарушении, nil при валидном req.
+// (формат/диапазоны полей). Чистая (без DB/peer-вызовов). Выделена для fuzz.
 func ValidateCreateInstanceReq(req CreateInstanceReq) error {
 	if req.ProjectID == "" {
 		return status.Error(codes.InvalidArgument, "project_id required")
@@ -169,18 +186,10 @@ func ValidateCreateInstanceReq(req CreateInstanceReq) error {
 	if err := validateResources(req.Cores, req.Memory, req.CoreFraction); err != nil {
 		return err
 	}
-	if err := validateDiskSourceSpec("boot_disk_spec", req.BootDisk); err != nil {
-		return err
-	}
-	for i, sd := range req.SecondaryDisks {
-		if err := validateDiskSourceSpec(fmt.Sprintf("secondary_disk_specs[%d]", i), sd); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
-// Create инициирует создание Instance.
+// Create инициирует создание Instance (без привязок — storage-split sec.0.3).
 func (s *InstanceService) Create(ctx context.Context, req CreateInstanceReq) (*operations.Operation, error) {
 	if err := ValidateCreateInstanceReq(req); err != nil {
 		return nil, err
@@ -200,32 +209,6 @@ func (s *InstanceService) doCreate(ctx context.Context, instanceID string, req C
 	}
 	if err := s.zones.GetZone(ctx, req.ZoneID); err != nil {
 		return nil, mapZoneRefErr(err, req.ZoneID)
-	}
-
-	// Instance is created WITHOUT any network interface. NIC binding has
-	// been removed from the Instance lifecycle entirely (no auto-NIC) — no
-	// kacho-vpc Address/NetworkInterface resources are created or attached at
-	// Create time. NICs can be managed independently through kacho-vpc.
-
-	// Boot disk + secondary disks: resolve existing OR materialize inline.
-	var inlineDisks []*domain.Disk
-	bootAD, bootInline, err := s.resolveDiskSource(ctx, req.ProjectID, req.ZoneID, req.BootDisk, true)
-	if err != nil {
-		return nil, err
-	}
-	if bootInline != nil {
-		inlineDisks = append(inlineDisks, bootInline)
-	}
-	attached := []domain.AttachedDisk{bootAD}
-	for _, sd := range req.SecondaryDisks {
-		ad, inline, err := s.resolveDiskSource(ctx, req.ProjectID, req.ZoneID, sd, false)
-		if err != nil {
-			return nil, err
-		}
-		if inline != nil {
-			inlineDisks = append(inlineDisks, inline)
-		}
-		attached = append(attached, ad)
 	}
 
 	in := &domain.Instance{
@@ -252,116 +235,12 @@ func (s *InstanceService) doCreate(ctx context.Context, instanceID string, req C
 		PlacementPolicy:       req.PlacementPolicy,
 		HardwareGeneration:    req.HardwareGeneration,
 		Application:           req.Application,
-		AttachedDisks:         attached,
 	}
-	created, err := s.repo.Insert(ctx, in, inlineDisks)
+	created, err := s.repo.Insert(ctx, in)
 	if err != nil {
 		return nil, mapRepoErr(err)
 	}
-	// the compute_instance→project owner-tuple (and any inline boot/secondary
-	// disk tuples) is registered transactionally — repo.Insert writes the FGA
-	// register-intent in the SAME writer-tx as the rows (compute_fga_register_outbox)
-	// and the register-drainer applies it via kacho-iam InternalIAMService
-	// .RegisterResource. No direct FGA write, no best-effort post-commit dual-write
-	// (closes the lost-tuple bug N5: the owner-tuple is now durable + retried, so the
-	// per-resource Check "no path" DENY window is finite, not permanent).
 	return anypb.New(protoconv.Instance(created))
-}
-
-// resolveDiskSource резолвит DiskSourceSpec в AttachedDisk + (опционально) новый
-// диск для inline-вставки. Для существующего диска проверяет READY + zone + not-attached.
-func (s *InstanceService) resolveDiskSource(ctx context.Context, projectID, zoneID string, spec DiskSourceSpec, isBoot bool) (domain.AttachedDisk, *domain.Disk, error) {
-	if spec.DiskID != "" {
-		d, err := s.diskRepo.Get(ctx, spec.DiskID)
-		if err != nil {
-			return domain.AttachedDisk{}, nil, mapRefErr(err, "Disk", spec.DiskID)
-		}
-		// Cross-project BOLA guard: repo.Get resolves across ALL projects; a
-		// caller must not attach a disk owned by another project to their own
-		// instance (cross-project takeover + auto_delete destruction). Reject
-		// with NotFound (no existence oracle) BEFORE any state leak.
-		if d.ProjectID != projectID {
-			return domain.AttachedDisk{}, nil, crossProjectNotFound("Disk", spec.DiskID)
-		}
-		if d.Status != domain.DiskStatusReady {
-			return domain.AttachedDisk{}, nil, status.Errorf(codes.FailedPrecondition, "Disk %s is not READY", spec.DiskID)
-		}
-		if d.ZoneID != zoneID {
-			return domain.AttachedDisk{}, nil, status.Errorf(codes.InvalidArgument, "Disk %s is in zone %s, instance zone is %s", spec.DiskID, d.ZoneID, zoneID)
-		}
-		attached, err := s.diskRepo.IsAttached(ctx, spec.DiskID)
-		if err != nil {
-			return domain.AttachedDisk{}, nil, mapRepoErr(err)
-		}
-		if attached {
-			return domain.AttachedDisk{}, nil, status.Errorf(codes.FailedPrecondition, "Disk %s is already attached", spec.DiskID)
-		}
-		return domain.AttachedDisk{
-			DiskID: spec.DiskID, IsBoot: isBoot, Mode: domain.AttachedDiskMode(spec.Mode),
-			DeviceName: spec.DeviceName, AutoDelete: spec.AutoDelete, AttachedAt: time.Now().UTC(),
-		}, nil, nil
-	}
-	// inline disk_spec → create a new READY disk in the same TX. Materialization
-	// runs the SAME within-service invariants as the standalone DiskService.Create
-	// path (disk-type existence, size bounds, source min-size) — disks.type_id has
-	// no cross-table FK, so skipping these here would persist an invalid/undersized
-	// disk row that CreateDisk itself would reject (parity of enforcement across
-	// both creation paths).
-	newDiskID := ids.NewID(ids.PrefixDisk)
-	size := spec.NewDiskSizeBytes
-	if size == 0 {
-		size = diskSizeMin
-	}
-	if size < diskSizeMin || size > diskSizeMaxCreate {
-		return domain.AttachedDisk{}, nil, invalidArg("disk_spec.size", fmt.Sprintf("size must be in range [%d, %d] bytes", diskSizeMin, diskSizeMaxCreate))
-	}
-	typeID := orDefault(spec.NewDiskTypeID, defaultDiskType)
-	if _, err := s.diskTypeRepo.Get(ctx, typeID); err != nil {
-		return domain.AttachedDisk{}, nil, mapRefErr(err, "Disk type", typeID)
-	}
-	if spec.NewSourceImage != "" {
-		img, err := s.imageRepo.Get(ctx, spec.NewSourceImage)
-		if err != nil {
-			return domain.AttachedDisk{}, nil, mapRefErr(err, "Image", spec.NewSourceImage)
-		}
-		// Cross-project BOLA guard: an inline boot/secondary disk must not be
-		// seeded from a source image owned by another project (data exfiltration
-		// into the caller's project). Reject with NotFound (no existence oracle).
-		if img.ProjectID != projectID {
-			return domain.AttachedDisk{}, nil, crossProjectNotFound("Image", spec.NewSourceImage)
-		}
-		if img.MinDiskSize > 0 && size < img.MinDiskSize {
-			return domain.AttachedDisk{}, nil, status.Errorf(codes.InvalidArgument, "Disk size %d is less than image min_disk_size %d", size, img.MinDiskSize)
-		}
-	}
-	if spec.NewSourceSnap != "" {
-		snap, err := s.snapshotRepo.Get(ctx, spec.NewSourceSnap)
-		if err != nil {
-			return domain.AttachedDisk{}, nil, mapRefErr(err, "Snapshot", spec.NewSourceSnap)
-		}
-		if snap.ProjectID != projectID {
-			return domain.AttachedDisk{}, nil, crossProjectNotFound("Snapshot", spec.NewSourceSnap)
-		}
-		if snap.DiskSize > 0 && size < snap.DiskSize {
-			return domain.AttachedDisk{}, nil, status.Errorf(codes.InvalidArgument, "Disk size %d is less than snapshot disk_size %d", size, snap.DiskSize)
-		}
-	}
-	d := &domain.Disk{
-		ID:               newDiskID,
-		ProjectID:        projectID,
-		CreatedAt:        time.Now().UTC(),
-		TypeID:           typeID,
-		ZoneID:           zoneID,
-		Size:             size,
-		BlockSize:        defaultBlockSize,
-		Status:           domain.DiskStatusReady,
-		SourceImageID:    spec.NewSourceImage,
-		SourceSnapshotID: spec.NewSourceSnap,
-	}
-	return domain.AttachedDisk{
-		DiskID: newDiskID, IsBoot: isBoot, Mode: domain.AttachedDiskMode(spec.Mode),
-		DeviceName: spec.DeviceName, AutoDelete: true, AttachedAt: time.Now().UTC(),
-	}, d, nil
 }
 
 // Update обновляет ВМ. mask ⊇ {resources_spec/platform_id} требует STOPPED.
@@ -385,15 +264,7 @@ func (s *InstanceService) Update(ctx context.Context, req UpdateInstanceReq) (*o
 				updates = []string{"name", "description", "labels", "service_account_id", "placement_policy", "network_settings"}
 			}
 			touchesCompute := false
-			// labelsInMask (epic RSAB β, D-β6): triggers an FGA register-intent refresh
-			// so the IAM resource_mirror tracks dev→prod label dynamics. A full-object
-			// PATCH (empty mask) applies labels too, so `updates` already includes it.
 			labelsInMask := false
-			// changed — фактически изменённые mask-поля. Передаётся в repo.Update, чтобы
-			// UPDATE писал ТОЛЬКО эти колонки (column-scoped), а не весь набор из
-			// устаревшего Get-снимка — иначе конкурентный Update по другому полю
-			// затирается (lost update). Поля, пропущенные из-за условий (silent-ignore),
-			// в changed НЕ добавляются.
 			changed := make([]string, 0, len(updates))
 			for _, f := range updates {
 				switch f {
@@ -452,19 +323,11 @@ func validateInstanceUpdate(req UpdateInstanceReq) error {
 		"placement_policy": {}, "network_settings": {},
 		"resources_spec": {}, "platform_id": {},
 	}
-	// Immutable-check ПЕРЕД UpdateMask: known-set не содержит immutable-полей,
-	// поэтому UpdateMask вернул бы generic "unknown field" вместо конвенционного
-	// "<field> is immutable after Instance.Create" (api-conventions: update_mask).
 	for _, f := range req.UpdateMask {
 		switch f {
-		case "zone_id", "boot_disk", "metadata":
+		case "zone_id", "boot_disk", "boot_volume", "secondary_volumes", "network_interfaces", "metadata":
 			return invalidArg(f, f+" is immutable after Instance.Create (use AttachDisk/UpdateMetadata/Relocate)")
 		case "scheduling_policy", "metadata_options":
-			// Присутствуют в UpdateInstanceRequest, но НЕ применяются на generic
-			// Update-пути (нет column-write в repo.Update, нет в full-mask наборе) —
-			// фиксируются на Create. Ранее сидели в known-set → masked-мутация
-			// «успешно» проходила без эффекта (silent no-op). Отвергаем конвенционным
-			// immutable-сообщением вместо тихого no-op.
 			return invalidArg(f, f+" is immutable after Instance.Create")
 		}
 	}
@@ -498,9 +361,6 @@ func (s *InstanceService) UpdateMetadata(ctx context.Context, instanceID string,
 	return runOp(ctx, s.opsRepo, fmt.Sprintf("Update instance %s metadata", instanceID),
 		&computev1.UpdateInstanceMetadataMetadata{InstanceId: instanceID},
 		func(ctx context.Context) (*anypb.Any, error) {
-			// Атомарный delete+upsert merge на DB-уровне (project-rule 10). Прежний
-			// Get→merge-in-Go→SetMetadata(full-overwrite) был read-modify-write вне TX и
-			// терял дельту конкурентного UpdateMetadata (second-writer-wins).
 			updated, err := s.repo.MergeMetadata(ctx, instanceID, del, upsert)
 			if err != nil {
 				return nil, mapRepoErr(err)
@@ -509,45 +369,20 @@ func (s *InstanceService) UpdateMetadata(ctx context.Context, instanceID string,
 		})
 }
 
-// Start/Stop/Restart — state-машина. DB-уровневый CAS (within-service-инвариант
-// на DB-уровне): `Get → check → SetStatus` заменено на atomic
-// `SetStatusCAS(expected, next)` в одной транзакции — concurrent Stop+Restart на
-// RUNNING ВМ не может привести к second-writer-wins / lost-state.
+// Start/Stop/Restart — state-машина (DB-уровневый atomic CAS).
 func (s *InstanceService) Start(ctx context.Context, id string) (*operations.Operation, error) {
 	return s.lifecycle(ctx, id, "Start", domain.InstanceStatusStopped, domain.InstanceStatusRunning,
 		"Instance is not stopped", &computev1.StartInstanceMetadata{InstanceId: id})
 }
 
-// Stop переводит ВМ RUNNING→STOPPED. CAS-условие на DB-уровне: только из
-// RUNNING. Второй concurrent Stop увидит status=STOPPED и получит
-// FailedPrecondition.
+// Stop переводит ВМ RUNNING→STOPPED.
 func (s *InstanceService) Stop(ctx context.Context, id string) (*operations.Operation, error) {
 	return s.lifecycle(ctx, id, "Stop", domain.InstanceStatusRunning, domain.InstanceStatusStopped,
 		"Instance is not running", &computev1.StopInstanceMetadata{InstanceId: id})
 }
 
-// Restart перезапускает RUNNING ВМ. Single atomic CAS RUNNING→RUNNING (без
-// durably-committed промежуточного RESTARTING).
-//
-// Почему НЕ two-step (RUNNING→RESTARTING→RUNNING): промежуточный RESTARTING
-// коммитился отдельной транзакцией; прерывание воркера между двумя коммитами
-// (crash / panic / срабатывание per-op deadline) оставляло ВМ навсегда в
-// RESTARTING без пути восстановления — Start требует STOPPED, Stop/Restart
-// требуют RUNNING, AttachDisk требует RUNNING|STOPPED → любой последующий CAS
-// падал FailedPrecondition (bricked instance). Orphan-resolver трактует
-// RestartInstanceMetadata как kindUpdate и, видя ВМ присутствующей, помечал
-// операцию Done(current) не переигрывая замыкание — заклиненный RESTARTING
-// маскировался под успех.
-//
-// В control-plane реального гипервизора нет — restart мгновенный, промежуточный
-// durable state не нужен. Одиночный `SetStatusCAS(RUNNING→RUNNING)` идемпотентен:
-// row-level lock сериализует конкурентные Restart'ы, каждый видит RUNNING и
-// подтверждает RUNNING (no bricking, no intermediate). RESTARTING enum в proto
-// сохранён — контракт не тронут.
+// Restart перезапускает RUNNING ВМ (single atomic CAS RUNNING→RUNNING).
 func (s *InstanceService) Restart(ctx context.Context, id string) (*operations.Operation, error) {
-	// RUNNING→RUNNING идёт через общий lifecycle-путь (тот же single-atomic CAS +
-	// mapLifecycleErr + async-обвязка), а не переинлайнит её — единый диспетчер, без
-	// drift относительно Start/Stop.
 	return s.lifecycle(ctx, id, "Restart", domain.InstanceStatusRunning, domain.InstanceStatusRunning,
 		"Instance is not running", &computev1.RestartInstanceMetadata{InstanceId: id})
 }
@@ -566,10 +401,8 @@ func (s *InstanceService) lifecycle(ctx context.Context, id, action string, from
 		})
 }
 
-// mapLifecycleErr маппит ошибку SetStatusCAS в gRPC-status: ErrFailedPrecondition
-// от CAS-промаха («status != expected») транслируется в FailedPrecondition с
-// precondMsg ("Instance is not running"/"... not stopped"); все остальные
-// (ErrNotFound, ErrInternal, ...) — стандартный mapRepoErr.
+// mapLifecycleErr маппит ошибку SetStatusCAS: CAS-промах → FailedPrecondition
+// с precondMsg; остальное — стандартный mapRepoErr.
 func mapLifecycleErr(err error, precondMsg string) error {
 	if errors.Is(err, ErrFailedPrecondition) {
 		return status.Error(codes.FailedPrecondition, precondMsg)
@@ -577,106 +410,104 @@ func mapLifecycleErr(err error, precondMsg string) error {
 	return mapRepoErr(err)
 }
 
-// AttachDisk подключает READY-диск к ВМ (status ∈ {RUNNING, STOPPED}).
-func (s *InstanceService) AttachDisk(ctx context.Context, id string, spec DiskSourceSpec) (*operations.Operation, error) {
-	if id == "" {
+// AttachDisk подключает storage-Volume к ВМ (async сага → kacho-storage).
+//
+// Sync-фаза: malformed instance/volume-id первым стейтментом (sec.3.1). Async-worker:
+// compute-local CAS-гейт (GateForAttach: state ∈ {RUNNING, STOPPED} + self-describing
+// zone/project/name) → storage.Attach (fail-closed Unavailable, идемпотентный replay,
+// zone/project-coherence + attach-CAS на стороне storage). Компьют attach-строку
+// локально НЕ пишет (storage — владелец привязки; ацикличность).
+func (s *InstanceService) AttachDisk(ctx context.Context, instanceID string, req AttachDiskReq) (*operations.Operation, error) {
+	if instanceID == "" {
 		return nil, status.Error(codes.InvalidArgument, "instance_id required")
 	}
-	if spec.DiskID == "" {
-		return nil, invalidArg("attached_disk_spec.disk_id", "disk_id is required (inline disk_spec not supported on AttachDisk)")
+	// Malformed-id первым стейтментом (sync InvalidArgument, до Operation).
+	if err := corevalidate.ResourceID(insResource, ids.PrefixInstance, instanceID); err != nil {
+		return nil, err
 	}
-	return runOp(ctx, s.opsRepo, fmt.Sprintf("Attach disk to instance %s", id),
-		&computev1.AttachInstanceDiskMetadata{InstanceId: id, VolumeId: spec.DiskID},
+	if req.VolumeID == "" {
+		return nil, invalidArg("volume_id", "volume_id is required")
+	}
+	if err := validateVolumeID(req.VolumeID); err != nil {
+		return nil, err
+	}
+	return runOp(ctx, s.opsRepo, fmt.Sprintf("Attach disk to instance %s", instanceID),
+		&computev1.AttachInstanceDiskMetadata{InstanceId: instanceID, VolumeId: req.VolumeID},
 		func(ctx context.Context) (*anypb.Any, error) {
-			in, err := s.repo.Get(ctx, id)
+			zoneID, projectID, name, err := s.repo.GateForAttach(ctx, instanceID)
 			if err != nil {
 				return nil, mapRepoErr(err)
 			}
-			if in.Status != domain.InstanceStatusRunning && in.Status != domain.InstanceStatusStopped {
-				return nil, status.Error(codes.FailedPrecondition, "Instance is not running or stopped")
+			if s.storageClient == nil {
+				return nil, status.Error(codes.Unavailable, "volume service unavailable")
 			}
-			for _, ad := range in.AttachedDisks {
-				if ad.DiskID == spec.DiskID {
-					return nil, status.Errorf(codes.FailedPrecondition, "Disk %s is already attached", spec.DiskID)
-				}
-				if spec.DeviceName != "" && ad.DeviceName == spec.DeviceName {
-					return nil, status.Errorf(codes.FailedPrecondition, "device_name %s is already in use", spec.DeviceName)
-				}
+			if _, err := s.storageClient.Attach(ctx, VolumeAttachSpec{
+				VolumeID:       req.VolumeID,
+				InstanceID:     instanceID,
+				InstanceName:   name,
+				InstanceZoneID: zoneID,
+				ProjectID:      projectID,
+				DeviceName:     req.DeviceName,
+				IsBoot:         req.IsBoot,
+				Mode:           VolumeAttachMode(req.Mode),
+				AutoDelete:     req.AutoDelete,
+			}); err != nil {
+				return nil, err // storage-client уже нормализовал (leak-guard + contract codes)
 			}
-			d, err := s.diskRepo.Get(ctx, spec.DiskID)
-			if err != nil {
-				return nil, mapRefErr(err, "Disk", spec.DiskID)
-			}
-			// Cross-project BOLA guard: repo.Get resolves across ALL projects; a
-			// caller must not attach a disk owned by another project to their own
-			// instance (cross-project takeover + auto_delete destruction). Reject
-			// with NotFound (no existence oracle) BEFORE the status/zone leak. The
-			// insertAttachedDiskTx CTE re-enforces this at the DB level.
-			if d.ProjectID != in.ProjectID {
-				return nil, crossProjectNotFound("Disk", spec.DiskID)
-			}
-			if d.Status != domain.DiskStatusReady {
-				return nil, status.Errorf(codes.FailedPrecondition, "Disk %s is not READY", spec.DiskID)
-			}
-			if d.ZoneID != in.ZoneID {
-				return nil, status.Errorf(codes.InvalidArgument, "Disk %s is in zone %s, instance zone is %s", spec.DiskID, d.ZoneID, in.ZoneID)
-			}
-			attached, err := s.diskRepo.IsAttached(ctx, spec.DiskID)
-			if err != nil {
-				return nil, mapRepoErr(err)
-			}
-			if attached {
-				return nil, status.Errorf(codes.FailedPrecondition, "Disk %s is already attached", spec.DiskID)
-			}
-			updated, err := s.repo.AttachDisk(ctx, id, domain.AttachedDisk{
-				DiskID: spec.DiskID, IsBoot: false, Mode: domain.AttachedDiskMode(spec.Mode),
-				DeviceName: spec.DeviceName, AutoDelete: spec.AutoDelete, AttachedAt: time.Now().UTC(),
-			})
-			if err != nil {
-				return nil, mapRepoErr(err)
-			}
-			return anypb.New(protoconv.Instance(updated))
+			return s.reloadWithMirror(ctx, instanceID)
 		})
 }
 
-// DetachDisk отвязывает диск (по disk_id или device_name; не boot).
-func (s *InstanceService) DetachDisk(ctx context.Context, id, diskID, deviceName string) (*operations.Operation, error) {
-	if id == "" {
+// DetachDisk отвязывает том (по volume_id ЛИБО device_name; boot нельзя).
+// Идемпотентно: том не привязан → done no-op. Привязку резолвит storage
+// (compute local attach-state нет) — источник истины для volume_id/is_boot.
+func (s *InstanceService) DetachDisk(ctx context.Context, instanceID, volumeID, deviceName string) (*operations.Operation, error) {
+	if instanceID == "" {
 		return nil, status.Error(codes.InvalidArgument, "instance_id required")
 	}
-	if diskID == "" && deviceName == "" {
-		return nil, invalidArg("disk", "one of disk_id or device_name is required")
+	// oneof exactly_one: ровно одно из volume_id / device_name.
+	if (volumeID == "") == (deviceName == "") {
+		return nil, invalidArg("disk", "exactly one of volume_id or device_name is required")
 	}
-	return runOp(ctx, s.opsRepo, fmt.Sprintf("Detach disk from instance %s", id),
-		&computev1.DetachInstanceDiskMetadata{InstanceId: id, VolumeId: diskID},
+	if err := corevalidate.ResourceID(insResource, ids.PrefixInstance, instanceID); err != nil {
+		return nil, err
+	}
+	if err := validateVolumeID(volumeID); err != nil {
+		return nil, err
+	}
+	return runOp(ctx, s.opsRepo, fmt.Sprintf("Detach disk from instance %s", instanceID),
+		&computev1.DetachInstanceDiskMetadata{InstanceId: instanceID, VolumeId: volumeID},
 		func(ctx context.Context) (*anypb.Any, error) {
-			in, err := s.repo.Get(ctx, id)
-			if err != nil {
-				return nil, mapRepoErr(err)
+			if s.storageClient == nil {
+				return nil, status.Error(codes.Unavailable, "volume service unavailable")
 			}
-			var target *domain.AttachedDisk
-			for i := range in.AttachedDisks {
-				ad := &in.AttachedDisks[i]
-				if (diskID != "" && ad.DiskID == diskID) || (deviceName != "" && ad.DeviceName == deviceName) {
-					target = ad
+			atts, err := s.storageClient.ListAttachments(ctx, []string{instanceID})
+			if err != nil {
+				return nil, err // fail-closed (Unavailable) — не роняем detach в INTERNAL
+			}
+			var target *VolumeAttachmentInfo
+			for i := range atts {
+				a := &atts[i]
+				if (volumeID != "" && a.VolumeID == volumeID) || (deviceName != "" && a.DeviceName == deviceName) {
+					target = a
 					break
 				}
 			}
 			if target == nil {
-				return nil, status.Error(codes.FailedPrecondition, "Disk is not attached to the instance")
+				// Уже отвязан — идемпотентный no-op.
+				return s.reloadWithMirror(ctx, instanceID)
 			}
 			if target.IsBoot {
-				return nil, status.Error(codes.FailedPrecondition, "Cannot detach boot disk")
+				return nil, status.Error(codes.FailedPrecondition, "boot volume cannot be detached")
 			}
-			updated, err := s.repo.DetachDisk(ctx, id, target.DiskID)
-			if err != nil {
-				return nil, mapRepoErr(err)
+			if err := s.storageClient.Detach(ctx, target.VolumeID, instanceID); err != nil {
+				return nil, err
 			}
-			return anypb.New(protoconv.Instance(updated))
+			return s.reloadWithMirror(ctx, instanceID)
 		})
 }
 
-// SimulateMaintenanceEvent — no-op (control-plane: возвращает done-операцию с самой ВМ).
+// SimulateMaintenanceEvent — no-op (control-plane: done-операция с самой ВМ).
 func (s *InstanceService) SimulateMaintenanceEvent(ctx context.Context, id string) (*operations.Operation, error) {
 	if id == "" {
 		return nil, status.Error(codes.InvalidArgument, "instance_id required")
@@ -692,7 +523,20 @@ func (s *InstanceService) SimulateMaintenanceEvent(ctx context.Context, id strin
 		})
 }
 
-// Delete инициирует удаление ВМ (auto-delete диски удаляются, остальные detach'атся CASCADE).
+// Delete инициирует удаление ВМ (delete-сага, M2).
+//
+// Порядок (crash-safe, идемпотентный): (1) гейт instance→DELETING (конкурентный
+// AttachDisk-гейт видит DELETING и падает — attach-vs-delete race); (2) release всех
+// NIC-привязок через kacho-vpc (fail-closed Unavailable — не оставляем dangling);
+// (3) release всех volume-привязок через kacho-storage (fail-closed); (4) строка
+// инстанса удаляется ПОСЛЕДНЕЙ. Списки привязок пересчитываются из storage/vpc на
+// каждом прогоне (self-describing) → replay идемпотентен: уже снятая привязка
+// возвращается пустым списком, повторный Detach — no-op. Crash после любого шага
+// оставляет консистентное состояние (строка инстанса ещё жива → привязки резолвятся).
+//
+// NB: удаление auto_delete-томов (storage Volume.Delete) вынесено в отдельный
+// storage-side инкремент (acceptance sec.0.3) — здесь привязки лишь СНИМАЮТСЯ
+// (detach), что закрывает найденный go-review NIC/volume-leak.
 func (s *InstanceService) Delete(ctx context.Context, id string) (*operations.Operation, error) {
 	if id == "" {
 		return nil, status.Error(codes.InvalidArgument, "instance_id required")
@@ -700,10 +544,42 @@ func (s *InstanceService) Delete(ctx context.Context, id string) (*operations.Op
 	return runOp(ctx, s.opsRepo, fmt.Sprintf("Delete instance %s", id),
 		&computev1.DeleteInstanceMetadata{InstanceId: id},
 		func(ctx context.Context) (*anypb.Any, error) {
-			// auto-delete множество вычисляет repo.Delete ВНУТРИ своей TX из текущих
-			// attached_disks (project-rule 10) — здесь его больше НЕ снимаем out-of-tx,
-			// иначе конкурентный AttachDisk(auto_delete) оставил бы orphan-диск.
+			// (1) gate → DELETING. Уже удалён (crash-replay) → идемпотентный success.
+			if _, err := s.repo.MarkDeleting(ctx, id); err != nil {
+				if errors.Is(err, ErrNotFound) {
+					return anypb.New(&emptypb.Empty{})
+				}
+				return nil, mapRepoErr(err)
+			}
+			// (2) release NICs (fail-closed).
+			if s.nicClient != nil {
+				nics, err := s.nicClient.ListByInstance(ctx, []string{id})
+				if err != nil {
+					return nil, mapNicErr(err)
+				}
+				for i := range nics {
+					if err := s.nicClient.Detach(ctx, nics[i].NICID, id); err != nil {
+						return nil, mapNicErr(err)
+					}
+				}
+			}
+			// (3) release volumes (fail-closed).
+			if s.storageClient != nil {
+				vols, err := s.storageClient.ListAttachments(ctx, []string{id})
+				if err != nil {
+					return nil, err
+				}
+				for i := range vols {
+					if err := s.storageClient.Detach(ctx, vols[i].VolumeID, id); err != nil {
+						return nil, err
+					}
+				}
+			}
+			// (4) delete instance row LAST.
 			if err := s.repo.Delete(ctx, id); err != nil {
+				if errors.Is(err, ErrNotFound) {
+					return anypb.New(&emptypb.Empty{})
+				}
 				return nil, mapRepoErr(err)
 			}
 			return anypb.New(&emptypb.Empty{})
@@ -727,6 +603,85 @@ func (s *InstanceService) ListOperations(ctx context.Context, id string, p Pagin
 	return s.opsRepo.List(ctx, operations.ListFilter{ResourceID: id, PageSize: p.PageSize, PageToken: p.PageToken})
 }
 
+// ---- mirrors (read-only проекции attach-состояния из storage/vpc) ----
+
+// reloadWithMirror перечитывает инстанс и накладывает NIC/volume-зеркала — общий
+// хвост attach/detach-саг, возвращающий свежий Instance-снимок.
+func (s *InstanceService) reloadWithMirror(ctx context.Context, id string) (*anypb.Any, error) {
+	in, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return nil, mapRepoErr(err)
+	}
+	s.applyNicMirror(ctx, in)
+	s.applyVolumeMirror(ctx, in)
+	return anypb.New(protoconv.Instance(in))
+}
+
+// applyVolumeMirror заполняет in.AttachedDisks read-only зеркалом из kacho-storage
+// (source of truth). Graceful-degrade: nil-client или ошибка storage → зеркало
+// опускается (Get/List не падают).
+func (s *InstanceService) applyVolumeMirror(ctx context.Context, in *domain.Instance) {
+	if s.storageClient == nil || in == nil {
+		return
+	}
+	atts, err := s.storageClient.ListAttachments(ctx, []string{in.ID})
+	if err != nil {
+		return
+	}
+	in.AttachedDisks = volumeMirror(atts)
+}
+
+// applyVolumeMirrorBatch — batched (не N+1) зеркало для List: один ListAttachments
+// по всем id, затем раскладка по инстансам. Graceful-degrade как applyVolumeMirror.
+func (s *InstanceService) applyVolumeMirrorBatch(ctx context.Context, list []*domain.Instance) {
+	if s.storageClient == nil || len(list) == 0 {
+		return
+	}
+	instIDs := make([]string, 0, len(list))
+	for _, in := range list {
+		instIDs = append(instIDs, in.ID)
+	}
+	atts, err := s.storageClient.ListAttachments(ctx, instIDs)
+	if err != nil {
+		return
+	}
+	byInstance := make(map[string][]VolumeAttachmentInfo, len(list))
+	for _, a := range atts {
+		byInstance[a.InstanceID] = append(byInstance[a.InstanceID], a)
+	}
+	for _, in := range list {
+		in.AttachedDisks = volumeMirror(byInstance[in.ID])
+	}
+}
+
+// volumeMirror конвертирует storage volume-attachments в domain.AttachedDisk
+// (read-only зеркало), boot первым, затем по device_name — детерминированный порядок.
+func volumeMirror(atts []VolumeAttachmentInfo) []domain.AttachedDisk {
+	if len(atts) == 0 {
+		return nil
+	}
+	sorted := make([]VolumeAttachmentInfo, len(atts))
+	copy(sorted, atts)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].IsBoot != sorted[j].IsBoot {
+			return sorted[i].IsBoot // boot первым
+		}
+		return sorted[i].DeviceName < sorted[j].DeviceName
+	})
+	out := make([]domain.AttachedDisk, 0, len(sorted))
+	for i := range sorted {
+		a := &sorted[i]
+		out = append(out, domain.AttachedDisk{
+			DiskID:     a.VolumeID,
+			IsBoot:     a.IsBoot,
+			Mode:       domain.AttachedDiskMode(a.Mode),
+			DeviceName: a.DeviceName,
+			AutoDelete: a.AutoDelete,
+		})
+	}
+	return out
+}
+
 // ---- helpers ----
 
 // protoreflectMessage — alias для proto.Message (operations.New принимает его).
@@ -743,15 +698,6 @@ func validateResources(cores, memory, coreFraction int64) error {
 		if _, ok := validCoreFractions[coreFraction]; !ok {
 			return invalidArg("resources_spec.core_fraction", "core_fraction must be one of 0, 5, 20, 50, 100")
 		}
-	}
-	return nil
-}
-
-func validateDiskSourceSpec(field string, spec DiskSourceSpec) error {
-	hasRef := spec.DiskID != ""
-	hasInline := spec.NewDiskSizeBytes != 0 || spec.NewDiskTypeID != "" || spec.NewSourceImage != "" || spec.NewSourceSnap != ""
-	if hasRef == hasInline {
-		return invalidArg(field, "exactly one of disk_id or disk_spec must be set")
 	}
 	return nil
 }

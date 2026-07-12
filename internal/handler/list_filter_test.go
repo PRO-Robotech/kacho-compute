@@ -391,13 +391,10 @@ func TestInstanceHandler_List_CLL05(t *testing.T) {
 	zoneRegistry := portmock.NewZoneRegistry()
 	svc := service.NewInstanceService(
 		portmock.NewInstanceRepo(),
-		portmock.NewDiskRepo(),
-		portmock.NewImageRepo(),
-		portmock.NewSnapshotRepo(),
-		portmock.NewDiskTypeRepo(),
 		zoneRegistry,
 		&portmock.ProjectClient{OK: true},
 		portmock.NewNicClient(),
+		portmock.NewStorageClient(),
 		ops,
 	)
 	h := NewInstanceHandler(svc, newFilter(t, cli))
@@ -445,9 +442,8 @@ func TestListHandlers_SendViewerResolvingAction(t *testing.T) {
 		cli := &mockAuthCli{allowedByKey: map[string][]string{}}
 		ops := portmock.NewOpsRepo()
 		svc := service.NewInstanceService(
-			portmock.NewInstanceRepo(), portmock.NewDiskRepo(), portmock.NewImageRepo(),
-			portmock.NewSnapshotRepo(), portmock.NewDiskTypeRepo(), portmock.NewZoneRegistry(),
-			&portmock.ProjectClient{OK: true}, portmock.NewNicClient(), ops,
+			portmock.NewInstanceRepo(), portmock.NewZoneRegistry(),
+			&portmock.ProjectClient{OK: true}, portmock.NewNicClient(), portmock.NewStorageClient(), ops,
 		)
 		h := NewInstanceHandler(svc, newFilter(t, cli))
 		_, err := h.List(ctxWithSubject("user:usr_alice"), &computev1.ListInstancesRequest{ProjectId: "proj"})

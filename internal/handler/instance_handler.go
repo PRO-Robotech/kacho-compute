@@ -111,8 +111,12 @@ func (h *InstanceHandler) Create(ctx context.Context, req *computev1.CreateInsta
 // CreateReqFromProto — чистая proto→use-case конвертация CreateInstanceRequest в
 // svc.CreateInstanceReq (без auth/transport). Тот же маппинг, что выполняет RPC
 // Create; выделен, чтобы fuzz (internal/fuzz) прогонял ровно этот путь на
-// hostile-входах. network_interface_specs игнорируются — Instance создаётся без
-// auto-NIC (NIC-binding вынесен из lifecycle Instance).
+// hostile-входах.
+//
+// Storage-split cutover: boot_disk_spec / secondary_disk_specs / network_interface_specs
+// на входе Create ИГНОРИРУЮТСЯ — Instance создаётся без привязок (acceptance sec.0.3:
+// inline-attach out-of-scope). Тома/NIC подключаются явными AttachDisk/
+// AttachNetworkInterface на уже существующих ресурсах.
 func CreateReqFromProto(req *computev1.CreateInstanceRequest) svc.CreateInstanceReq {
 	cr := svc.CreateInstanceReq{
 		ProjectID:        req.ProjectId,
@@ -123,7 +127,6 @@ func CreateReqFromProto(req *computev1.CreateInstanceRequest) svc.CreateInstance
 		PlatformID:       req.PlatformId,
 		Metadata:         req.Metadata,
 		MetadataOptions:  req.MetadataOptions,
-		BootDisk:         diskSourceFromSpec(req.BootDiskSpec),
 		Hostname:         req.Hostname,
 		ServiceAccountID: req.ServiceAccountId,
 		PlacementPolicy:  req.PlacementPolicy,
@@ -137,9 +140,6 @@ func CreateReqFromProto(req *computev1.CreateInstanceRequest) svc.CreateInstance
 	}
 	if ns := req.NetworkSettings; ns != nil {
 		cr.NetworkSettingsType = ns.Type.String()
-	}
-	for _, sd := range req.SecondaryDiskSpecs {
-		cr.SecondaryDisks = append(cr.SecondaryDisks, diskSourceFromSpec(sd))
 	}
 	return cr
 }
@@ -247,7 +247,7 @@ func (h *InstanceHandler) AttachDisk(ctx context.Context, req *computev1.AttachI
 	if err := AssertProjectOwnership(ctx, in.ProjectID); err != nil {
 		return nil, err
 	}
-	op, err := h.svc.AttachDisk(ctx, req.InstanceId, diskSourceFromSpec(req.AttachedDiskSpec))
+	op, err := h.svc.AttachDisk(ctx, req.InstanceId, attachDiskReqFromSpec(req.AttachedDiskSpec))
 	if err != nil {
 		return nil, err
 	}
@@ -407,24 +407,18 @@ func (h *InstanceHandler) ListOperations(ctx context.Context, req *computev1.Lis
 
 // ---- conversion helpers ----
 
-func diskSourceFromSpec(s *computev1.AttachedDiskSpec) svc.DiskSourceSpec {
+// attachDiskReqFromSpec — proto AttachedDiskSpec → svc.AttachDiskReq. Только
+// volume_id-arm (storage-split: inline disk_spec на AttachDisk не поддерживается —
+// подключаются только уже созданные storage-Volume; sec.2.2). is_boot берётся из
+// AttachedDiskSpec (mirror: boot vs secondary на Instance).
+func attachDiskReqFromSpec(s *computev1.AttachedDiskSpec) svc.AttachDiskReq {
 	if s == nil {
-		return svc.DiskSourceSpec{}
+		return svc.AttachDiskReq{}
 	}
-	out := svc.DiskSourceSpec{
+	return svc.AttachDiskReq{
+		VolumeID:   s.GetVolumeId(),
 		DeviceName: s.GetDeviceName(),
 		AutoDelete: s.GetAutoDelete(),
 		Mode:       int32(s.GetMode()),
 	}
-	if s.GetVolumeId() != "" {
-		out.DiskID = s.GetVolumeId()
-		return out
-	}
-	if ds := s.GetDiskSpec(); ds != nil {
-		out.NewDiskSizeBytes = ds.GetSize()
-		out.NewDiskTypeID = ds.GetTypeId()
-		out.NewSourceImage = ds.GetImageId()
-		out.NewSourceSnap = ds.GetSnapshotId()
-	}
-	return out
 }

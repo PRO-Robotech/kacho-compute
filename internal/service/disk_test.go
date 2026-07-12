@@ -148,26 +148,27 @@ func TestDisk_Delete_OK(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestDisk_Delete_Attached_FailedPrecondition(t *testing.T) {
+// TestDisk_Delete_NoLocalAttachGate — storage-split: compute Disk больше не
+// «attached к инстансу» локально (том↔Instance-привязка в kacho-storage), поэтому
+// Delete не имеет in-use гейта и проходит.
+func TestDisk_Delete_NoLocalAttachGate(t *testing.T) {
 	svc, repo, _, _, ops := newDiskSvc(t, true)
 	repo.Seed(&domain.Disk{ID: "d1", ProjectID: "f", Size: diskSizeMin})
-	repo.SetAttached("d1", true)
 	op, err := svc.Delete(context.Background(), "d1")
 	require.NoError(t, err)
-	done := portmock.AwaitOpDone(t, ops, op.ID)
-	require.NotNil(t, done.Error)
-	require.Equal(t, int32(codes.FailedPrecondition), done.Error.Code)
+	require.Nil(t, portmock.AwaitOpDone(t, ops, op.ID).Error)
+	_, err = repo.Get(context.Background(), "d1")
+	require.Error(t, err)
 }
 
-func TestDisk_Relocate_Attached_Rejected(t *testing.T) {
+// TestDisk_Relocate_NoLocalAttachGate — storage-split: Relocate не имеет
+// local-attach гейта (compute Disk всегда detached локально) и проходит.
+func TestDisk_Relocate_NoLocalAttachGate(t *testing.T) {
 	svc, repo, _, _, ops := newDiskSvc(t, true)
 	repo.Seed(&domain.Disk{ID: "d1", ProjectID: "f", ZoneID: "ru-central1-a", Size: diskSizeMin})
-	repo.SetAttached("d1", true)
-	op, err := svc.Relocate(context.Background(), "d1", "ru-central1-b")
+	op, err := svc.Relocate(context.Background(), "d1", "ru-central1-a")
 	require.NoError(t, err)
-	done := portmock.AwaitOpDone(t, ops, op.ID)
-	require.NotNil(t, done.Error)
-	require.Equal(t, int32(codes.FailedPrecondition), done.Error.Code)
+	require.Nil(t, portmock.AwaitOpDone(t, ops, op.ID).Error)
 }
 
 func TestDisk_Operations_Always_HasComputePrefix(t *testing.T) {

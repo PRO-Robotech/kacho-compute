@@ -68,8 +68,6 @@ type DiskRepo interface {
 	// а не software-check-then-act: detached → новый zone_id; attached →
 	// ErrFailedPrecondition; нет диска → ErrNotFound.
 	SetZoneIfDetached(ctx context.Context, id, zoneID string) (*domain.Disk, error)
-	// IsAttached — true если есть строка attached_disks для disk_id.
-	IsAttached(ctx context.Context, id string) (bool, error)
 }
 
 // ImageRepo — port-интерфейс репозитория образов.
@@ -97,10 +95,12 @@ type SnapshotRepo interface {
 type InstanceRepo interface {
 	Get(ctx context.Context, id string) (*domain.Instance, error)
 	List(ctx context.Context, f InstanceFilter, p Pagination) ([]*domain.Instance, string, error)
-	// Insert вставляет ВМ + attached_disks в одной TX. inlineDisks — диски,
-	// созданные из disk_spec (вставляются в этой же TX). Возвращает созданную
-	// ВМ (с заполненными AttachedDisks).
-	Insert(ctx context.Context, in *domain.Instance, inlineDisks []*domain.Disk) (*domain.Instance, error)
+	// Insert вставляет строку ВМ (+ outbox CREATED + FGA register-intent) в одной
+	// writer-tx. compute больше НЕ держит local attach-state (storage-split
+	// cutover): том↔Instance-привязка живёт в kacho-storage, boot_volume/
+	// secondary_volumes — read-only зеркало, пересчитываемое на чтении. Возвращает
+	// созданную ВМ (без attached-строк — их нет).
+	Insert(ctx context.Context, in *domain.Instance) (*domain.Instance, error)
 	// Update обновляет mutable descriptive/resource поля (status НЕ трогает —
 	// им владеет SetStatusCAS). emitLabelsRegister: true когда "labels" присутствует
 	// в update-mask (или full-object PATCH применяет labels) → repo эмитит свежий FGA
@@ -119,19 +119,29 @@ type InstanceRepo interface {
 	// обновлённую ВМ (+ outbox UPDATED в той же TX). Within-service-инвариант на
 	// DB-уровне (CAS), не software check-then-act — защита от second-writer-wins.
 	SetStatusCAS(ctx context.Context, id string, expected, next domain.InstanceStatus) (*domain.Instance, error)
-	// AttachDisk добавляет строку attached_disks. Возвращает обновлённую ВМ.
-	AttachDisk(ctx context.Context, id string, ad domain.AttachedDisk) (*domain.Instance, error)
-	// DetachDisk удаляет строку attached_disks по disk_id. Возвращает обновлённую ВМ.
-	DetachDisk(ctx context.Context, id, diskID string) (*domain.Instance, error)
+	// GateForAttach — compute-local CAS-гейт disk/NIC-attach саги: атомарно
+	// проверяет, что инстанс в {RUNNING, STOPPED}, и возвращает self-describing
+	// payload (zone_id, project_id, name) для форварда в storage/vpc. Инстанс не в
+	// допустимом состоянии → ErrFailedPrecondition ("Instance must be RUNNING or
+	// STOPPED"); отсутствует → ErrNotFound. Гейт закрывает attach-vs-delete гонку
+	// (Delete переводит инстанс в DELETING первым → гейт видит DELETING → 0 rows),
+	// на DB-уровне (CAS), не software check-then-act.
+	GateForAttach(ctx context.Context, id string) (zoneID, projectID, name string, err error)
+	// MarkDeleting атомарно переводит инстанс в DELETING (идемпотентно: повтор на
+	// уже-DELETING инстансе — no-op OK). Возвращает инстанс (для self-describing
+	// release-payload delete-саги). Отсутствует → ErrNotFound. Ставится ПЕРЕД
+	// release'ом привязок, чтобы конкурентный AttachDisk-гейт видел DELETING и падал.
+	MarkDeleting(ctx context.Context, id string) (*domain.Instance, error)
 	// MergeMetadata атомарно применяет delete+upsert дельту к map metadata одним
 	// SQL-statement'ом (within-service-инвариант на DB-уровне, project-rule 10 —
 	// не Go-side read-modify-write, иначе second-writer-wins под concurrency).
 	// Возвращает обновлённую ВМ.
 	MergeMetadata(ctx context.Context, id string, del []string, upsert map[string]string) (*domain.Instance, error)
-	// Delete удаляет ВМ. Диски с auto_delete=true определяются ВНУТРИ TX Delete из
-	// текущих строк attached_disks (не из snapshot вызывающего — иначе конкурентный
-	// AttachDisk между out-of-tx Get и Delete-TX оставил бы orphan-диск, project-rule
-	// 10); остальные строки attached_disks чистит FK CASCADE.
+	// Delete удаляет строку ВМ (+ outbox DELETED + FGA unregister-intent) в одной
+	// writer-tx. Это ФИНАЛЬНЫЙ шаг delete-саги: том/NIC-привязки уже сняты через
+	// storage.Detach/vpc.Detach в use-case ДО этого вызова (compute local
+	// attach-state больше нет; ПОРЯДОК — строка инстанса удаляется ПОСЛЕДНЕЙ, чтобы
+	// crash не осиротил привязки). Отсутствует → ErrNotFound.
 	Delete(ctx context.Context, id string) error
 }
 

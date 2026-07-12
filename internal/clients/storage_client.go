@@ -37,7 +37,7 @@ const defaultVolumeCallTimeout = 5 * time.Second
 // auth.PropagateOutgoing, чтобы storage-side per-RPC authz-Check видел реального
 // caller'а (security.md). Транспортная недоступность (Unavailable/DeadlineExceeded)
 // нормализуется в фиксированный opaque Unavailable (leak-guard: сырой dial-текст с
-// host/port peer'а НЕ утекает наружу, security.md hardening-инвариант #1); контрактные
+// host/port peer'а НЕ утекает наружу, security.md hardening-инвариант N1); контрактные
 // коды storage (InvalidArgument/FailedPrecondition/NotFound + их тексты) пробрасываются
 // как есть — это собственный контракт владельца, не transport-leak.
 type StorageClient struct {

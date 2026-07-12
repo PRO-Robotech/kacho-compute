@@ -57,7 +57,7 @@ func TestIntegration_InstanceUpdate_DoesNotClobberLifecycleStatus(t *testing.T) 
 	instRepo := repo.NewInstanceRepo(pool)
 
 	inID := ids.NewID(ids.PrefixInstance)
-	_, err = instRepo.Insert(ctx, newRunningInstance(inID), nil)
+	_, err = instRepo.Insert(ctx, newRunningInstance(inID))
 	require.NoError(t, err)
 
 	// (1) Update use-case reads the instance up-front — captures status=RUNNING.
@@ -104,7 +104,7 @@ func TestIntegration_InstanceUpdate_ConcurrentWithStop_ExactlyOneStatusOutcome(t
 	instRepo := repo.NewInstanceRepo(pool)
 
 	inID := ids.NewID(ids.PrefixInstance)
-	_, err = instRepo.Insert(ctx, newRunningInstance(inID), nil)
+	_, err = instRepo.Insert(ctx, newRunningInstance(inID))
 	require.NoError(t, err)
 
 	// Every Updater starts from the SAME stale RUNNING snapshot (as the real

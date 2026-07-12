@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,7 +21,13 @@ import (
 	"github.com/PRO-Robotech/kacho-compute/internal/ports"
 )
 
-// InstanceRepo — реализация ports.InstanceRepo поверх pgxpool (multi-table).
+// InstanceRepo — реализация ports.InstanceRepo поверх pgxpool.
+//
+// Storage-split cutover: compute больше НЕ держит local attach-state — таблица
+// `attached_disks` удалена (миграция 0013). Том↔Instance-привязка живёт в
+// kacho-storage; `Instance.boot_volume`/`secondary_volumes` — read-only зеркало,
+// заполняемое use-case'ом на чтении из storage. Здесь остаётся только строка
+// `instances` (+ same-DB NIC-mirror child таблица, cascade).
 type InstanceRepo struct {
 	pool *pgxpool.Pool
 }
@@ -35,20 +40,18 @@ const instanceCols = `id, project_id, created_at, name, description, labels, zon
 	`placement_policy, serial_port_ssh_authorization, gpu_cluster_id, hardware_generation, maintenance_policy, ` +
 	`maintenance_grace_period_seconds, reserved_instance_pool_id, host_group_id, host_id, application`
 
-// Get возвращает ВМ по id (+ attached_disks).
+// Get возвращает ВМ по id. AttachedDisks НЕ заполняются здесь — это зеркало из
+// kacho-storage, use-case подтягивает его на чтении (graceful-degrade).
 func (r *InstanceRepo) Get(ctx context.Context, id string) (*domain.Instance, error) {
 	q := fmt.Sprintf(`SELECT %s FROM instances WHERE id = $1`, instanceCols)
 	in, err := scanInstance(r.pool.QueryRow(ctx, q, id))
 	if err != nil {
 		return nil, wrapPgErr(err, "Instance", id)
 	}
-	if err := r.fillChildren(ctx, r.pool, in); err != nil {
-		return nil, err
-	}
 	return in, nil
 }
 
-// List возвращает ВМ по folder с cursor-pagination.
+// List возвращает ВМ по project с cursor-pagination.
 func (r *InstanceRepo) List(ctx context.Context, f ports.InstanceFilter, p ports.Pagination) ([]*domain.Instance, string, error) {
 	pageSize, err := validate.PageSize("page_size", p.PageSize)
 	if err != nil {
@@ -120,17 +123,13 @@ func (r *InstanceRepo) List(ctx context.Context, f ports.InstanceFilter, p ports
 		nextToken = encodePageToken(last.CreatedAt, last.ID)
 		result = result[:pageSize]
 	}
-	// Batch children fetch: ONE attached_disks query over all page ids
-	// (WHERE instance_id = ANY(...)) instead of a per-row SELECT (N+1 storm that
-	// held a pool conn for up to page_size serial round-trips).
-	if err := r.fillChildrenBatch(ctx, r.pool, result); err != nil {
-		return nil, "", err
-	}
 	return result, nextToken, nil
 }
 
-// Insert вставляет ВМ + attached_disks + inline-диски в одной TX.
-func (r *InstanceRepo) Insert(ctx context.Context, in *domain.Instance, inlineDisks []*domain.Disk) (*domain.Instance, error) {
+// Insert вставляет строку ВМ + outbox CREATED + FGA register-intent в одной
+// writer-tx. Никаких attached_disks / inline-дисков — compute local attach-state
+// упразднён (storage-split).
+func (r *InstanceRepo) Insert(ctx context.Context, in *domain.Instance) (*domain.Instance, error) {
 	insertArgs, err := instanceInsertArgs(in)
 	if err != nil {
 		return nil, err
@@ -141,52 +140,11 @@ func (r *InstanceRepo) Insert(ctx context.Context, in *domain.Instance, inlineDi
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// inline disks first (FK attached_disks.disk_id → disks).
-	for _, d := range inlineDisks {
-		if err := insertDiskTx(ctx, tx, d); err != nil {
-			return nil, err
-		}
-	}
-
 	const qIns = `INSERT INTO instances (` + instanceCols + `)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30) RETURNING ` + instanceCols
 	created, err := scanInstance(tx.QueryRow(ctx, qIns, insertArgs...))
 	if err != nil {
 		return nil, wrapPgErr(err, "Instance", in.Name)
-	}
-	for _, ad := range in.AttachedDisks {
-		if err := insertAttachedDiskTx(ctx, tx, in.ID, ad); err != nil {
-			// UNIQUE на attached_disks.disk_id — диск уже attached другой Instance.
-			if isAttachedDisksDiskIDUniqViolation(err) {
-				return nil, fmt.Errorf("%w: disk already attached to another instance", ports.ErrFailedPrecondition)
-			}
-			// per-instance device_name / boot uniqueness — тот же класс инварианта, что
-			// и concurrent AttachDisk-путь (mutateAndReload). Держим error-контракт
-			// согласованным: обе → FailedPrecondition, не codes.Internal (mapRepoErr не
-			// имел бы sentinel для raw 23505 attached_disks_device_uniq/boot_uniq).
-			if isAttachedDisksDeviceOrBootUniqViolation(err) {
-				return nil, fmt.Errorf("%w: device_name or boot-disk already in use on this instance", ports.ErrFailedPrecondition)
-			}
-			// любой другой UNIQUE — generic AlreadyExists sentinel, не raw pgx-error
-			// (иначе mapRepoErr отдал бы codes.Internal "internal database error").
-			if isUniqueViolation(err) {
-				return nil, ports.ErrAlreadyExists
-			}
-			return nil, err
-		}
-	}
-	for _, d := range inlineDisks {
-		if err := emitCompute(ctx, tx, "Disk", d.ID, "CREATED", diskPayload(d)); err != nil {
-			return nil, ports.ErrInternal
-		}
-		// inline boot/secondary disks are created resources → register their
-		// owner-tuple too, in the same writer-tx, carrying the disk labels.
-		if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Disk", d.ID, d.ProjectID, d.Labels); err != nil {
-			return nil, ports.ErrInternal
-		}
-	}
-	if err := r.fillChildrenTx(ctx, tx, created); err != nil {
-		return nil, err
 	}
 	if err := emitCompute(ctx, tx, "Instance", created.ID, "CREATED", instancePayload(created)); err != nil {
 		return nil, ports.ErrInternal
@@ -203,21 +161,12 @@ func (r *InstanceRepo) Insert(ctx context.Context, in *domain.Instance, inlineDi
 }
 
 // Update обновляет mutable descriptive/resource поля ВМ + outbox UPDATED.
-// status НЕ трогается — им владеет исключительно SetStatusCAS (lifecycle).
+// status НЕ трогается — им владеет исключительно SetStatusCAS/MarkDeleting.
 //
-// emitLabelsRegister: when true (the use-case saw "labels" in the update-mask, or
-// a full-object PATCH that applies labels) a fresh FGA register-intent carrying the
-// updated labels + parent-scope is emitted IN THE SAME writer-tx as the UPDATE
-// (atomic) so the IAM resource_mirror stays in sync. When false
-// (name/description/… without labels) NO register-intent is emitted — labels-
-// membership and the immutable parent are unchanged, so a refresh would be
-// pointless traffic.
+// emitLabelsRegister: when true a fresh FGA register-intent carrying the updated
+// labels + parent-scope is emitted IN THE SAME writer-tx as the UPDATE (atomic) so
+// the IAM resource_mirror stays in sync.
 func (r *InstanceRepo) Update(ctx context.Context, in *domain.Instance, emitLabelsRegister bool, changed []string) (*domain.Instance, error) {
-	// column-scoped SET: пишем ТОЛЬКО фактически изменённые колонки (`changed`).
-	// Полный column-set затирал бы независимое поле, изменённое конкурентным
-	// Update, значением из устаревшего Get-снимка (lost update). status в SET
-	// НЕ входит никогда — им владеет атомарный SetStatusCAS (lifecycle); писать
-	// его здесь клобберило бы конкурентный Stop/Start/Restart.
 	ch := changedSet(changed)
 	us := newUpdateSet(in.ID)
 	if _, ok := ch["name"]; ok {
@@ -247,12 +196,8 @@ func (r *InstanceRepo) Update(ctx context.Context, in *domain.Instance, emitLabe
 		us.add("network_settings_type", in.NetworkSettingsType)
 	}
 	// requireStopped: resize (resources_spec) и replatform (platform_id) разрешены
-	// ТОЛЬКО пока instance STOPPED (нельзя live-resize / live-replatform). Инвариант
-	// закрывается на DB-уровне атомарным CAS `AND status='STOPPED'` в самом UPDATE —
-	// НЕ software Get→check→UPDATE: между софтверной проверкой и записью конкурентный
-	// Start (SetStatusCAS STOPPED→RUNNING) закоммитил бы смену статуса, а безусловный
-	// UPDATE приземлил бы resize на уже-RUNNING машину (TOCTOU; within-service
-	// инвариант обязан жить на DB-уровне, не software check-then-act).
+	// ТОЛЬКО пока instance STOPPED. Инвариант закрывается на DB-уровне атомарным CAS
+	// `AND status='STOPPED'` в самом UPDATE — НЕ software Get→check→UPDATE.
 	requireStopped := false
 	if _, ok := ch["resources_spec"]; ok {
 		us.add("cores", in.Cores)
@@ -280,7 +225,6 @@ func (r *InstanceRepo) Update(ctx context.Context, in *domain.Instance, emitLabe
 	} else {
 		where := ` WHERE id = $1`
 		if requireStopped {
-			// $1 = id, $2..$N = SET-колонки; статус-предикат занимает следующий $.
 			us.args = append(us.args, instanceStatusName(domain.InstanceStatusStopped))
 			where += fmt.Sprintf(` AND status = $%d`, len(us.args))
 		}
@@ -289,9 +233,6 @@ func (r *InstanceRepo) Update(ctx context.Context, in *domain.Instance, emitLabe
 	}
 	if err != nil {
 		if requireStopped && errors.Is(err, pgx.ErrNoRows) {
-			// 0 строк на resize/replatform-CAS: либо instance не существует
-			// (NotFound), либо он не STOPPED (FailedPrecondition). Различаем
-			// EXISTS-пробой в той же TX — как SetStatusCAS.
 			var exists bool
 			if e2 := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM instances WHERE id = $1)`, in.ID).Scan(&exists); e2 != nil {
 				return nil, wrapPgErr(e2, "Instance", in.ID)
@@ -303,14 +244,9 @@ func (r *InstanceRepo) Update(ctx context.Context, in *domain.Instance, emitLabe
 		}
 		return nil, wrapPgErr(err, "Instance", in.ID)
 	}
-	if err := r.fillChildrenTx(ctx, tx, updated); err != nil {
-		return nil, err
-	}
 	if err := emitCompute(ctx, tx, "Instance", updated.ID, "UPDATED", instancePayload(updated)); err != nil {
 		return nil, ports.ErrInternal
 	}
-	// refresh the IAM resource_mirror only when labels were in the update-mask.
-	// Emitted in the SAME writer-tx as the UPDATE (atomic).
 	if emitLabelsRegister {
 		if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventRegister, "Instance", updated.ID, updated.ProjectID, updated.Labels); err != nil {
 			return nil, ports.ErrInternal
@@ -323,14 +259,7 @@ func (r *InstanceRepo) Update(ctx context.Context, in *domain.Instance, emitLabe
 }
 
 // SetStatusCAS атомарно переводит instance из expected-status в next-status
-// (within-service-инвариант на DB-уровне, не software check-then-act).
-//
-// Conditional UPDATE: `WHERE id=$1 AND status=$expected` — Postgres row-level
-// lock сериализует concurrent writer'ов на одной row; второй writer ждёт
-// commit'а первого, после чего видит уже обновлённый status, WHERE не
-// matches, 0 rows → FailedPrecondition. Различаем NotFound vs
-// FailedPrecondition дополнительным `SELECT EXISTS` в той же TX. Закрывает
-// TOCTOU `Get→check→SetStatus` (software check-then-act race).
+// (within-service-инвариант на DB-уровне, conditional UPDATE WHERE id AND status).
 func (r *InstanceRepo) SetStatusCAS(ctx context.Context, id string, expected, next domain.InstanceStatus) (*domain.Instance, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -344,7 +273,6 @@ func (r *InstanceRepo) SetStatusCAS(ctx context.Context, id string, expected, ne
 		return nil, wrapPgErr(err, "Instance", id)
 	}
 	if tag.RowsAffected() == 0 {
-		// Различаем «instance не существует» vs «instance в другом state».
 		var exists bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM instances WHERE id = $1)`, id).Scan(&exists); err != nil {
 			return nil, wrapPgErr(err, "Instance", id)
@@ -359,9 +287,6 @@ func (r *InstanceRepo) SetStatusCAS(ctx context.Context, id string, expected, ne
 	if err != nil {
 		return nil, wrapPgErr(err, "Instance", id)
 	}
-	if err := r.fillChildrenTx(ctx, tx, in); err != nil {
-		return nil, err
-	}
 	if err := emitCompute(ctx, tx, "Instance", in.ID, "UPDATED", instancePayload(in)); err != nil {
 		return nil, ports.ErrInternal
 	}
@@ -371,37 +296,76 @@ func (r *InstanceRepo) SetStatusCAS(ctx context.Context, id string, expected, ne
 	return in, nil
 }
 
-// AttachDisk добавляет строку attached_disks + outbox UPDATED.
-func (r *InstanceRepo) AttachDisk(ctx context.Context, id string, ad domain.AttachedDisk) (*domain.Instance, error) {
-	return r.mutateAndReload(ctx, id, "UPDATED", func(ctx context.Context, tx pgx.Tx) error {
-		return insertAttachedDiskTx(ctx, tx, id, ad)
-	})
+// GateForAttach — compute-local CAS-гейт attach-саги (disk/NIC): атомарно
+// проверяет, что инстанс в {RUNNING, STOPPED}, и возвращает self-describing payload
+// (zone_id/project_id/name) для форварда в storage/vpc. Реализован conditional
+// SELECT `WHERE status IN (...)` — 0 rows означает либо отсутствие инстанса
+// (NotFound), либо недопустимое состояние (FailedPrecondition). Гейт закрывает
+// attach-vs-delete гонку (Delete ставит DELETING первым → status IN(...) не сматчит).
+func (r *InstanceRepo) GateForAttach(ctx context.Context, id string) (string, string, string, error) {
+	var zoneID, projectID, name string
+	err := r.pool.QueryRow(ctx,
+		`SELECT zone_id, project_id, name FROM instances
+		  WHERE id = $1 AND status IN ('RUNNING','STOPPED')`, id).
+		Scan(&zoneID, &projectID, &name)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Различаем «нет инстанса» vs «в недопустимом состоянии».
+			var exists bool
+			if e2 := r.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM instances WHERE id = $1)`, id).Scan(&exists); e2 != nil {
+				return "", "", "", wrapPgErr(e2, "Instance", id)
+			}
+			if !exists {
+				return "", "", "", fmt.Errorf("%w: Instance %s not found", ports.ErrNotFound, id)
+			}
+			return "", "", "", fmt.Errorf("%w: Instance must be RUNNING or STOPPED", ports.ErrFailedPrecondition)
+		}
+		return "", "", "", wrapPgErr(err, "Instance", id)
+	}
+	return zoneID, projectID, name, nil
 }
 
-// DetachDisk удаляет строку attached_disks по disk_id + outbox UPDATED.
-func (r *InstanceRepo) DetachDisk(ctx context.Context, id, diskID string) (*domain.Instance, error) {
-	return r.mutateAndReload(ctx, id, "UPDATED", func(ctx context.Context, tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `DELETE FROM attached_disks WHERE instance_id = $1 AND disk_id = $2`, id, diskID)
-		return err
-	})
+// MarkDeleting атомарно переводит инстанс в DELETING (идемпотентно). Ставится ПЕРЕД
+// release'ом привязок в delete-саге, чтобы конкурентный AttachDisk-гейт видел
+// DELETING и падал (attach-vs-delete race). Повтор на уже-DELETING — no-op OK.
+func (r *InstanceRepo) MarkDeleting(ctx context.Context, id string) (*domain.Instance, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, ports.ErrInternal
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	tag, err := tx.Exec(ctx, `UPDATE instances SET status = 'DELETING' WHERE id = $1 AND status <> 'DELETING'`, id)
+	if err != nil {
+		return nil, wrapPgErr(err, "Instance", id)
+	}
+	q := fmt.Sprintf(`SELECT %s FROM instances WHERE id = $1`, instanceCols)
+	in, err := scanInstance(tx.QueryRow(ctx, q, id))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("%w: Instance %s not found", ports.ErrNotFound, id)
+		}
+		return nil, wrapPgErr(err, "Instance", id)
+	}
+	if tag.RowsAffected() > 0 {
+		// эмитим UPDATED только на фактическом переходе (не на идемпотентном повторе).
+		if err := emitCompute(ctx, tx, "Instance", in.ID, "UPDATED", instancePayload(in)); err != nil {
+			return nil, ports.ErrInternal
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, wrapPgErr(err, "Instance", id)
+	}
+	return in, nil
 }
 
 // MergeMetadata атомарно применяет delete+upsert дельту к map metadata одним
-// SQL-statement'ом + outbox UPDATED. del — ключи на удаление, upsert — ключи на
-// вставку/перезапись.
-//
-// Within-service-инвариант на DB-уровне (project-rule 10): merge выполняется
-// одним `UPDATE … SET metadata = (metadata - $del::text[]) || $upsert::jsonb`,
-// а НЕ Go-side read-modify-write. Row-level lock Postgres сериализует конкурентные
-// merge'и на одной row → второй writer видит уже применённую дельту первого и
-// накладывает свою поверх (no lost update). Прежний
-// Get→merge-in-Go→unconditional-overwrite давал second-writer-wins.
+// SQL-statement'ом + outbox UPDATED (within-service-инвариант на DB-уровне).
 func (r *InstanceRepo) MergeMetadata(ctx context.Context, id string, del []string, upsert map[string]string) (*domain.Instance, error) {
 	upsertJSON, err := marshalJSONB(orEmptyMap(upsert), "Instance.metadata.upsert")
 	if err != nil {
 		return nil, err
 	}
-	// nil-slice → пустой text[]; удаление отсутствующих ключей — no-op.
 	delKeys := del
 	if delKeys == nil {
 		delKeys = []string{}
@@ -416,90 +380,28 @@ func (r *InstanceRepo) MergeMetadata(ctx context.Context, id string, del []strin
 	})
 }
 
-// Delete удаляет ВМ. Множество auto-delete дисков вычисляется ВНУТРИ этой TX из
-// строк attached_disks (не из snapshot вызывающего) — иначе конкурентный
-// AttachDisk(auto_delete=true), закоммиченный между out-of-tx Get вызывающего и
-// этой TX, оставил бы orphan-диск: его attached_disks-строку унёс бы CASCADE, а
-// сам диск не удалился бы (стейл-снимок его не содержал). Within-service-инвариант
-// на DB-уровне (project-rule 10), не cross-tx read-modify-write. Остальные строки
-// attached_disks (auto_delete=false) чистит FK CASCADE на DELETE instance.
+// Delete удаляет строку ВМ + outbox DELETED + FGA unregister-intent в одной
+// writer-tx. ФИНАЛЬНЫЙ шаг delete-саги — том/NIC-привязки уже сняты в use-case
+// (storage.Detach/vpc.Detach) ДО этого вызова; строка инстанса удаляется ПОСЛЕДНЕЙ,
+// чтобы crash не осиротил привязки. Никакого attached_disks-sweep (таблицы нет).
 func (r *InstanceRepo) Delete(ctx context.Context, id string) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return ports.ErrInternal
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	// Блокируем row инстанса: конкурентный AttachDisk при INSERT в attached_disks
-	// берёт FK KEY-SHARE lock на instances(id); наш FOR UPDATE конфликтует с ним и
-	// сериализует — новая привязка не может закоммититься в окне между sweep'ом
-	// attached_disks и DELETE instance (иначе — orphan auto_delete диск). NotFound,
-	// если инстанс уже удалён (в т.ч. конкурентным Delete, ждавшим на этом lock'е).
 	var projectID string
-	err = tx.QueryRow(ctx, `SELECT project_id FROM instances WHERE id = $1 FOR UPDATE`, id).Scan(&projectID)
+	err = tx.QueryRow(ctx, `DELETE FROM instances WHERE id = $1 RETURNING project_id`, id).Scan(&projectID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("%w: Instance %s not found", ports.ErrNotFound, id)
 		}
 		return wrapPgErr(err, "Instance", id)
 	}
-	// Detach всех дисков + вычисление auto-delete множества из ТЕКУЩИХ строк одной
-	// DELETE … RETURNING (FK attached_disks.disk_id RESTRICT не блокирует удаление
-	// auto-delete дисков — строки уже сняты этим DELETE).
-	adRows, err := tx.Query(ctx, `DELETE FROM attached_disks WHERE instance_id = $1 RETURNING disk_id, auto_delete`, id)
-	if err != nil {
-		return wrapPgErr(err, "Instance", id)
-	}
-	var autoDeleteDiskIDs []string
-	for adRows.Next() {
-		var diskID string
-		var autoDelete bool
-		if err := adRows.Scan(&diskID, &autoDelete); err != nil {
-			adRows.Close()
-			return wrapPgErr(err, "Instance", id)
-		}
-		if autoDelete {
-			autoDeleteDiskIDs = append(autoDeleteDiskIDs, diskID)
-		}
-	}
-	adRows.Close()
-	if err := adRows.Err(); err != nil {
-		return wrapPgErr(err, "Instance", id)
-	}
-	// DELETE … RETURNING project_id (auto-delete disks share the instance's
-	// project) so the FGA unregister-intents (below) can build the project-hierarchy
-	// tuples of the just-deleted resources within the same writer-tx.
-	for _, did := range autoDeleteDiskIDs {
-		var diskProject string
-		err := tx.QueryRow(ctx, `DELETE FROM disks WHERE id = $1 RETURNING project_id`, did).Scan(&diskProject)
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				// already gone — nothing to unregister; carry on (idempotent delete).
-				continue
-			}
-			if isFKViolation(err) {
-				return fmt.Errorf("%w: The disk %s is being used", ports.ErrFailedPrecondition, did)
-			}
-			return wrapPgErr(err, "Disk", did)
-		}
-		if err := emitCompute(ctx, tx, "Disk", did, "DELETED", map[string]any{"id": did}); err != nil {
-			return ports.ErrInternal
-		}
-		// symmetric FGA unregister-intent for the auto-deleted disk.
-		// Unregister removes the mirror row by object → labels are irrelevant (nil).
-		if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventUnregister, "Disk", did, diskProject, nil); err != nil {
-			return ports.ErrInternal
-		}
-	}
-	// Инстанс уже залочен FOR UPDATE выше и гарантированно существует → plain DELETE
-	// (project_id взят из того же locked-row снимка).
-	if _, err := tx.Exec(ctx, `DELETE FROM instances WHERE id = $1`, id); err != nil {
-		return wrapPgErr(err, "Instance", id)
-	}
+	// instance_network_interfaces (same-DB cascade child) снимается FK CASCADE.
 	if err := emitCompute(ctx, tx, "Instance", id, "DELETED", map[string]any{"id": id}); err != nil {
 		return ports.ErrInternal
 	}
-	// symmetric FGA unregister-intent for the instance in the SAME writer-tx.
-	// Unregister removes the mirror row by object → labels are irrelevant (nil).
 	if err := emitFGARegisterIntent(ctx, tx, fgaintent.EventUnregister, "Instance", id, projectID, nil); err != nil {
 		return ports.ErrInternal
 	}
@@ -517,7 +419,6 @@ func (r *InstanceRepo) mutateAndReload(ctx context.Context, id, eventType string
 		return nil, ports.ErrInternal
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	// ensure instance exists.
 	var exists bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM instances WHERE id = $1)`, id).Scan(&exists); err != nil {
 		return nil, wrapPgErr(err, "Instance", id)
@@ -526,38 +427,12 @@ func (r *InstanceRepo) mutateAndReload(ctx context.Context, id, eventType string
 		return nil, fmt.Errorf("%w: Instance %s not found", ports.ErrNotFound, id)
 	}
 	if err := mutate(ctx, tx); err != nil {
-		if isFKViolation(err) {
-			return nil, fmt.Errorf("%w: Instance %s has dependent resources", ports.ErrFailedPrecondition, id)
-		}
-		// UNIQUE на attached_disks.disk_id — диск уже attached другой Instance.
-		// Отделяем от generic AlreadyExists (мапит в FailedPrecondition, не AlreadyExists).
-		if isAttachedDisksDiskIDUniqViolation(err) {
-			return nil, fmt.Errorf("%w: disk already attached to another instance", ports.ErrFailedPrecondition)
-		}
-		// per-instance device_name / boot uniqueness — тот же класс инварианта, что
-		// sequential software-check в service.AttachDisk (FailedPrecondition). Держим
-		// error-контракт согласованным между sequential и concurrent путями.
-		if isAttachedDisksDeviceOrBootUniqViolation(err) {
-			return nil, fmt.Errorf("%w: device_name or boot-disk already in use on this instance", ports.ErrFailedPrecondition)
-		}
-		if isUniqueViolation(err) {
-			return nil, ports.ErrAlreadyExists
-		}
-		// Уже классифицированный sentinel из mutate (напр. zone/status-consistent
-		// attach вернул FailedPrecondition) — пробрасываем как есть, иначе wrapPgErr
-		// схлопнул бы его в generic Internal.
-		if errors.Is(err, ports.ErrFailedPrecondition) {
-			return nil, err
-		}
 		return nil, wrapPgErr(err, "Instance", id)
 	}
 	q := fmt.Sprintf(`SELECT %s FROM instances WHERE id = $1`, instanceCols)
 	in, err := scanInstance(tx.QueryRow(ctx, q, id))
 	if err != nil {
 		return nil, wrapPgErr(err, "Instance", id)
-	}
-	if err := r.fillChildrenTx(ctx, tx, in); err != nil {
-		return nil, err
 	}
 	if err := emitCompute(ctx, tx, "Instance", in.ID, eventType, instancePayload(in)); err != nil {
 		return nil, ports.ErrInternal
@@ -566,133 +441,6 @@ func (r *InstanceRepo) mutateAndReload(ctx context.Context, id, eventType string
 		return nil, wrapPgErr(err, "Instance", id)
 	}
 	return in, nil
-}
-
-type querier interface {
-	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
-}
-
-func (r *InstanceRepo) fillChildren(ctx context.Context, q querier, in *domain.Instance) error {
-	return r.fillChildrenGeneric(ctx, q, in)
-}
-
-func (r *InstanceRepo) fillChildrenTx(ctx context.Context, tx pgx.Tx, in *domain.Instance) error {
-	return r.fillChildrenGeneric(ctx, tx, in)
-}
-
-// fillChildrenBatch loads attached_disks for a whole page of instances in a single
-// round-trip (WHERE instance_id = ANY($1)) and groups them in memory, keeping the
-// per-instance ordering (is_boot DESC, attached_at) via the ORDER BY. Same result as
-// calling fillChildren per row, but O(1) queries instead of O(len(instances)).
-func (r *InstanceRepo) fillChildrenBatch(ctx context.Context, q querier, instances []*domain.Instance) error {
-	if len(instances) == 0 {
-		return nil
-	}
-	byID := make(map[string]*domain.Instance, len(instances))
-	ids := make([]string, 0, len(instances))
-	for _, in := range instances {
-		byID[in.ID] = in
-		ids = append(ids, in.ID)
-	}
-	adRows, err := q.Query(ctx, `SELECT instance_id, disk_id, is_boot, mode, device_name, auto_delete, attached_at FROM attached_disks WHERE instance_id = ANY($1) ORDER BY instance_id, is_boot DESC, attached_at`, ids)
-	if err != nil {
-		return wrapPgErr(err, "Instance", "")
-	}
-	defer adRows.Close()
-	for adRows.Next() {
-		var instanceID, modeName string
-		var ad domain.AttachedDisk
-		if err := adRows.Scan(&instanceID, &ad.DiskID, &ad.IsBoot, &modeName, &ad.DeviceName, &ad.AutoDelete, &ad.AttachedAt); err != nil {
-			return wrapPgErr(err, "Instance", instanceID)
-		}
-		ad.Mode = attachedDiskModeFromName(modeName)
-		if in, ok := byID[instanceID]; ok {
-			in.AttachedDisks = append(in.AttachedDisks, ad)
-		}
-	}
-	return wrapPgErr(adRows.Err(), "Instance", "")
-}
-
-func (r *InstanceRepo) fillChildrenGeneric(ctx context.Context, q querier, in *domain.Instance) error {
-	// attached_disks.
-	adRows, err := q.Query(ctx, `SELECT disk_id, is_boot, mode, device_name, auto_delete, attached_at FROM attached_disks WHERE instance_id = $1 ORDER BY is_boot DESC, attached_at`, in.ID)
-	if err != nil {
-		return wrapPgErr(err, "Instance", in.ID)
-	}
-	for adRows.Next() {
-		var ad domain.AttachedDisk
-		var modeName string
-		if err := adRows.Scan(&ad.DiskID, &ad.IsBoot, &modeName, &ad.DeviceName, &ad.AutoDelete, &ad.AttachedAt); err != nil {
-			adRows.Close()
-			return wrapPgErr(err, "Instance", in.ID)
-		}
-		ad.Mode = attachedDiskModeFromName(modeName)
-		in.AttachedDisks = append(in.AttachedDisks, ad)
-	}
-	adRows.Close()
-	if err := adRows.Err(); err != nil {
-		return wrapPgErr(err, "Instance", in.ID)
-	}
-	return nil
-}
-
-func insertAttachedDiskTx(ctx context.Context, tx pgx.Tx, instanceID string, ad domain.AttachedDisk) error {
-	at := ad.AttachedAt
-	if at.IsZero() {
-		at = time.Now().UTC()
-	}
-	// Атомарный zone/status/project-consistent attach (within-service DB-invariant):
-	// диск лочится FOR UPDATE в CTE — это сериализует против Disk.Relocate
-	// (SetZoneIfDetached берёт тот же FOR UPDATE на disks(id)). Zone-, READY- и
-	// project-предикаты вычисляются ПОД локом, поэтому прежняя TOCTOU-гонка
-	// (service-слой читал zone unlocked, затем безусловный INSERT) закрыта: если
-	// relocate закоммитил новую зону раньше, EvalPlanQual перечитывает её в CTE →
-	// предикат `ld.zone_id = i.zone_id` не сматчит → 0 rows → FailedPrecondition
-	// вместо cross-zone attach.
-	//
-	// `ld.project_id = i.project_id` — cross-tenant BOLA guard на DB-уровне
-	// (project-rule 10): даже если service-слой пропустил бы disk чужого проекта
-	// (или его обошли), DB не даст прикрепить его к instance другого проекта
-	// (cross-project takeover + auto_delete destruction). project_id обоих ресурсов
-	// иммутабелен, так что предикат — статический инвариант, не гонка.
-	tag, err := tx.Exec(ctx, `
-		WITH locked_disk AS (
-			SELECT d.zone_id, d.status, d.project_id
-			  FROM disks d
-			 WHERE d.id = $2
-			 FOR UPDATE
-		)
-		INSERT INTO attached_disks (instance_id, disk_id, is_boot, mode, device_name, auto_delete, attached_at)
-		SELECT $1, $2, $3, $4, $5, $6, $7
-		  FROM locked_disk ld
-		  JOIN instances i ON i.id = $1
-		 WHERE ld.zone_id = i.zone_id
-		   AND ld.status = 'READY'
-		   AND ld.project_id = i.project_id`,
-		instanceID, ad.DiskID, ad.IsBoot, attachedDiskModeName(ad.Mode), ad.DeviceName, ad.AutoDelete, at)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("%w: Disk %s is not READY or not in the instance zone/project", ports.ErrFailedPrecondition, ad.DiskID)
-	}
-	return nil
-}
-
-// insertDiskTx вставляет диск внутри переданной TX (для inline-дисков Instance.Create).
-func insertDiskTx(ctx context.Context, tx pgx.Tx, d *domain.Disk) error {
-	args, err := diskInsertArgs(d)
-	if err != nil {
-		return err
-	}
-	const q = `INSERT INTO disks (id, project_id, created_at, name, description, labels, type_id, zone_id, size, block_size,
-		product_ids, status, source_image_id, source_snapshot_id, disk_placement_policy, hardware_generation, kms_key)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`
-	_, err = tx.Exec(ctx, q, args...)
-	if err != nil {
-		return wrapPgErr(err, "Disk", d.ID)
-	}
-	return nil
 }
 
 // ---- scan / args ----
@@ -790,28 +538,7 @@ func instanceStatusFromName(s string) domain.InstanceStatus {
 	return domain.InstanceStatusUnspecified
 }
 
-func attachedDiskModeName(m domain.AttachedDiskMode) string {
-	switch m {
-	case domain.AttachedDiskModeReadOnly:
-		return "READ_ONLY"
-	case domain.AttachedDiskModeReadWrite:
-		return "READ_WRITE"
-	default:
-		return "MODE_UNSPECIFIED"
-	}
-}
-
-func attachedDiskModeFromName(s string) domain.AttachedDiskMode {
-	switch s {
-	case "READ_ONLY":
-		return domain.AttachedDiskModeReadOnly
-	case "READ_WRITE":
-		return domain.AttachedDiskModeReadWrite
-	default:
-		return domain.AttachedDiskModeUnspecified
-	}
-}
-
+// orEmptyMap возвращает пустую map вместо nil (JSONB-колонки NOT NULL DEFAULT '{}').
 func orEmptyMap(m map[string]string) map[string]string {
 	if m == nil {
 		return map[string]string{}

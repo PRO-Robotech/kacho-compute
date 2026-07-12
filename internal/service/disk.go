@@ -316,7 +316,11 @@ func validateDiskUpdate(req UpdateDiskReq) error {
 	return nil
 }
 
-// Delete удаляет Disk (FailedPrecondition если attached).
+// Delete удаляет Disk.
+//
+// Storage-split cutover: `attached_disks` удалена — compute Disk больше не
+// «attached к инстансу» (том↔Instance-привязка живёт в kacho-storage на
+// volume-ресурсах), поэтому локального in-use гейта нет.
 func (s *DiskService) Delete(ctx context.Context, id string) (*operations.Operation, error) {
 	if id == "" {
 		return nil, status.Error(codes.InvalidArgument, "disk_id required")
@@ -324,13 +328,6 @@ func (s *DiskService) Delete(ctx context.Context, id string) (*operations.Operat
 	return runOp(ctx, s.opsRepo, fmt.Sprintf("Delete disk %s", id),
 		&computev1.DeleteDiskMetadata{DiskId: id},
 		func(ctx context.Context) (*anypb.Any, error) {
-			attached, err := s.repo.IsAttached(ctx, id)
-			if err != nil {
-				return nil, mapRepoErr(err)
-			}
-			if attached {
-				return nil, status.Errorf(codes.FailedPrecondition, "The disk %s is being used", id)
-			}
 			if err := s.repo.Delete(ctx, id); err != nil {
 				return nil, mapRepoErr(err)
 			}
@@ -338,7 +335,7 @@ func (s *DiskService) Delete(ctx context.Context, id string) (*operations.Operat
 		})
 }
 
-// Relocate инициирует перенос Disk в другую зону (precondition: disk не attached).
+// Relocate инициирует перенос Disk в другую зону.
 func (s *DiskService) Relocate(ctx context.Context, id, destZoneID string) (*operations.Operation, error) {
 	if id == "" {
 		return nil, status.Error(codes.InvalidArgument, "disk_id required")

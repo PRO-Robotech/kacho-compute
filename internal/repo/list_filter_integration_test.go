@@ -261,7 +261,7 @@ func TestIntegration_InstanceRepo_PaginationAfterFilter(t *testing.T) {
 			Cores: 2, Memory: 2 << 30, CoreFraction: 100,
 			Status: domain.InstanceStatusRunning, FQDN: id + ".auto.internal",
 			NetworkSettingsType: "STANDARD",
-		}, nil)
+		})
 		require.NoError(t, err)
 		allIDs = append(allIDs, id)
 	}

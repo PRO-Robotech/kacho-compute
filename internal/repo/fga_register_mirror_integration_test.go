@@ -30,16 +30,14 @@ func payloadMirror(t *testing.T, b []byte) fgaintent.Payload {
 	return p
 }
 
-func newMirrorInstance(id, projectID string, labels map[string]string) (*domain.Instance, *domain.Disk) {
-	bootDiskID := ids.NewID(ids.PrefixDisk)
-	in := &domain.Instance{
+func newMirrorInstance(id, projectID string, labels map[string]string) *domain.Instance {
+	// Storage-split: инстанс создаётся без привязок — FGA register-intent касается
+	// только самого инстанса (том-owner-tuple живёт в kacho-storage).
+	return &domain.Instance{
 		ID: id, ProjectID: projectID, CreatedAt: time.Now().UTC().Truncate(time.Microsecond), Name: "vm-" + id[len(id)-4:],
 		Labels: labels, ZoneID: "ru-central1-a", PlatformID: "standard-v3", Cores: 2, Memory: 2 << 30, CoreFraction: 100,
 		Status: domain.InstanceStatusRunning, FQDN: id + ".auto.internal", NetworkSettingsType: "STANDARD",
-		AttachedDisks: []domain.AttachedDisk{{DiskID: bootDiskID, IsBoot: true, AutoDelete: true}},
 	}
-	boot := &domain.Disk{ID: bootDiskID, ProjectID: projectID, CreatedAt: time.Now().UTC().Truncate(time.Microsecond), ZoneID: "ru-central1-a", Size: 4194304, BlockSize: 4096, Status: domain.DiskStatusReady}
-	return in, boot
 }
 
 // Test_Beta01_CreateInstance_IntentCarriesLabelsAndParent — β-01: Create instance
@@ -58,8 +56,8 @@ func Test_Beta01_CreateInstance_IntentCarriesLabelsAndParent(t *testing.T) {
 	instRepo := repo.NewInstanceRepo(pool)
 	inID := ids.NewID(ids.PrefixInstance)
 	projectID := "proj-aaaaaaaaaaaaaaaaa"
-	in, boot := newMirrorInstance(inID, projectID, map[string]string{"env": "dev", "team": "core"})
-	_, err = instRepo.Insert(ctx, in, []*domain.Disk{boot})
+	in := newMirrorInstance(inID, projectID, map[string]string{"env": "dev", "team": "core"})
+	_, err = instRepo.Insert(ctx, in)
 	require.NoError(t, err)
 
 	rows := queryFGARegisterRows(ctx, t, pool, inID)
@@ -89,8 +87,8 @@ func Test_Beta02_CreateInstance_NoLabels_IntentEmptyLabels(t *testing.T) {
 	instRepo := repo.NewInstanceRepo(pool)
 	inID := ids.NewID(ids.PrefixInstance)
 	projectID := "proj-bbbbbbbbbbbbbbbbb"
-	in, boot := newMirrorInstance(inID, projectID, nil)
-	_, err = instRepo.Insert(ctx, in, []*domain.Disk{boot})
+	in := newMirrorInstance(inID, projectID, nil)
+	_, err = instRepo.Insert(ctx, in)
 	require.NoError(t, err)
 
 	rows := queryFGARegisterRows(ctx, t, pool, inID)
@@ -116,8 +114,8 @@ func Test_Beta04_UpdateLabels_EmitsNewIntent(t *testing.T) {
 	instRepo := repo.NewInstanceRepo(pool)
 	inID := ids.NewID(ids.PrefixInstance)
 	projectID := "proj-ccccccccccccccccc"
-	in, boot := newMirrorInstance(inID, projectID, map[string]string{"env": "dev"})
-	created, err := instRepo.Insert(ctx, in, []*domain.Disk{boot})
+	in := newMirrorInstance(inID, projectID, map[string]string{"env": "dev"})
+	created, err := instRepo.Insert(ctx, in)
 	require.NoError(t, err)
 
 	// dev → prod, "labels" in mask → emitLabelsRegister = true.
@@ -160,8 +158,8 @@ func Test_BetaHardening_RegisterIntentStampsMonotonicSourceVersion(t *testing.T)
 	instRepo := repo.NewInstanceRepo(pool)
 	inID := ids.NewID(ids.PrefixInstance)
 	projectID := "proj-eeeeeeeeeeeeeeeee"
-	in, boot := newMirrorInstance(inID, projectID, map[string]string{"env": "dev"})
-	created, err := instRepo.Insert(ctx, in, []*domain.Disk{boot})
+	in := newMirrorInstance(inID, projectID, map[string]string{"env": "dev"})
+	created, err := instRepo.Insert(ctx, in)
 	require.NoError(t, err)
 
 	created.Labels = map[string]string{"env": "prod"}
@@ -201,8 +199,8 @@ func Test_BetaHardening_UnregisterIntentStampsTombstoneVersion(t *testing.T) {
 	instRepo := repo.NewInstanceRepo(pool)
 	inID := ids.NewID(ids.PrefixInstance)
 	projectID := "proj-fffffffffffffffff"
-	in, boot := newMirrorInstance(inID, projectID, map[string]string{"env": "dev"})
-	_, err = instRepo.Insert(ctx, in, []*domain.Disk{boot})
+	in := newMirrorInstance(inID, projectID, map[string]string{"env": "dev"})
+	_, err = instRepo.Insert(ctx, in)
 	require.NoError(t, err)
 	require.NoError(t, instRepo.Delete(ctx, inID))
 
@@ -239,8 +237,8 @@ func Test_Beta04b_UpdateNonLabels_NoNewIntent(t *testing.T) {
 	instRepo := repo.NewInstanceRepo(pool)
 	inID := ids.NewID(ids.PrefixInstance)
 	projectID := "proj-ddddddddddddddddd"
-	in, boot := newMirrorInstance(inID, projectID, map[string]string{"env": "dev"})
-	created, err := instRepo.Insert(ctx, in, []*domain.Disk{boot})
+	in := newMirrorInstance(inID, projectID, map[string]string{"env": "dev"})
+	created, err := instRepo.Insert(ctx, in)
 	require.NoError(t, err)
 
 	// name-only update → emitLabelsRegister = false.
@@ -273,8 +271,8 @@ func Test_Beta07_DeleteInstance_UnregisterIntent(t *testing.T) {
 	instRepo := repo.NewInstanceRepo(pool)
 	inID := ids.NewID(ids.PrefixInstance)
 	projectID := "proj-eeeeeeeeeeeeeeeee"
-	in, boot := newMirrorInstance(inID, projectID, map[string]string{"env": "dev"})
-	_, err = instRepo.Insert(ctx, in, []*domain.Disk{boot})
+	in := newMirrorInstance(inID, projectID, map[string]string{"env": "dev"})
+	_, err = instRepo.Insert(ctx, in)
 	require.NoError(t, err)
 
 	require.NoError(t, instRepo.Delete(ctx, inID))
@@ -309,8 +307,8 @@ func Test_Beta05_ConcurrentUpdateLabels_OutboxConsistent(t *testing.T) {
 	instRepo := repo.NewInstanceRepo(pool)
 	inID := ids.NewID(ids.PrefixInstance)
 	projectID := "proj-fffffffffffffffff"
-	in, boot := newMirrorInstance(inID, projectID, map[string]string{"env": "dev"})
-	created, err := instRepo.Insert(ctx, in, []*domain.Disk{boot})
+	in := newMirrorInstance(inID, projectID, map[string]string{"env": "dev"})
+	created, err := instRepo.Insert(ctx, in)
 	require.NoError(t, err)
 
 	const goroutines = 8

@@ -93,7 +93,7 @@ func TestIntegration_InstanceUpdate_ColumnScoped_NoLostUpdate(t *testing.T) {
 		ZoneID: "ru-central1-a", PlatformID: "standard-v3", Cores: 2, Memory: 2 << 30, CoreFraction: 100,
 		Status: domain.InstanceStatusRunning, FQDN: id + ".auto.internal", NetworkSettingsType: "STANDARD",
 		NetworkInterfaces: []domain.NetworkInterface{{Index: "0", SubnetID: "e9bsub", PrimaryV4Address: "10.0.0.10"}},
-	}, nil)
+	})
 	require.NoError(t, err)
 
 	inA, err := instRepo.Get(ctx, id)

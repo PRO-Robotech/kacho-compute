@@ -32,15 +32,16 @@ func NewDiskRepo(pool *pgxpool.Pool) *DiskRepo { return &DiskRepo{pool: pool} }
 const diskCols = `id, project_id, created_at, name, description, labels, type_id, zone_id, size, block_size, ` +
 	`product_ids, status, source_image_id, source_snapshot_id, disk_placement_policy, hardware_generation, kms_key`
 
-// Get возвращает диск по id (+ instance_ids из attached_disks).
+// Get возвращает диск по id.
+//
+// Storage-split cutover: `attached_disks` удалена — compute Disk больше НЕ несёт
+// instance_ids-зеркало (том↔Instance-привязка живёт в kacho-storage на
+// volume-ресурсах, не на compute-дисках). Disk.instance_ids остаётся пустым.
 func (r *DiskRepo) Get(ctx context.Context, id string) (*domain.Disk, error) {
 	q := fmt.Sprintf(`SELECT %s FROM disks WHERE id = $1`, diskCols)
 	d, err := scanDisk(r.pool.QueryRow(ctx, q, id))
 	if err != nil {
 		return nil, wrapPgErr(err, "Disk", id)
-	}
-	if err := r.fillInstanceIDs(ctx, d); err != nil {
-		return nil, err
 	}
 	return d, nil
 }
@@ -119,12 +120,8 @@ func (r *DiskRepo) List(ctx context.Context, f ports.DiskFilter, p ports.Paginat
 		nextToken = encodePageToken(last.CreatedAt, last.ID)
 		result = result[:pageSize]
 	}
-	// Batch instance-id fetch: ONE attached_disks query over all page ids
-	// (WHERE disk_id = ANY(...)) instead of a per-row SELECT (N+1 storm that held a
-	// pool conn for up to page_size serial round-trips).
-	if err := r.fillInstanceIDsBatch(ctx, result); err != nil {
-		return nil, "", err
-	}
+	// instance_ids-зеркало упразднено вместе с `attached_disks` (storage-split) —
+	// см. Get: compute Disk больше не отслеживает привязку к инстансам.
 	return result, nextToken, nil
 }
 
@@ -257,21 +254,14 @@ func (r *DiskRepo) Update(ctx context.Context, d *domain.Disk, emitLabelsRegiste
 	return result, nil
 }
 
-// SetZoneIfDetached атомарно переносит диск в другую зону, но только если он не
-// attached (Relocate). Инвариант «не релоцировать attached-диск» обеспечивается на
-// DB-уровне, а не software check-then-act.
+// SetZoneIfDetached атомарно переносит диск в другую зону (Relocate).
 //
-// Сериализация с конкурентным AttachDisk: `SELECT … FOR UPDATE` берёт на строке
-// disks row-lock `FOR UPDATE`, который конфликтует с `FOR KEY SHARE` — его берёт
-// INSERT в attached_disks по FK disk_id. Поэтому attach и relocate упорядочиваются:
-//   - relocate первым: attach-INSERT ждёт commit relocate, потом видит обновлённую
-//     зону (его собственный zone-guard отбивает несоответствие);
-//   - attach первым: relocate после его commit видит строку attached_disks и
-//     отдаёт FailedPrecondition.
-//
-// Один UPDATE с подзапросом `WHERE NOT EXISTS(…)` здесь недостаточен: он берёт лишь
-// `FOR NO KEY UPDATE`, который НЕ конфликтует с `FOR KEY SHARE` attach'а, и гонка
-// остаётся открытой. Нет диска → ErrNotFound; attached → ErrFailedPrecondition.
+// Storage-split cutover: `attached_disks` удалена — compute Disk больше НЕ несёт
+// локальной attach-строки (том↔Instance-привязка живёт в kacho-storage на
+// volume-ресурсах). Поэтому compute-Disk с точки зрения compute всегда detached, и
+// прежний attach-guard/сериализация с AttachDisk-INSERT неприменимы. Остаётся
+// одиночный атомарный UPDATE по id (row-lock на disks сериализует конкурентные
+// relocate). Нет диска → ErrNotFound.
 func (r *DiskRepo) SetZoneIfDetached(ctx context.Context, id, zoneID string) (*domain.Disk, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -279,18 +269,6 @@ func (r *DiskRepo) SetZoneIfDetached(ctx context.Context, id, zoneID string) (*d
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	var locked int
-	if err := tx.QueryRow(ctx, `SELECT 1 FROM disks WHERE id = $1 FOR UPDATE`, id).Scan(&locked); err != nil {
-		return nil, wrapPgErr(err, "Disk", id)
-	}
-	var attached bool
-	if err := tx.QueryRow(ctx,
-		`SELECT EXISTS(SELECT 1 FROM attached_disks WHERE disk_id = $1)`, id).Scan(&attached); err != nil {
-		return nil, wrapPgErr(err, "Disk", id)
-	}
-	if attached {
-		return nil, fmt.Errorf("%w: Disk is in use", ports.ErrFailedPrecondition)
-	}
 	result, err := scanDisk(tx.QueryRow(ctx,
 		`UPDATE disks SET zone_id = $2 WHERE id = $1 RETURNING `+diskCols, id, zoneID))
 	if err != nil {
@@ -305,7 +283,7 @@ func (r *DiskRepo) SetZoneIfDetached(ctx context.Context, id, zoneID string) (*d
 	return result, nil
 }
 
-// Delete удаляет диск (23503 → FailedPrecondition если attached) + outbox DELETED.
+// Delete удаляет диск + outbox DELETED.
 func (r *DiskRepo) Delete(ctx context.Context, id string) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -336,63 +314,6 @@ func (r *DiskRepo) Delete(ctx context.Context, id string) error {
 		return wrapPgErr(err, "Disk", id)
 	}
 	return nil
-}
-
-// IsAttached — true если есть строка attached_disks для disk_id.
-func (r *DiskRepo) IsAttached(ctx context.Context, id string) (bool, error) {
-	var exists bool
-	err := r.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM attached_disks WHERE disk_id = $1)`, id).Scan(&exists)
-	if err != nil {
-		return false, wrapPgErr(err, "Disk", id)
-	}
-	return exists, nil
-}
-
-// fillInstanceIDsBatch loads attached_disks instance_ids for a whole page of disks
-// in a single round-trip (WHERE disk_id = ANY($1)) and groups them in memory,
-// keeping the per-disk instance_id ordering via the ORDER BY. Same result as calling
-// fillInstanceIDs per row, but O(1) queries instead of O(len(disks)).
-func (r *DiskRepo) fillInstanceIDsBatch(ctx context.Context, disks []*domain.Disk) error {
-	if len(disks) == 0 {
-		return nil
-	}
-	byID := make(map[string]*domain.Disk, len(disks))
-	ids := make([]string, 0, len(disks))
-	for _, d := range disks {
-		byID[d.ID] = d
-		ids = append(ids, d.ID)
-	}
-	rows, err := r.pool.Query(ctx, `SELECT disk_id, instance_id FROM attached_disks WHERE disk_id = ANY($1) ORDER BY disk_id, instance_id`, ids)
-	if err != nil {
-		return wrapPgErr(err, "Disk", "")
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var diskID, iid string
-		if err := rows.Scan(&diskID, &iid); err != nil {
-			return wrapPgErr(err, "Disk", diskID)
-		}
-		if d, ok := byID[diskID]; ok {
-			d.InstanceIDs = append(d.InstanceIDs, iid)
-		}
-	}
-	return wrapPgErr(rows.Err(), "Disk", "")
-}
-
-func (r *DiskRepo) fillInstanceIDs(ctx context.Context, d *domain.Disk) error {
-	rows, err := r.pool.Query(ctx, `SELECT instance_id FROM attached_disks WHERE disk_id = $1 ORDER BY instance_id`, d.ID)
-	if err != nil {
-		return wrapPgErr(err, "Disk", d.ID)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var iid string
-		if err := rows.Scan(&iid); err != nil {
-			return wrapPgErr(err, "Disk", d.ID)
-		}
-		d.InstanceIDs = append(d.InstanceIDs, iid)
-	}
-	return rows.Err()
 }
 
 // ---- scan / args ----

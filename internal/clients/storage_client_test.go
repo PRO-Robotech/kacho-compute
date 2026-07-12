@@ -115,7 +115,7 @@ func TestStorageClient_Attach_ContractErrorPreserved(t *testing.T) {
 // TestStorageClient_Attach_Unavailable_FailClosed_LeakGuard — a transport-level
 // Unavailable (carrying raw dial details) must fail-closed as codes.Unavailable with
 // a FIXED opaque message: the caller-visible error must NOT leak the peer host/port
-// or driver text (security.md hardening-invariant #1, applied to the peer-client).
+// or driver text (security.md hardening-invariant N1, applied to the peer-client).
 func TestStorageClient_Attach_Unavailable_FailClosed_LeakGuard(t *testing.T) {
 	const dialLeak = "connection refused: dial tcp 10.42.7.13:9091: i/o timeout"
 	fake := &fakeStorageClient{attachFn: func(_ context.Context, _ *storagev1.AttachVolumeRequest) (*storagev1.AttachVolumeResponse, error) {

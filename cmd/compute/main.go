@@ -787,7 +787,7 @@ func buildServices(pool *pgxpool.Pool, projectClient service.ProjectClient, geoZ
 		image:    service.NewImageService(imageRepo, diskRepo, snapshotRepo, projectClient, opsRepo),
 		snapshot: service.NewSnapshotService(snapshotRepo, diskRepo, projectClient, opsRepo),
 		diskType: diskTypeSvc,
-		instance: service.NewInstanceService(instanceRepo, diskRepo, imageRepo, snapshotRepo, diskTypeRepo, geoZones, projectClient, nicClient, opsRepo),
+		instance: service.NewInstanceService(instanceRepo, geoZones, projectClient, nicClient, storageClient, opsRepo),
 	}
 }
 

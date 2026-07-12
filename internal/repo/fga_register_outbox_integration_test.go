@@ -77,15 +77,12 @@ func TestInstance_SEC_D_04_RegisterIntentInWriterTx(t *testing.T) {
 	instRepo := repo.NewInstanceRepo(pool)
 	inID := ids.NewID(ids.PrefixInstance)
 	projectID := "proj-aaaaaaaaaaaaaaaaa"
-	bootDiskID := ids.NewID(ids.PrefixDisk)
 	in := &domain.Instance{
 		ID: inID, ProjectID: projectID, CreatedAt: time.Now().UTC().Truncate(time.Microsecond), Name: "vm-a",
 		ZoneID: "ru-central1-a", PlatformID: "standard-v3", Cores: 2, Memory: 2 << 30, CoreFraction: 100,
 		Status: domain.InstanceStatusRunning, FQDN: inID + ".auto.internal", NetworkSettingsType: "STANDARD",
-		AttachedDisks: []domain.AttachedDisk{{DiskID: bootDiskID, IsBoot: true, AutoDelete: true}},
 	}
-	inlineBoot := &domain.Disk{ID: bootDiskID, ProjectID: projectID, CreatedAt: time.Now().UTC().Truncate(time.Microsecond), ZoneID: "ru-central1-a", Size: 4194304, BlockSize: 4096, Status: domain.DiskStatusReady}
-	_, err = instRepo.Insert(ctx, in, []*domain.Disk{inlineBoot})
+	_, err = instRepo.Insert(ctx, in)
 	require.NoError(t, err)
 
 	rows := queryFGARegisterRows(ctx, t, pool, inID)
@@ -107,54 +104,6 @@ func TestInstance_SEC_D_04_RegisterIntentInWriterTx(t *testing.T) {
 	assert.Equal(t, 1, domainCount)
 }
 
-// TestInstance_SEC_D_02_AbortNoIntent — a failed writer-tx (duplicate
-// attached disk → tx aborts) leaves NO fga.register intent and NO orphan instance
-// row (intent + Insert are one commit; both roll back).
-func TestInstance_SEC_D_02_AbortNoIntent(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	ctx := context.Background()
-	dsn := setupTestDB(t)
-	pool, err := coredb.NewPool(ctx, dsn)
-	require.NoError(t, err)
-	defer pool.Close()
-
-	diskRepo := repo.NewDiskRepo(pool)
-	instRepo := repo.NewInstanceRepo(pool)
-	projectID := "proj-aaaaaaaaaaaaaaaaa"
-
-	// disk already attached to a first instance.
-	sharedDiskID := ids.NewID(ids.PrefixDisk)
-	_, err = diskRepo.Insert(ctx, &domain.Disk{ID: sharedDiskID, ProjectID: projectID, CreatedAt: time.Now().UTC().Truncate(time.Microsecond), ZoneID: "ru-central1-a", Size: 4194304, BlockSize: 4096, Status: domain.DiskStatusReady})
-	require.NoError(t, err)
-	first := ids.NewID(ids.PrefixInstance)
-	_, err = instRepo.Insert(ctx, &domain.Instance{
-		ID: first, ProjectID: projectID, CreatedAt: time.Now().UTC().Truncate(time.Microsecond), Name: "vm-first",
-		ZoneID: "ru-central1-a", PlatformID: "standard-v3", Cores: 2, Memory: 2 << 30, CoreFraction: 100,
-		Status: domain.InstanceStatusRunning, FQDN: first + ".auto.internal", NetworkSettingsType: "STANDARD",
-		AttachedDisks: []domain.AttachedDisk{{DiskID: sharedDiskID, IsBoot: true}},
-	}, nil)
-	require.NoError(t, err)
-
-	// second instance tries to attach the SAME already-attached disk → tx aborts.
-	second := ids.NewID(ids.PrefixInstance)
-	_, err = instRepo.Insert(ctx, &domain.Instance{
-		ID: second, ProjectID: projectID, CreatedAt: time.Now().UTC().Truncate(time.Microsecond), Name: "vm-second",
-		ZoneID: "ru-central1-a", PlatformID: "standard-v3", Cores: 2, Memory: 2 << 30, CoreFraction: 100,
-		Status: domain.InstanceStatusRunning, FQDN: second + ".auto.internal", NetworkSettingsType: "STANDARD",
-		AttachedDisks: []domain.AttachedDisk{{DiskID: sharedDiskID, IsBoot: true}},
-	}, nil)
-	require.Error(t, err, "duplicate attach must fail the writer-tx")
-
-	// no intent for the aborted second instance.
-	rows := queryFGARegisterRows(ctx, t, pool, second)
-	assert.Empty(t, rows, "aborted tx leaves no fga.register intent")
-	// no orphan instance row.
-	_, gerr := instRepo.Get(ctx, second)
-	require.Error(t, gerr)
-}
-
 // TestInstance_SEC_D_03_UnregisterIntentOnDelete — Instance.Delete writes an
 // fga.unregister intent in the same writer-tx; payload
 // carries the project-hierarchy tuple; the instance row is gone.
@@ -171,15 +120,12 @@ func TestInstance_SEC_D_03_UnregisterIntentOnDelete(t *testing.T) {
 	instRepo := repo.NewInstanceRepo(pool)
 	inID := ids.NewID(ids.PrefixInstance)
 	projectID := "proj-bbbbbbbbbbbbbbbbb"
-	bootDiskID := ids.NewID(ids.PrefixDisk)
 	in := &domain.Instance{
 		ID: inID, ProjectID: projectID, CreatedAt: time.Now().UTC().Truncate(time.Microsecond), Name: "vm-del",
 		ZoneID: "ru-central1-a", PlatformID: "standard-v3", Cores: 2, Memory: 2 << 30, CoreFraction: 100,
 		Status: domain.InstanceStatusRunning, FQDN: inID + ".auto.internal", NetworkSettingsType: "STANDARD",
-		AttachedDisks: []domain.AttachedDisk{{DiskID: bootDiskID, IsBoot: true, AutoDelete: true}},
 	}
-	inlineBoot := &domain.Disk{ID: bootDiskID, ProjectID: projectID, CreatedAt: time.Now().UTC().Truncate(time.Microsecond), ZoneID: "ru-central1-a", Size: 4194304, BlockSize: 4096, Status: domain.DiskStatusReady}
-	_, err = instRepo.Insert(ctx, in, []*domain.Disk{inlineBoot})
+	_, err = instRepo.Insert(ctx, in)
 	require.NoError(t, err)
 
 	require.NoError(t, instRepo.Delete(ctx, inID))
