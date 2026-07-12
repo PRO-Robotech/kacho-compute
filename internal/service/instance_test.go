@@ -266,7 +266,7 @@ func TestInstance_AttachDetachDisk(t *testing.T) {
 	require.NoError(t, err)
 	in := instanceFromOp(t, portmock.AwaitOpDone(t, ops, op.ID))
 	require.Len(t, in.SecondaryDisks, 1)
-	require.Equal(t, "epddata", in.SecondaryDisks[0].DiskId)
+	require.Equal(t, "epddata", in.SecondaryDisks[0].VolumeId)
 
 	// detach boot → rejected.
 	op, err = svc.DetachDisk(context.Background(), "epdvm1", "epdboot", "")

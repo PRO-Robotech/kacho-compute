@@ -162,7 +162,11 @@ func attachedDisk(ad *domain.AttachedDisk) *computev1.AttachedDisk {
 		Mode:       computev1.AttachedDisk_Mode(ad.Mode),
 		DeviceName: ad.DeviceName,
 		AutoDelete: ad.AutoDelete,
-		DiskId:     ad.DiskID,
+		// disk_id was renamed to volume_id in the storage-split proto. During the
+		// strangler transition compute still owns the local disk row, so the local
+		// disk id is what is surfaced on the renamed wire field. The storage-volume
+		// attach saga (later cutover slice) replaces this with a real vol-id mirror.
+		VolumeId: ad.DiskID,
 	}
 }
 

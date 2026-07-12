@@ -265,7 +265,7 @@ func (h *InstanceHandler) DetachDisk(ctx context.Context, req *computev1.DetachI
 	if err := AssertProjectOwnership(ctx, in.ProjectID); err != nil {
 		return nil, err
 	}
-	op, err := h.svc.DetachDisk(ctx, req.InstanceId, req.GetDiskId(), req.GetDeviceName())
+	op, err := h.svc.DetachDisk(ctx, req.InstanceId, req.GetVolumeId(), req.GetDeviceName())
 	if err != nil {
 		return nil, err
 	}
@@ -363,8 +363,8 @@ func diskSourceFromSpec(s *computev1.AttachedDiskSpec) svc.DiskSourceSpec {
 		AutoDelete: s.GetAutoDelete(),
 		Mode:       int32(s.GetMode()),
 	}
-	if s.GetDiskId() != "" {
-		out.DiskID = s.GetDiskId()
+	if s.GetVolumeId() != "" {
+		out.DiskID = s.GetVolumeId()
 		return out
 	}
 	if ds := s.GetDiskSpec(); ds != nil {

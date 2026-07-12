@@ -571,7 +571,7 @@ func (s *InstanceService) AttachDisk(ctx context.Context, id string, spec DiskSo
 		return nil, invalidArg("attached_disk_spec.disk_id", "disk_id is required (inline disk_spec not supported on AttachDisk)")
 	}
 	return runOp(ctx, s.opsRepo, fmt.Sprintf("Attach disk to instance %s", id),
-		&computev1.AttachInstanceDiskMetadata{InstanceId: id, DiskId: spec.DiskID},
+		&computev1.AttachInstanceDiskMetadata{InstanceId: id, VolumeId: spec.DiskID},
 		func(ctx context.Context) (*anypb.Any, error) {
 			in, err := s.repo.Get(ctx, id)
 			if err != nil {
@@ -633,7 +633,7 @@ func (s *InstanceService) DetachDisk(ctx context.Context, id, diskID, deviceName
 		return nil, invalidArg("disk", "one of disk_id or device_name is required")
 	}
 	return runOp(ctx, s.opsRepo, fmt.Sprintf("Detach disk from instance %s", id),
-		&computev1.DetachInstanceDiskMetadata{InstanceId: id, DiskId: diskID},
+		&computev1.DetachInstanceDiskMetadata{InstanceId: id, VolumeId: diskID},
 		func(ctx context.Context) (*anypb.Any, error) {
 			in, err := s.repo.Get(ctx, id)
 			if err != nil {

@@ -130,9 +130,9 @@ func TestInstance_ProjectsExpectedFields(t *testing.T) {
 
 	// boot disk vs secondary split.
 	require.NotNil(t, out.GetBootDisk())
-	assert.Equal(t, "epd-boot", out.GetBootDisk().GetDiskId())
+	assert.Equal(t, "epd-boot", out.GetBootDisk().GetVolumeId())
 	require.Len(t, out.GetSecondaryDisks(), 1)
-	assert.Equal(t, "epd-data", out.GetSecondaryDisks()[0].GetDiskId())
+	assert.Equal(t, "epd-data", out.GetSecondaryDisks()[0].GetVolumeId())
 	require.Len(t, out.GetNetworkInterfaces(), 1)
 	assert.Equal(t, "10.0.0.2", out.GetNetworkInterfaces()[0].GetPrimaryV4Address().GetAddress())
 }
