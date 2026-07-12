@@ -22,11 +22,12 @@ import (
 //
 // Unimplemented RPC (наследуются из UnimplementedInstanceServiceServer →
 // codes.Unimplemented): AttachFilesystem/DetachFilesystem (blocked:kacho-filesystem),
-// AttachNetworkInterface/DetachNetworkInterface/UpdateNetworkInterface/AddOneToOneNat/
-// RemoveOneToOneNat (NIC binding removed from the Instance lifecycle — no auto-NIC:
-// Instance создаётся без network interface, поэтому включать/выключать NAT не над чем),
+// UpdateNetworkInterface/AddOneToOneNat/RemoveOneToOneNat (NIC first-class в kacho-vpc —
+// адресация/NAT редактируются через vpc NetworkInterface, не через Instance),
 // Relocate (blocked: cross-zone disk move), ListAccessBindings/SetAccessBindings/
 // UpdateAccessBindings (AAA-скелет). См. docs/architecture/07-known-divergences.md.
+// AttachNetworkInterface/DetachNetworkInterface — реализованы (S4, NIC-attach saga →
+// kacho-vpc InternalNetworkInterfaceService).
 type InstanceHandler struct {
 	computev1.UnimplementedInstanceServiceServer
 	svc        *svc.InstanceService
@@ -266,6 +267,58 @@ func (h *InstanceHandler) DetachDisk(ctx context.Context, req *computev1.DetachI
 		return nil, err
 	}
 	op, err := h.svc.DetachDisk(ctx, req.InstanceId, req.GetVolumeId(), req.GetDeviceName())
+	if err != nil {
+		return nil, err
+	}
+	return operationToProto(op), nil
+}
+
+// AttachNetworkInterface привязывает существующий kacho-vpc NIC к ВМ (async saga,
+// S4). Владелец привязки — kacho-vpc; compute держит ноль local attach-state.
+func (h *InstanceHandler) AttachNetworkInterface(ctx context.Context, req *computev1.AttachInstanceNetworkInterfaceRequest) (*operationpb.Operation, error) {
+	if req.InstanceId == "" {
+		return nil, status.Error(codes.InvalidArgument, "instance_id required")
+	}
+	spec := req.GetAttachedNicSpec()
+	if spec == nil {
+		return nil, status.Error(codes.InvalidArgument, "attached_nic_spec is required")
+	}
+	in, err := h.svc.Get(ctx, req.InstanceId)
+	if err != nil {
+		return nil, err
+	}
+	if err := AssertProjectOwnership(ctx, in.ProjectID); err != nil {
+		return nil, err
+	}
+	op, err := h.svc.AttachNetworkInterface(ctx, req.InstanceId, spec.GetNicId(), spec.GetIndex())
+	if err != nil {
+		return nil, err
+	}
+	return operationToProto(op), nil
+}
+
+// DetachNetworkInterface отвязывает NIC от ВМ по nic_id ЛИБО index (oneof, async
+// saga, S4). Пустой oneof → sync InvalidArgument (exactly_one).
+func (h *InstanceHandler) DetachNetworkInterface(ctx context.Context, req *computev1.DetachInstanceNetworkInterfaceRequest) (*operationpb.Operation, error) {
+	if req.InstanceId == "" {
+		return nil, status.Error(codes.InvalidArgument, "instance_id required")
+	}
+	in, err := h.svc.Get(ctx, req.InstanceId)
+	if err != nil {
+		return nil, err
+	}
+	if err := AssertProjectOwnership(ctx, in.ProjectID); err != nil {
+		return nil, err
+	}
+	var op *operations.Operation
+	switch req.GetNetworkInterface().(type) {
+	case *computev1.DetachInstanceNetworkInterfaceRequest_NicId:
+		op, err = h.svc.DetachNetworkInterface(ctx, req.InstanceId, req.GetNicId(), 0, false)
+	case *computev1.DetachInstanceNetworkInterfaceRequest_Index:
+		op, err = h.svc.DetachNetworkInterface(ctx, req.InstanceId, "", req.GetIndex(), true)
+	default:
+		return nil, status.Error(codes.InvalidArgument, "exactly one of nic_id or index is required")
+	}
 	if err != nil {
 		return nil, err
 	}

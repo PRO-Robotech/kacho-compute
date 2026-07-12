@@ -41,7 +41,7 @@ func newInstanceSvcGeo(t *testing.T, geoZones fakeGeoZoneCli) (*service.Instance
 	geoReg := clients.NewGeoClientWith(geoZones) // GeoClient implements service.ZoneRegistry
 	svc := service.NewInstanceService(
 		instanceRepo, diskRepo, portmock.NewImageRepo(), portmock.NewSnapshotRepo(),
-		portmock.NewDiskTypeRepo(), geoReg, &portmock.ProjectClient{OK: true}, ops,
+		portmock.NewDiskTypeRepo(), geoReg, &portmock.ProjectClient{OK: true}, portmock.NewNicClient(), ops,
 	)
 	return svc, ops
 }

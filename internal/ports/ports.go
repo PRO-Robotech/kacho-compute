@@ -152,6 +152,51 @@ type ProjectClient interface {
 	Exists(ctx context.Context, projectID string) (bool, error)
 }
 
+// NicAttachSpec — self-describing NIC-attach payload for compute→kacho-vpc
+// InternalNetworkInterfaceService.Attach. compute forwards the instance's
+// zone/name/project so kacho-vpc can validate zone-coherence (anycast/REGIONAL
+// subnet excepted) against its OWN network_interfaces + subnets rows — kacho-vpc
+// never calls compute back (acyclic edge; the NIC binding lives on the vpc-side
+// row, compute holds no local attach-state).
+type NicAttachSpec struct {
+	NICID          string
+	InstanceID     string
+	InstanceName   string
+	InstanceZoneID string
+	ProjectID      string
+	// Index — requested slot (eth0=0, eth1=1, …). 0 lets kacho-vpc assign the first
+	// free slot atomically.
+	Index int32
+}
+
+// NicAttachment — a single NIC↔Instance binding enriched with the instance-local
+// slot index + a denormalised mirror of the NIC's addressing (source of truth =
+// kacho-vpc NetworkInterface). Output-only on the compute side; used to build the
+// read-only Instance.network_interfaces[] mirror on Get/List.
+type NicAttachment struct {
+	NICID            string
+	InstanceID       string
+	Index            int32
+	SubnetID         string
+	PrimaryV4Address string
+	PrimaryV6Address string
+	SecurityGroupIDs []string
+	MACAddress       string
+}
+
+// NicClient — port for compute→kacho-vpc InternalNetworkInterfaceService (NIC↔
+// Instance attach coordination, internal :9091 mTLS). kacho-vpc owns the binding
+// and enforces the atomic used_by_id CAS + zone-coherence; compute only forwards a
+// self-describing payload and mirrors the result. Peer unavailable → fail-closed
+// (Unavailable) on the attach/detach mutations. ListByInstance is a best-effort
+// batched read for the Get/List mirror (graceful-degrade — the mirror is omitted
+// when kacho-vpc is unreachable, the Instance read itself never fails).
+type NicClient interface {
+	Attach(ctx context.Context, spec NicAttachSpec) (*NicAttachment, error)
+	Detach(ctx context.Context, nicID, instanceID string) error
+	ListByInstance(ctx context.Context, instanceIDs []string) ([]NicAttachment, error)
+}
+
 // ZoneRegistry — port для existence-check zone_id в Disk.Create / Instance.Create
 // (и Disk.Relocate). Реализуется поверх kacho-geo (geo.v1.ZoneService.Get) через
 // clients.GeoClient — Geography (Region/Zone) принадлежит kacho-geo. GetZone —

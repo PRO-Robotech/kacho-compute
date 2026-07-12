@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"google.golang.org/genproto/googleapis/rpc/status"
+	grpccodes "google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/PRO-Robotech/kacho-compute/internal/domain"
@@ -404,7 +406,11 @@ func (r *InstanceRepo) Seed(in *domain.Instance) {
 	r.data[in.ID] = in
 }
 
-// Get возвращает ВМ по id.
+// Get возвращает ВМ по id. Отдаёт shallow-КОПИЮ (не live-указатель) — зеркалит
+// pg-адаптер, где каждый Get — свежий scan строки: конкурентные worker'ы,
+// заполняющие read-only NIC-зеркало (applyNicMirror пишет in.NetworkInterfaces),
+// не делят один *domain.Instance (иначе data-race на общем указателе, чего в
+// проде нет).
 func (r *InstanceRepo) Get(_ context.Context, id string) (*domain.Instance, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -412,7 +418,8 @@ func (r *InstanceRepo) Get(_ context.Context, id string) (*domain.Instance, erro
 	if !ok {
 		return nil, ports.ErrNotFound
 	}
-	return in, nil
+	cp := *in
+	return &cp, nil
 }
 
 // List возвращает ВМ по folder.
@@ -691,6 +698,112 @@ type ProjectClient struct{ OK bool }
 
 // Exists возвращает ProjectClient.OK.
 func (c *ProjectClient) Exists(_ context.Context, _ string) (bool, error) { return c.OK, nil }
+
+// ---- NicClient ----
+
+// NicClient — in-memory fake ports.NicClient. Models the kacho-vpc side of the
+// NIC↔Instance binding: a single-slot-per-NIC map with atomic (mutex-serialised)
+// attach — enough to unit-test the compute saga-worker (auto-index, in-use CAS,
+// idempotent replay, mirror-read) without a live kacho-vpc. AttachErrs / Err inject
+// the peer error paths (zone-coherence FailedPrecondition, Unavailable fail-closed).
+type NicClient struct {
+	mu    sync.Mutex
+	byNic map[string]ports.NicAttachment // nicID → current binding
+	// AttachErrs — per-NIC injected Attach error (zone-coherence, in-use, …).
+	AttachErrs map[string]error
+	// Err — global injected error for Attach/Detach/ListByInstance (e.g. Unavailable).
+	Err error
+	// ListErr — injected error for ListByInstance only (mirror graceful-degrade test).
+	ListErr error
+}
+
+// NewNicClient создаёт пустой fake NicClient.
+func NewNicClient() *NicClient {
+	return &NicClient{byNic: make(map[string]ports.NicAttachment), AttachErrs: make(map[string]error)}
+}
+
+// SeedZoneMismatch помечает NIC как zone-incoherent — Attach вернёт
+// FailedPrecondition (S4-03), зеркалит kacho-vpc zone-coherence CAS-промах.
+func (c *NicClient) SeedZoneMismatch(nicID, msg string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.AttachErrs[nicID] = grpcstatus.Error(grpccodes.FailedPrecondition, msg)
+}
+
+// Attach атомарно (под mutex) привязывает NIC к инстансу: auto-index (первый
+// свободный слот при spec.Index==0), in-use-CAS (чужой инстанс → FailedPrecondition
+// "NetworkInterface is in use"), идемпотентный replay (already-ours → OK).
+func (c *NicClient) Attach(_ context.Context, spec ports.NicAttachSpec) (*ports.NicAttachment, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.Err != nil {
+		return nil, c.Err
+	}
+	if e := c.AttachErrs[spec.NICID]; e != nil {
+		return nil, e
+	}
+	if ex, ok := c.byNic[spec.NICID]; ok {
+		if ex.InstanceID != spec.InstanceID {
+			return nil, grpcstatus.Error(grpccodes.FailedPrecondition, "NetworkInterface is in use")
+		}
+		cp := ex
+		return &cp, nil // idempotent replay: already ours
+	}
+	used := make(map[int32]bool)
+	for _, a := range c.byNic {
+		if a.InstanceID == spec.InstanceID {
+			used[a.Index] = true
+		}
+	}
+	idx := spec.Index
+	for used[idx] {
+		idx++
+	}
+	att := ports.NicAttachment{
+		NICID: spec.NICID, InstanceID: spec.InstanceID, Index: idx,
+		SubnetID: "sub-fake", PrimaryV4Address: fmt.Sprintf("10.0.0.%d", idx+2),
+		MACAddress: fmt.Sprintf("00:11:22:33:44:%02d", idx),
+	}
+	c.byNic[spec.NICID] = att
+	cp := att
+	return &cp, nil
+}
+
+// Detach идемпотентно снимает привязку NIC↔instance (already-free → OK).
+func (c *NicClient) Detach(_ context.Context, nicID, instanceID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.Err != nil {
+		return c.Err
+	}
+	if ex, ok := c.byNic[nicID]; ok && ex.InstanceID == instanceID {
+		delete(c.byNic, nicID)
+	}
+	return nil
+}
+
+// ListByInstance — batched read of NIC-привязок по instance-ids.
+func (c *NicClient) ListByInstance(_ context.Context, instanceIDs []string) ([]ports.NicAttachment, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.ListErr != nil {
+		return nil, c.ListErr
+	}
+	if c.Err != nil {
+		return nil, c.Err
+	}
+	want := make(map[string]struct{}, len(instanceIDs))
+	for _, id := range instanceIDs {
+		want[id] = struct{}{}
+	}
+	var out []ports.NicAttachment
+	for _, a := range c.byNic {
+		if _, ok := want[a.InstanceID]; ok {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
 
 // ---- operations.Repo ----
 

@@ -26,7 +26,7 @@ func newInstanceSvc(t *testing.T, folderOK bool) (*InstanceService, *portmock.In
 	instanceRepo := portmock.NewInstanceRepo().WithDiskRepo(diskRepo)
 	ops := portmock.NewOpsRepo()
 	svc := NewInstanceService(instanceRepo, diskRepo, imgRepo, snapRepo, portmock.NewDiskTypeRepo(), portmock.NewZoneRegistry(),
-		&portmock.ProjectClient{OK: folderOK}, ops)
+		&portmock.ProjectClient{OK: folderOK}, portmock.NewNicClient(), ops)
 	return svc, instanceRepo, diskRepo, imgRepo, ops
 }
 
@@ -330,7 +330,7 @@ func TestInstance_Create_ZoneFromSource(t *testing.T) {
 	ops := portmock.NewOpsRepo()
 	zoneSrc := portmock.NewZoneRegistry("ru-central1-a")
 	svc := NewInstanceService(instanceRepo, diskRepo, portmock.NewImageRepo(), portmock.NewSnapshotRepo(),
-		portmock.NewDiskTypeRepo(), zoneSrc, &portmock.ProjectClient{OK: true}, ops)
+		portmock.NewDiskTypeRepo(), zoneSrc, &portmock.ProjectClient{OK: true}, portmock.NewNicClient(), ops)
 
 	// known zone → success.
 	op, err := svc.Create(context.Background(), baseCreateReq())

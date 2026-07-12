@@ -97,32 +97,47 @@ type InstanceService struct {
 	// SKIP_PEER_VALIDATION — no-op. Wiring — cmd/compute/main.go.
 	zones         ZoneRegistry
 	projectClient ProjectClient
-	opsRepo       operations.Repo
+	// nicClient — compute→kacho-vpc InternalNetworkInterfaceService (NIC↔Instance
+	// attach/detach + batched mirror-read). Может быть nil (SKIP_PEER_VALIDATION /
+	// vpc-edge не сконфигурирован): mutations fail-closed Unavailable, read-mirror
+	// грациозно опускается.
+	nicClient NicClient
+	opsRepo   operations.Repo
 }
 
 // NewInstanceService создаёт InstanceService.
-func NewInstanceService(repo InstanceRepo, diskRepo DiskRepo, imageRepo ImageRepo, snapshotRepo SnapshotRepo, diskTypeRepo DiskTypeRepo, zones ZoneRegistry, projectClient ProjectClient, opsRepo operations.Repo) *InstanceService {
+func NewInstanceService(repo InstanceRepo, diskRepo DiskRepo, imageRepo ImageRepo, snapshotRepo SnapshotRepo, diskTypeRepo DiskTypeRepo, zones ZoneRegistry, projectClient ProjectClient, nicClient NicClient, opsRepo operations.Repo) *InstanceService {
 	return &InstanceService{
 		repo: repo, diskRepo: diskRepo, imageRepo: imageRepo, snapshotRepo: snapshotRepo,
-		diskTypeRepo: diskTypeRepo, zones: zones, projectClient: projectClient, opsRepo: opsRepo,
+		diskTypeRepo: diskTypeRepo, zones: zones, projectClient: projectClient,
+		nicClient: nicClient, opsRepo: opsRepo,
 	}
 }
 
-// Get возвращает Instance по ID.
+// Get возвращает Instance по ID. NIC-зеркало (network_interfaces) подтягивается из
+// kacho-vpc (source of truth) с graceful-degrade — недоступность vpc не роняет Get
+// (consumer грациозно переживает недоступность owner'а).
 func (s *InstanceService) Get(ctx context.Context, id string) (*domain.Instance, error) {
 	in, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return nil, mapRepoErr(err)
 	}
+	s.applyNicMirror(ctx, in)
 	return in, nil
 }
 
-// List возвращает список ВМ. project_id обязателен.
+// List возвращает список ВМ. project_id обязателен. NIC-зеркало резолвится ОДНИМ
+// batched ListByInstance (не N+1) с graceful-degrade.
 func (s *InstanceService) List(ctx context.Context, f InstanceFilter, p Pagination) ([]*domain.Instance, string, error) {
 	if f.ProjectID == "" {
 		return nil, "", status.Error(codes.InvalidArgument, "project_id required")
 	}
-	return s.repo.List(ctx, f, p)
+	out, next, err := s.repo.List(ctx, f, p)
+	if err != nil {
+		return nil, "", err
+	}
+	s.applyNicMirrorBatch(ctx, out)
+	return out, next, nil
 }
 
 // ValidateCreateInstanceReq — синхронная pre-flight валидация Create-запроса

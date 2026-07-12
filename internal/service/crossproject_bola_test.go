@@ -164,7 +164,7 @@ func TestInstance_Create_CrossProjectInlineSnapshot_NotFound(t *testing.T) {
 	instanceRepo := portmock.NewInstanceRepo().WithDiskRepo(diskRepo)
 	ops := portmock.NewOpsRepo()
 	svc := NewInstanceService(instanceRepo, diskRepo, imgRepo, snapRepo, portmock.NewDiskTypeRepo(), portmock.NewZoneRegistry(),
-		&portmock.ProjectClient{OK: true}, ops)
+		&portmock.ProjectClient{OK: true}, portmock.NewNicClient(), ops)
 	snapRepo.Seed(&domain.Snapshot{ID: "svic", ProjectID: "victim", DiskSize: diskSizeMin})
 	req := baseCreateReq()
 	req.BootDisk = DiskSourceSpec{NewDiskSizeBytes: diskSizeMin, NewSourceSnap: "svic"}
