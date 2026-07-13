@@ -114,8 +114,7 @@ func TestTenantOwnershipGuard_CrossTenantDenied(t *testing.T) {
 	t.Run("instance", func(t *testing.T) {
 		instRepo := portmock.NewInstanceRepo()
 		ops := portmock.NewOpsRepo()
-		svc := service.NewInstanceService(instRepo, portmock.NewDiskRepo(), portmock.NewImageRepo(),
-			portmock.NewSnapshotRepo(), portmock.NewDiskTypeRepo(), portmock.NewZoneRegistry(), &portmock.ProjectClient{OK: true}, ops)
+		svc := service.NewInstanceService(instRepo, portmock.NewZoneRegistry(), &portmock.ProjectClient{OK: true}, portmock.NewNicClient(), portmock.NewStorageClient(), ops)
 		h := NewInstanceHandler(svc, nil)
 		instRepo.Seed(&domain.Instance{
 			ID: "epdvm1", ProjectID: guardOwnerFolder, Name: "vm", ZoneID: "ru-central1-a", PlatformID: "standard-v3",

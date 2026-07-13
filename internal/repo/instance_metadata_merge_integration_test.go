@@ -30,7 +30,7 @@ func seedInstanceForMetadata(t *testing.T, ctx context.Context, instRepo *repo.I
 		Status: domain.InstanceStatusRunning, FQDN: inID + ".auto.internal", NetworkSettingsType: "STANDARD",
 		Metadata:          md,
 		NetworkInterfaces: []domain.NetworkInterface{{Index: "0", SubnetID: "e9bsub", PrimaryV4Address: "10.0.0.10"}},
-	}, nil)
+	})
 	require.NoError(t, err)
 	return inID
 }

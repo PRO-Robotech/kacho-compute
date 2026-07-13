@@ -25,7 +25,7 @@ import (
 // fresh STOPPED snapshot.
 func stopInstance(ctx context.Context, t *testing.T, r *repo.InstanceRepo, id string) *domain.Instance {
 	t.Helper()
-	_, err := r.Insert(ctx, newRunningInstance(id), nil)
+	_, err := r.Insert(ctx, newRunningInstance(id))
 	require.NoError(t, err)
 	stopped, err := r.SetStatusCAS(ctx, id, domain.InstanceStatusRunning, domain.InstanceStatusStopped)
 	require.NoError(t, err)

@@ -22,11 +22,12 @@ import (
 //
 // Unimplemented RPC (наследуются из UnimplementedInstanceServiceServer →
 // codes.Unimplemented): AttachFilesystem/DetachFilesystem (blocked:kacho-filesystem),
-// AttachNetworkInterface/DetachNetworkInterface/UpdateNetworkInterface/AddOneToOneNat/
-// RemoveOneToOneNat (NIC binding removed from the Instance lifecycle — no auto-NIC:
-// Instance создаётся без network interface, поэтому включать/выключать NAT не над чем),
+// UpdateNetworkInterface/AddOneToOneNat/RemoveOneToOneNat (NIC first-class в kacho-vpc —
+// адресация/NAT редактируются через vpc NetworkInterface, не через Instance),
 // Relocate (blocked: cross-zone disk move), ListAccessBindings/SetAccessBindings/
 // UpdateAccessBindings (AAA-скелет). См. docs/architecture/07-known-divergences.md.
+// AttachNetworkInterface/DetachNetworkInterface — реализованы (S4, NIC-attach saga →
+// kacho-vpc InternalNetworkInterfaceService).
 type InstanceHandler struct {
 	computev1.UnimplementedInstanceServiceServer
 	svc        *svc.InstanceService
@@ -110,8 +111,12 @@ func (h *InstanceHandler) Create(ctx context.Context, req *computev1.CreateInsta
 // CreateReqFromProto — чистая proto→use-case конвертация CreateInstanceRequest в
 // svc.CreateInstanceReq (без auth/transport). Тот же маппинг, что выполняет RPC
 // Create; выделен, чтобы fuzz (internal/fuzz) прогонял ровно этот путь на
-// hostile-входах. network_interface_specs игнорируются — Instance создаётся без
-// auto-NIC (NIC-binding вынесен из lifecycle Instance).
+// hostile-входах.
+//
+// Storage-split cutover: boot_disk_spec / secondary_disk_specs / network_interface_specs
+// на входе Create ИГНОРИРУЮТСЯ — Instance создаётся без привязок (acceptance sec.0.3:
+// inline-attach out-of-scope). Тома/NIC подключаются явными AttachDisk/
+// AttachNetworkInterface на уже существующих ресурсах.
 func CreateReqFromProto(req *computev1.CreateInstanceRequest) svc.CreateInstanceReq {
 	cr := svc.CreateInstanceReq{
 		ProjectID:        req.ProjectId,
@@ -122,23 +127,21 @@ func CreateReqFromProto(req *computev1.CreateInstanceRequest) svc.CreateInstance
 		PlatformID:       req.PlatformId,
 		Metadata:         req.Metadata,
 		MetadataOptions:  req.MetadataOptions,
-		BootDisk:         diskSourceFromSpec(req.BootDiskSpec),
 		Hostname:         req.Hostname,
 		ServiceAccountID: req.ServiceAccountId,
 		PlacementPolicy:  req.PlacementPolicy,
 		Application:      req.Application,
+		Image:            req.Image,
 	}
 	if rs := req.ResourcesSpec; rs != nil {
 		cr.Cores, cr.Memory, cr.CoreFraction, cr.GPUs = rs.Cores, rs.Memory, rs.CoreFraction, rs.Gpus
+		cr.CPUGuaranteePercent = rs.CpuGuaranteePercent
 	}
 	if sp := req.SchedulingPolicy; sp != nil {
 		cr.Preemptible = sp.Preemptible
 	}
 	if ns := req.NetworkSettings; ns != nil {
 		cr.NetworkSettingsType = ns.Type.String()
-	}
-	for _, sd := range req.SecondaryDiskSpecs {
-		cr.SecondaryDisks = append(cr.SecondaryDisks, diskSourceFromSpec(sd))
 	}
 	return cr
 }
@@ -167,10 +170,12 @@ func (h *InstanceHandler) Update(ctx context.Context, req *computev1.UpdateInsta
 		ServiceAccountID: req.ServiceAccountId,
 		PlatformID:       req.PlatformId,
 		PlacementPolicy:  req.PlacementPolicy,
+		Image:            req.Image,
 		UpdateMask:       mask,
 	}
 	if rs := req.ResourcesSpec; rs != nil {
 		ur.Cores, ur.Memory, ur.CoreFraction, ur.GPUs = rs.Cores, rs.Memory, rs.CoreFraction, rs.Gpus
+		ur.CPUGuaranteePercent = rs.CpuGuaranteePercent
 	}
 	if ns := req.NetworkSettings; ns != nil {
 		ur.NetworkSettingsType = ns.Type.String()
@@ -246,7 +251,7 @@ func (h *InstanceHandler) AttachDisk(ctx context.Context, req *computev1.AttachI
 	if err := AssertProjectOwnership(ctx, in.ProjectID); err != nil {
 		return nil, err
 	}
-	op, err := h.svc.AttachDisk(ctx, req.InstanceId, diskSourceFromSpec(req.AttachedDiskSpec))
+	op, err := h.svc.AttachDisk(ctx, req.InstanceId, attachDiskReqFromSpec(req.AttachedDiskSpec))
 	if err != nil {
 		return nil, err
 	}
@@ -265,7 +270,59 @@ func (h *InstanceHandler) DetachDisk(ctx context.Context, req *computev1.DetachI
 	if err := AssertProjectOwnership(ctx, in.ProjectID); err != nil {
 		return nil, err
 	}
-	op, err := h.svc.DetachDisk(ctx, req.InstanceId, req.GetDiskId(), req.GetDeviceName())
+	op, err := h.svc.DetachDisk(ctx, req.InstanceId, req.GetVolumeId(), req.GetDeviceName())
+	if err != nil {
+		return nil, err
+	}
+	return operationToProto(op), nil
+}
+
+// AttachNetworkInterface привязывает существующий kacho-vpc NIC к ВМ (async saga,
+// S4). Владелец привязки — kacho-vpc; compute держит ноль local attach-state.
+func (h *InstanceHandler) AttachNetworkInterface(ctx context.Context, req *computev1.AttachInstanceNetworkInterfaceRequest) (*operationpb.Operation, error) {
+	if req.InstanceId == "" {
+		return nil, status.Error(codes.InvalidArgument, "instance_id required")
+	}
+	spec := req.GetAttachedNicSpec()
+	if spec == nil {
+		return nil, status.Error(codes.InvalidArgument, "attached_nic_spec is required")
+	}
+	in, err := h.svc.Get(ctx, req.InstanceId)
+	if err != nil {
+		return nil, err
+	}
+	if err := AssertProjectOwnership(ctx, in.ProjectID); err != nil {
+		return nil, err
+	}
+	op, err := h.svc.AttachNetworkInterface(ctx, req.InstanceId, spec.GetNicId(), spec.GetIndex())
+	if err != nil {
+		return nil, err
+	}
+	return operationToProto(op), nil
+}
+
+// DetachNetworkInterface отвязывает NIC от ВМ по nic_id ЛИБО index (oneof, async
+// saga, S4). Пустой oneof → sync InvalidArgument (exactly_one).
+func (h *InstanceHandler) DetachNetworkInterface(ctx context.Context, req *computev1.DetachInstanceNetworkInterfaceRequest) (*operationpb.Operation, error) {
+	if req.InstanceId == "" {
+		return nil, status.Error(codes.InvalidArgument, "instance_id required")
+	}
+	in, err := h.svc.Get(ctx, req.InstanceId)
+	if err != nil {
+		return nil, err
+	}
+	if err := AssertProjectOwnership(ctx, in.ProjectID); err != nil {
+		return nil, err
+	}
+	var op *operations.Operation
+	switch req.GetNetworkInterface().(type) {
+	case *computev1.DetachInstanceNetworkInterfaceRequest_NicId:
+		op, err = h.svc.DetachNetworkInterface(ctx, req.InstanceId, req.GetNicId(), 0, false)
+	case *computev1.DetachInstanceNetworkInterfaceRequest_Index:
+		op, err = h.svc.DetachNetworkInterface(ctx, req.InstanceId, "", req.GetIndex(), true)
+	default:
+		return nil, status.Error(codes.InvalidArgument, "exactly one of nic_id or index is required")
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -354,24 +411,18 @@ func (h *InstanceHandler) ListOperations(ctx context.Context, req *computev1.Lis
 
 // ---- conversion helpers ----
 
-func diskSourceFromSpec(s *computev1.AttachedDiskSpec) svc.DiskSourceSpec {
+// attachDiskReqFromSpec — proto AttachedDiskSpec → svc.AttachDiskReq. Только
+// volume_id-arm (storage-split: inline disk_spec на AttachDisk не поддерживается —
+// подключаются только уже созданные storage-Volume; sec.2.2). is_boot берётся из
+// AttachedDiskSpec (mirror: boot vs secondary на Instance).
+func attachDiskReqFromSpec(s *computev1.AttachedDiskSpec) svc.AttachDiskReq {
 	if s == nil {
-		return svc.DiskSourceSpec{}
+		return svc.AttachDiskReq{}
 	}
-	out := svc.DiskSourceSpec{
+	return svc.AttachDiskReq{
+		VolumeID:   s.GetVolumeId(),
 		DeviceName: s.GetDeviceName(),
 		AutoDelete: s.GetAutoDelete(),
 		Mode:       int32(s.GetMode()),
 	}
-	if s.GetDiskId() != "" {
-		out.DiskID = s.GetDiskId()
-		return out
-	}
-	if ds := s.GetDiskSpec(); ds != nil {
-		out.NewDiskSizeBytes = ds.GetSize()
-		out.NewDiskTypeID = ds.GetTypeId()
-		out.NewSourceImage = ds.GetImageId()
-		out.NewSourceSnap = ds.GetSnapshotId()
-	}
-	return out
 }

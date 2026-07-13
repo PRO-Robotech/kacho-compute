@@ -39,4 +39,22 @@ type (
 	ProjectClient = ports.ProjectClient
 	// ZoneRegistry — port existence-check zone_id (Disk/Instance Create, Disk Relocate).
 	ZoneRegistry = ports.ZoneRegistry
+
+	// NicClient — port для compute→kacho-vpc InternalNetworkInterfaceService
+	// (NIC↔Instance attach/detach + batched mirror-read).
+	NicClient = ports.NicClient
+	// NicAttachSpec — self-describing NIC-attach payload.
+	NicAttachSpec = ports.NicAttachSpec
+	// NicAttachment — NIC↔Instance binding + addressing mirror.
+	NicAttachment = ports.NicAttachment
+
+	// StorageClient — port для compute→kacho-storage InternalVolumeService
+	// (volume↔Instance attach/detach + batched mirror-read).
+	StorageClient = ports.StorageClient
+	// VolumeAttachSpec — self-describing volume-attach payload.
+	VolumeAttachSpec = ports.VolumeAttachSpec
+	// VolumeAttachmentInfo — volume↔Instance attachment mirror.
+	VolumeAttachmentInfo = ports.VolumeAttachmentInfo
+	// VolumeAttachMode — access mode of a volume attachment.
+	VolumeAttachMode = ports.VolumeAttachMode
 )

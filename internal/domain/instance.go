@@ -4,10 +4,21 @@
 package domain
 
 import (
+	"errors"
 	"time"
 
 	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
 )
+
+// MaxCPUGuaranteePercent — верхняя граница cpu_guarantee_percent (нижняя — 0).
+const MaxCPUGuaranteePercent = 100
+
+// ErrInvalidCPUGuaranteePercent — cpu_guarantee_percent вне допустимого [0,100].
+var ErrInvalidCPUGuaranteePercent = errors.New("cpu_guarantee_percent out of range")
+
+// ValidCPUGuaranteePercent сообщает, лежит ли v в допустимом диапазоне [0,100]
+// (0 = best-effort/burstable, 1..100 = гарантированный baseline per vCPU).
+func ValidCPUGuaranteePercent(v int32) bool { return v >= 0 && v <= MaxCPUGuaranteePercent }
 
 // InstanceStatus — состояние ВМ (control-plane: детерминированная state-машина).
 // Значения зеркалят computev1.Instance_Status.
@@ -107,6 +118,9 @@ type Instance struct {
 	Memory                        int64
 	CoreFraction                  int64
 	GPUs                          int64
+	CPUGuaranteePercent           int32
+	Image                         string
+	ImageDigest                   string
 	Status                        InstanceStatus
 	Metadata                      map[string]string
 	MetadataOptions               *computev1.MetadataOptions
@@ -128,6 +142,16 @@ type Instance struct {
 
 	NetworkInterfaces []NetworkInterface
 	AttachedDisks     []AttachedDisk
+}
+
+// Validate проверяет доменные инварианты Instance (self-validating domain):
+// cpu_guarantee_percent обязан лежать в [0,100] (зеркалит DB-CHECK). Вызывается на
+// persistence-границе use-case'а как last-line guard инварианта.
+func (i *Instance) Validate() error {
+	if !ValidCPUGuaranteePercent(i.CPUGuaranteePercent) {
+		return ErrInvalidCPUGuaranteePercent
+	}
+	return nil
 }
 
 // BootDisk возвращает boot attached-disk (is_boot=true) или nil.

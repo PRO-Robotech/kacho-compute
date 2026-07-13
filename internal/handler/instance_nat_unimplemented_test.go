@@ -14,11 +14,12 @@ import (
 	computev1 "github.com/PRO-Robotech/kacho-proto/gen/go/kacho/cloud/compute/v1"
 )
 
-// One-to-one NAT оперирует над network interface, а Instance создаётся без NIC
-// (no auto-NIC): NIC-привязка вынесена из lifecycle Instance целиком. Поэтому
-// AddOneToOneNat / RemoveOneToOneNat не могут выполнить свою работу и обязаны
-// отдавать Unimplemented — тот же контракт, что и остальные NIC-RPC
-// (AttachNetworkInterface / DetachNetworkInterface / UpdateNetworkInterface).
+// One-to-one NAT оперирует над адресацией конкретного network interface, которая
+// редактируется через kacho-vpc NetworkInterface напрямую (NIC — first-class ресурс
+// vpc), а не через Instance. Поэтому AddOneToOneNat / RemoveOneToOneNat / (и
+// UpdateNetworkInterface) на InstanceService обязаны отдавать Unimplemented.
+// NB: AttachNetworkInterface / DetachNetworkInterface — РЕАЛИЗОВАНЫ (S4, привязка
+// существующего NIC к инстансу), это не Unimplemented-контракт.
 func TestInstanceHandler_OneToOneNat_Unimplemented(t *testing.T) {
 	h := &InstanceHandler{}
 

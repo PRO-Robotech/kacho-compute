@@ -104,7 +104,7 @@ func runServe(cfg config.Config) error {
 
 	opsRepo := operations.NewRepo(pool, "public")
 
-	projectClient, geoZones, closers, err := dialPeers(cfg, logger)
+	projectClient, geoZones, nicClient, storageClient, closers, err := dialPeers(cfg, logger)
 	if err != nil {
 		return err
 	}
@@ -114,7 +114,7 @@ func runServe(cfg config.Config) error {
 		}
 	}()
 
-	svcs := buildServices(pool, projectClient, geoZones, opsRepo)
+	svcs := buildServices(pool, projectClient, geoZones, nicClient, storageClient, opsRepo)
 
 	// Fail-closed boot-gate: when KACHO_COMPUTE_REQUIRE_IAM=true, mutating Create is
 	// refused and readiness is NotReady until the register-drainer is IAM-connected.
@@ -634,10 +634,10 @@ func insecureEdgesInProductionStrict(cfg config.Config) error {
 // zone_id-валидация Instance идёт через geo.v1.ZoneService.Get (clients.GeoClient);
 // Geography (Region/Zone) принадлежит kacho-geo — compute их больше не обслуживает,
 // а лишь валидирует свой zone_id как consumer.
-func dialPeers(cfg config.Config, logger *slog.Logger) (service.ProjectClient, service.ZoneRegistry, []*grpc.ClientConn, error) {
+func dialPeers(cfg config.Config, logger *slog.Logger) (service.ProjectClient, service.ZoneRegistry, service.NicClient, service.StorageClient, []*grpc.ClientConn, error) {
 	if cfg.SkipPeerValidation {
 		logger.Warn("KACHO_COMPUTE_SKIP_PEER_VALIDATION=true — cross-service existence-check disabled (dev/test only)")
-		return clients.NoopProjectClient{}, clients.NoopGeoClient{}, nil, nil
+		return clients.NoopProjectClient{}, clients.NoopGeoClient{}, clients.NoopNicClient{}, clients.NoopStorageClient{}, nil, nil
 	}
 	// iam (public ProjectService.Get) — активно используется на request-path каждой
 	// мутации → idle=false (трафик есть, idle-пинги не нужны; keepalive всё равно
@@ -650,11 +650,11 @@ func dialPeers(cfg config.Config, logger *slog.Logger) (service.ProjectClient, s
 	// required client-cert).
 	iamCreds, err := grpcclient.TLSClientTransportCreds(cfg.IAMProjectMTLS)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("compute→iam ProjectService.Get mTLS creds: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("compute→iam ProjectService.Get mTLS creds: %w", err)
 	}
 	iamConn, err := dialPeerCreds(cfg.IAMGRPCAddr, iamCreds, false)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("dial iam: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("dial iam: %w", err)
 	}
 	// compute→geo zone_id-валидация Instance (geo.v1.ZoneService.Get,
 	// public :9090). Per-edge client-cert mTLS через cfg.GeoMTLS (enable=false →
@@ -663,18 +663,76 @@ func dialPeers(cfg config.Config, logger *slog.Logger) (service.ProjectClient, s
 	geoCreds, err := grpcclient.TLSClientTransportCreds(cfg.GeoMTLS)
 	if err != nil {
 		_ = iamConn.Close()
-		return nil, nil, nil, fmt.Errorf("compute→geo ZoneService.Get mTLS creds: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("compute→geo ZoneService.Get mTLS creds: %w", err)
 	}
 	geoConn, err := dialPeerCreds(cfg.GeoGRPCAddr, geoCreds, false)
 	if err != nil {
 		_ = iamConn.Close()
-		return nil, nil, nil, fmt.Errorf("dial geo: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("dial geo: %w", err)
 	}
 	logger.Info("compute→geo resource-validation mTLS state",
 		"geo_zone_validate_mtls", cfg.GeoMTLS.Enable,
 	)
-	return clients.NewProjectClient(iamConn), clients.NewGeoClient(geoConn),
-		[]*grpc.ClientConn{iamConn, geoConn}, nil
+
+	conns := []*grpc.ClientConn{iamConn, geoConn}
+
+	// compute→vpc InternalNetworkInterfaceService (NIC-attach saga, S4, :9091
+	// internal). Пустой addr → NIC-ребро не сконфигурировано (NoopNicClient:
+	// attach fail-closed Unavailable, зеркало опускается). Per-edge client-cert
+	// mTLS через cfg.VPCNicMTLS (enable=false → insecure dev; enable=true без
+	// валидного cert-trio → startup error, fail-closed) — паритет с geo/iam рёбрами.
+	var nicClient service.NicClient = clients.NoopNicClient{}
+	if cfg.VPCInternalGRPCAddr != "" {
+		vpcCreds, cerr := grpcclient.TLSClientTransportCreds(cfg.VPCNicMTLS)
+		if cerr != nil {
+			for _, c := range conns {
+				_ = c.Close()
+			}
+			return nil, nil, nil, nil, nil, fmt.Errorf("compute→vpc InternalNetworkInterfaceService mTLS creds: %w", cerr)
+		}
+		vpcConn, cerr := dialPeerCreds(cfg.VPCInternalGRPCAddr, vpcCreds, false)
+		if cerr != nil {
+			for _, c := range conns {
+				_ = c.Close()
+			}
+			return nil, nil, nil, nil, nil, fmt.Errorf("dial vpc: %w", cerr)
+		}
+		conns = append(conns, vpcConn)
+		nicClient = clients.NewVPCNicClient(vpcConn)
+		logger.Info("compute→vpc NIC-attach mTLS state", "vpc_nic_attach_mtls", cfg.VPCNicMTLS.Enable)
+	} else {
+		logger.Warn("KACHO_COMPUTE_VPC_INTERNAL_GRPC_ADDR empty — NIC-attach edge disabled (NoopNicClient)")
+	}
+
+	// compute→storage InternalVolumeService (volume-attach saga, :9091 internal).
+	// Пустой addr → storage-ребро не сконфигурировано (NoopStorageClient: attach
+	// fail-closed Unavailable, зеркало опускается). Per-edge client-cert mTLS через
+	// cfg.StorageMTLS (enable=false → insecure dev; enable=true без валидного cert-trio
+	// → startup error, fail-closed) — паритет с vpc/geo/iam рёбрами.
+	var storageClient service.StorageClient = clients.NoopStorageClient{}
+	if cfg.StorageInternalGRPCAddr != "" {
+		storageCreds, cerr := grpcclient.TLSClientTransportCreds(cfg.StorageMTLS)
+		if cerr != nil {
+			for _, c := range conns {
+				_ = c.Close()
+			}
+			return nil, nil, nil, nil, nil, fmt.Errorf("compute→storage InternalVolumeService mTLS creds: %w", cerr)
+		}
+		storageConn, cerr := dialPeerCreds(cfg.StorageInternalGRPCAddr, storageCreds, false)
+		if cerr != nil {
+			for _, c := range conns {
+				_ = c.Close()
+			}
+			return nil, nil, nil, nil, nil, fmt.Errorf("dial storage: %w", cerr)
+		}
+		conns = append(conns, storageConn)
+		storageClient = clients.NewStorageClient(storageConn)
+		logger.Info("compute→storage volume-attach mTLS state", "storage_volume_attach_mtls", cfg.StorageMTLS.Enable)
+	} else {
+		logger.Warn("KACHO_COMPUTE_STORAGE_INTERNAL_GRPC_ADDR empty — volume-attach edge disabled (NoopStorageClient)")
+	}
+
+	return clients.NewProjectClient(iamConn), clients.NewGeoClient(geoConn), nicClient, storageClient, conns, nil
 }
 
 // peerKeepalive — keepalive-параметры для peer-conn. idle=true для
@@ -712,7 +770,11 @@ func dialPeerCreds(addr string, creds credentials.TransportCredentials, idle boo
 // kacho-geo; локальные таблицы `zones`/`regions` сняты миграцией
 // 0011_drop_geography. Режим KACHO_COMPUTE_SKIP_PEER_VALIDATION учтён на уровне
 // dialPeers (NoopProjectClient/NoopGeoClient — любой project/зона «существует»).
-func buildServices(pool *pgxpool.Pool, projectClient service.ProjectClient, geoZones service.ZoneRegistry, opsRepo operations.Repo) *services {
+// storageClient — compute→kacho-storage InternalVolumeService edge (volume-attach
+// saga). Wired here at the composition root; the Instance use-case consumes it in a
+// follow-up cutover slice (attach-state moves from the local attached_disks table to
+// storage). Threaded now so the peer-conn/config plumbing lands additively.
+func buildServices(pool *pgxpool.Pool, projectClient service.ProjectClient, geoZones service.ZoneRegistry, nicClient service.NicClient, storageClient service.StorageClient, opsRepo operations.Repo) *services {
 	diskRepo := repo.NewDiskRepo(pool)
 	imageRepo := repo.NewImageRepo(pool)
 	snapshotRepo := repo.NewSnapshotRepo(pool)
@@ -725,7 +787,7 @@ func buildServices(pool *pgxpool.Pool, projectClient service.ProjectClient, geoZ
 		image:    service.NewImageService(imageRepo, diskRepo, snapshotRepo, projectClient, opsRepo),
 		snapshot: service.NewSnapshotService(snapshotRepo, diskRepo, projectClient, opsRepo),
 		diskType: diskTypeSvc,
-		instance: service.NewInstanceService(instanceRepo, diskRepo, imageRepo, snapshotRepo, diskTypeRepo, geoZones, projectClient, opsRepo),
+		instance: service.NewInstanceService(instanceRepo, geoZones, projectClient, nicClient, storageClient, opsRepo),
 	}
 }
 

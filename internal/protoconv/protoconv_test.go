@@ -130,9 +130,9 @@ func TestInstance_ProjectsExpectedFields(t *testing.T) {
 
 	// boot disk vs secondary split.
 	require.NotNil(t, out.GetBootDisk())
-	assert.Equal(t, "epd-boot", out.GetBootDisk().GetDiskId())
+	assert.Equal(t, "epd-boot", out.GetBootDisk().GetVolumeId())
 	require.Len(t, out.GetSecondaryDisks(), 1)
-	assert.Equal(t, "epd-data", out.GetSecondaryDisks()[0].GetDiskId())
+	assert.Equal(t, "epd-data", out.GetSecondaryDisks()[0].GetVolumeId())
 	require.Len(t, out.GetNetworkInterfaces(), 1)
 	assert.Equal(t, "10.0.0.2", out.GetNetworkInterfaces()[0].GetPrimaryV4Address().GetAddress())
 }
@@ -151,4 +151,22 @@ func TestInstanceMessage_HasNoHostPlacementField(t *testing.T) {
 		require.False(t, strings.Contains(name, "host_id") || strings.Contains(name, "host_group"),
 			"suspicious host-placement field on public Instance: %q", name)
 	}
+}
+
+// TestInstance_ProjectsCPUGuaranteeAndImage — S5-03/05: protoconv проецирует
+// cpu_guarantee_percent / image / image_digest из domain на публичный Instance.
+func TestInstance_ProjectsCPUGuaranteeAndImage(t *testing.T) {
+	in := &domain.Instance{
+		ID:                  "epd0000000000000000",
+		ProjectID:           "prj0000000000000000",
+		Name:                "vm-cpu",
+		Status:              domain.InstanceStatusRunning,
+		CPUGuaranteePercent: 50,
+		Image:               "cr.kacho.cloud/library/ubuntu:24.04",
+		ImageDigest:         "sha256:deadbeef",
+	}
+	out := protoconv.Instance(in)
+	assert.Equal(t, int32(50), out.GetCpuGuaranteePercent())
+	assert.Equal(t, "cr.kacho.cloud/library/ubuntu:24.04", out.GetImage())
+	assert.Equal(t, "sha256:deadbeef", out.GetImageDigest())
 }

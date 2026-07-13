@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"google.golang.org/genproto/googleapis/rpc/status"
+	grpccodes "google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/PRO-Robotech/kacho-compute/internal/domain"
@@ -29,9 +31,8 @@ import (
 
 // DiskRepo — in-memory DiskRepo.
 type DiskRepo struct {
-	mu       sync.Mutex
-	data     map[string]*domain.Disk
-	attached map[string]bool // disk_id → attached?
+	mu   sync.Mutex
+	data map[string]*domain.Disk
 	// LastUpdateEmitLabels — последнее значение emitLabelsRegister, переданное в
 	// Update, для проверки labels-gated mirror-эмита use-case-тестом.
 	LastUpdateEmitLabels *bool
@@ -39,7 +40,7 @@ type DiskRepo struct {
 
 // NewDiskRepo создаёт пустой DiskRepo.
 func NewDiskRepo() *DiskRepo {
-	return &DiskRepo{data: make(map[string]*domain.Disk), attached: make(map[string]bool)}
+	return &DiskRepo{data: make(map[string]*domain.Disk)}
 }
 
 // Seed добавляет диск напрямую (для fixture'ов).
@@ -47,13 +48,6 @@ func (r *DiskRepo) Seed(d *domain.Disk) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.data[d.ID] = d
-}
-
-// SetAttached помечает диск attached/detached (для тестов Disk.Delete).
-func (r *DiskRepo) SetAttached(id string, v bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.attached[id] = v
 }
 
 // Get возвращает диск по id.
@@ -134,21 +128,20 @@ func (r *DiskRepo) Update(_ context.Context, d *domain.Disk, emitLabelsRegister 
 	return d, nil
 }
 
-// Delete удаляет диск (FailedPrecondition если attached).
+// Delete удаляет диск. Storage-split: compute Disk больше не «attached» локально —
+// in-use гейта нет.
 func (r *DiskRepo) Delete(_ context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, ok := r.data[id]; !ok {
 		return ports.ErrNotFound
 	}
-	if r.attached[id] {
-		return ports.ErrFailedPrecondition
-	}
 	delete(r.data, id)
 	return nil
 }
 
-// SetZoneIfDetached меняет zone_id, только если диск не attached (Relocate).
+// SetZoneIfDetached меняет zone_id (Relocate). Storage-split: compute Disk всегда
+// detached локально — attach-гейта нет.
 func (r *DiskRepo) SetZoneIfDetached(_ context.Context, id, zoneID string) (*domain.Disk, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -156,18 +149,8 @@ func (r *DiskRepo) SetZoneIfDetached(_ context.Context, id, zoneID string) (*dom
 	if !ok {
 		return nil, ports.ErrNotFound
 	}
-	if r.attached[id] {
-		return nil, ports.ErrFailedPrecondition
-	}
 	d.ZoneID = zoneID
 	return d, nil
-}
-
-// IsAttached — true если диск attached.
-func (r *DiskRepo) IsAttached(_ context.Context, id string) (bool, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.attached[id], nil
 }
 
 // ---- ImageRepo ----
@@ -379,9 +362,8 @@ func (r *SnapshotRepo) Delete(_ context.Context, id string) error {
 
 // InstanceRepo — in-memory InstanceRepo.
 type InstanceRepo struct {
-	mu       sync.Mutex
-	data     map[string]*domain.Instance
-	diskHook *DiskRepo // если задан — inlineDisks вставляются туда
+	mu   sync.Mutex
+	data map[string]*domain.Instance
 	// LastUpdateEmitLabels — последнее значение emitLabelsRegister, переданное в
 	// Update (epic RSAB β, D-β6). nil — Update ещё не вызывался. Позволяет
 	// use-case-тесту проверить решение «labels ∈ mask → эмитить register-intent».
@@ -391,12 +373,6 @@ type InstanceRepo struct {
 // NewInstanceRepo создаёт пустой InstanceRepo.
 func NewInstanceRepo() *InstanceRepo { return &InstanceRepo{data: make(map[string]*domain.Instance)} }
 
-// WithDiskRepo связывает InstanceRepo с DiskRepo (для inline-дисков и attach/detach).
-func (r *InstanceRepo) WithDiskRepo(d *DiskRepo) *InstanceRepo {
-	r.diskHook = d
-	return r
-}
-
 // Seed добавляет ВМ напрямую.
 func (r *InstanceRepo) Seed(in *domain.Instance) {
 	r.mu.Lock()
@@ -404,7 +380,11 @@ func (r *InstanceRepo) Seed(in *domain.Instance) {
 	r.data[in.ID] = in
 }
 
-// Get возвращает ВМ по id.
+// Get возвращает ВМ по id. Отдаёт shallow-КОПИЮ (не live-указатель) — зеркалит
+// pg-адаптер, где каждый Get — свежий scan строки: конкурентные worker'ы,
+// заполняющие read-only NIC-зеркало (applyNicMirror пишет in.NetworkInterfaces),
+// не делят один *domain.Instance (иначе data-race на общем указателе, чего в
+// проде нет).
 func (r *InstanceRepo) Get(_ context.Context, id string) (*domain.Instance, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -412,7 +392,8 @@ func (r *InstanceRepo) Get(_ context.Context, id string) (*domain.Instance, erro
 	if !ok {
 		return nil, ports.ErrNotFound
 	}
-	return in, nil
+	cp := *in
+	return &cp, nil
 }
 
 // List возвращает ВМ по folder.
@@ -438,8 +419,8 @@ func (r *InstanceRepo) List(_ context.Context, f ports.InstanceFilter, _ ports.P
 	return out, "", nil
 }
 
-// Insert вставляет ВМ и inline-диски.
-func (r *InstanceRepo) Insert(_ context.Context, in *domain.Instance, inlineDisks []*domain.Disk) (*domain.Instance, error) {
+// Insert вставляет строку ВМ (без привязок — storage-split).
+func (r *InstanceRepo) Insert(_ context.Context, in *domain.Instance) (*domain.Instance, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if in.Name != "" {
@@ -447,15 +428,6 @@ func (r *InstanceRepo) Insert(_ context.Context, in *domain.Instance, inlineDisk
 			if x.ProjectID == in.ProjectID && x.Name == in.Name {
 				return nil, ports.ErrAlreadyExists
 			}
-		}
-	}
-	if r.diskHook != nil {
-		for _, d := range inlineDisks {
-			r.diskHook.Seed(d)
-			r.diskHook.SetAttached(d.ID, true)
-		}
-		for _, ad := range in.AttachedDisks {
-			r.diskHook.SetAttached(ad.DiskID, true)
 		}
 	}
 	r.data[in.ID] = in
@@ -493,40 +465,32 @@ func (r *InstanceRepo) SetStatusCAS(_ context.Context, id string, expected, next
 	return in, nil
 }
 
-// AttachDisk добавляет attached_disk.
-func (r *InstanceRepo) AttachDisk(_ context.Context, id string, ad domain.AttachedDisk) (*domain.Instance, error) {
+// GateForAttach — CAS-гейт attach-саги: инстанс ∈ {RUNNING, STOPPED} → возвращает
+// zone/project/name; иначе FailedPrecondition; нет инстанса → NotFound.
+func (r *InstanceRepo) GateForAttach(_ context.Context, id string) (string, string, string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	in, ok := r.data[id]
 	if !ok {
-		return nil, ports.ErrNotFound
+		return "", "", "", fmt.Errorf("%w: Instance %s not found", ports.ErrNotFound, id)
 	}
-	in.AttachedDisks = append(in.AttachedDisks, ad)
-	if r.diskHook != nil {
-		r.diskHook.SetAttached(ad.DiskID, true)
+	if in.Status != domain.InstanceStatusRunning && in.Status != domain.InstanceStatusStopped {
+		return "", "", "", fmt.Errorf("%w: Instance must be RUNNING or STOPPED", ports.ErrFailedPrecondition)
 	}
-	return in, nil
+	return in.ZoneID, in.ProjectID, in.Name, nil
 }
 
-// DetachDisk удаляет attached_disk по disk_id.
-func (r *InstanceRepo) DetachDisk(_ context.Context, id, diskID string) (*domain.Instance, error) {
+// MarkDeleting переводит инстанс в DELETING (идемпотентно). Нет инстанса → NotFound.
+func (r *InstanceRepo) MarkDeleting(_ context.Context, id string) (*domain.Instance, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	in, ok := r.data[id]
 	if !ok {
-		return nil, ports.ErrNotFound
+		return nil, fmt.Errorf("%w: Instance %s not found", ports.ErrNotFound, id)
 	}
-	out := in.AttachedDisks[:0]
-	for _, ad := range in.AttachedDisks {
-		if ad.DiskID != diskID {
-			out = append(out, ad)
-		}
-	}
-	in.AttachedDisks = out
-	if r.diskHook != nil {
-		r.diskHook.SetAttached(diskID, false)
-	}
-	return in, nil
+	in.Status = domain.InstanceStatusDeleting
+	cp := *in
+	return &cp, nil
 }
 
 // MergeMetadata атомарно применяет delete+upsert дельту (под r.mu — зеркалит
@@ -552,24 +516,13 @@ func (r *InstanceRepo) MergeMetadata(_ context.Context, id string, del []string,
 	return in, nil
 }
 
-// Delete удаляет ВМ + auto-delete диски.
+// Delete удаляет строку ВМ (финальный шаг delete-саги; привязки уже сняты в
+// use-case через storage/vpc Detach). Нет инстанса → NotFound.
 func (r *InstanceRepo) Delete(_ context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	in, ok := r.data[id]
-	if !ok {
+	if _, ok := r.data[id]; !ok {
 		return ports.ErrNotFound
-	}
-	if r.diskHook != nil {
-		// auto-delete множество определяется из ТЕКУЩИХ attached-дисков (flag
-		// AutoDelete), а не из snapshot вызывающего — зеркалит in-tx вычисление
-		// repo.InstanceRepo.Delete (project-rule 10, no stale-snapshot orphan).
-		for _, ad := range in.AttachedDisks {
-			r.diskHook.SetAttached(ad.DiskID, false)
-			if ad.AutoDelete {
-				_ = r.diskHook.Delete(context.Background(), ad.DiskID)
-			}
-		}
 	}
 	delete(r.data, id)
 	return nil
@@ -691,6 +644,217 @@ type ProjectClient struct{ OK bool }
 
 // Exists возвращает ProjectClient.OK.
 func (c *ProjectClient) Exists(_ context.Context, _ string) (bool, error) { return c.OK, nil }
+
+// ---- NicClient ----
+
+// NicClient — in-memory fake ports.NicClient. Models the kacho-vpc side of the
+// NIC↔Instance binding: a single-slot-per-NIC map with atomic (mutex-serialised)
+// attach — enough to unit-test the compute saga-worker (auto-index, in-use CAS,
+// idempotent replay, mirror-read) without a live kacho-vpc. AttachErrs / Err inject
+// the peer error paths (zone-coherence FailedPrecondition, Unavailable fail-closed).
+type NicClient struct {
+	mu    sync.Mutex
+	byNic map[string]ports.NicAttachment // nicID → current binding
+	// AttachErrs — per-NIC injected Attach error (zone-coherence, in-use, …).
+	AttachErrs map[string]error
+	// Err — global injected error for Attach/Detach/ListByInstance (e.g. Unavailable).
+	Err error
+	// ListErr — injected error for ListByInstance only (mirror graceful-degrade test).
+	ListErr error
+}
+
+// NewNicClient создаёт пустой fake NicClient.
+func NewNicClient() *NicClient {
+	return &NicClient{byNic: make(map[string]ports.NicAttachment), AttachErrs: make(map[string]error)}
+}
+
+// SeedZoneMismatch помечает NIC как zone-incoherent — Attach вернёт
+// FailedPrecondition (S4-03), зеркалит kacho-vpc zone-coherence CAS-промах.
+func (c *NicClient) SeedZoneMismatch(nicID, msg string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.AttachErrs[nicID] = grpcstatus.Error(grpccodes.FailedPrecondition, msg)
+}
+
+// Attach атомарно (под mutex) привязывает NIC к инстансу: auto-index (первый
+// свободный слот при spec.Index==0), in-use-CAS (чужой инстанс → FailedPrecondition
+// "NetworkInterface is in use"), идемпотентный replay (already-ours → OK).
+func (c *NicClient) Attach(_ context.Context, spec ports.NicAttachSpec) (*ports.NicAttachment, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.Err != nil {
+		return nil, c.Err
+	}
+	if e := c.AttachErrs[spec.NICID]; e != nil {
+		return nil, e
+	}
+	if ex, ok := c.byNic[spec.NICID]; ok {
+		if ex.InstanceID != spec.InstanceID {
+			return nil, grpcstatus.Error(grpccodes.FailedPrecondition, "NetworkInterface is in use")
+		}
+		cp := ex
+		return &cp, nil // idempotent replay: already ours
+	}
+	used := make(map[int32]bool)
+	for _, a := range c.byNic {
+		if a.InstanceID == spec.InstanceID {
+			used[a.Index] = true
+		}
+	}
+	idx := spec.Index
+	for used[idx] {
+		idx++
+	}
+	att := ports.NicAttachment{
+		NICID: spec.NICID, InstanceID: spec.InstanceID, Index: idx,
+		SubnetID: "sub-fake", PrimaryV4Address: fmt.Sprintf("10.0.0.%d", idx+2),
+		MACAddress: fmt.Sprintf("00:11:22:33:44:%02d", idx),
+	}
+	c.byNic[spec.NICID] = att
+	cp := att
+	return &cp, nil
+}
+
+// Detach идемпотентно снимает привязку NIC↔instance (already-free → OK).
+func (c *NicClient) Detach(_ context.Context, nicID, instanceID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.Err != nil {
+		return c.Err
+	}
+	if ex, ok := c.byNic[nicID]; ok && ex.InstanceID == instanceID {
+		delete(c.byNic, nicID)
+	}
+	return nil
+}
+
+// ListByInstance — batched read of NIC-привязок по instance-ids.
+func (c *NicClient) ListByInstance(_ context.Context, instanceIDs []string) ([]ports.NicAttachment, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.ListErr != nil {
+		return nil, c.ListErr
+	}
+	if c.Err != nil {
+		return nil, c.Err
+	}
+	want := make(map[string]struct{}, len(instanceIDs))
+	for _, id := range instanceIDs {
+		want[id] = struct{}{}
+	}
+	var out []ports.NicAttachment
+	for _, a := range c.byNic {
+		if _, ok := want[a.InstanceID]; ok {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+// ---- StorageClient ----
+
+// StorageClient — in-memory fake ports.StorageClient. Models the kacho-storage side
+// of the volume↔Instance attachment: a single-slot-per-volume map with atomic
+// (mutex-serialised) attach — enough to unit-test the compute saga-worker (in-use CAS,
+// idempotent replay, mirror-read) without a live kacho-storage. AttachErrs / Err inject
+// the peer error paths (zone/project-coherence FailedPrecondition, Unavailable fail-closed).
+type StorageClient struct {
+	mu    sync.Mutex
+	byVol map[string]ports.VolumeAttachmentInfo // volumeID → current attachment
+	// AttachErrs — per-volume injected Attach error (zone/project-coherence, in-use, …).
+	AttachErrs map[string]error
+	// Err — global injected error for Attach/Detach/ListAttachments (e.g. Unavailable).
+	Err error
+	// ListErr — injected error for ListAttachments only (mirror graceful-degrade test).
+	ListErr error
+}
+
+// NewStorageClient создаёт пустой fake StorageClient.
+func NewStorageClient() *StorageClient {
+	return &StorageClient{
+		byVol:      make(map[string]ports.VolumeAttachmentInfo),
+		AttachErrs: make(map[string]error),
+	}
+}
+
+// SeedZoneMismatch помечает volume как zone-incoherent — Attach вернёт
+// FailedPrecondition, зеркалит kacho-storage zone-coherence CAS-промах.
+func (c *StorageClient) SeedZoneMismatch(volumeID, msg string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.AttachErrs[volumeID] = grpcstatus.Error(grpccodes.FailedPrecondition, msg)
+}
+
+// Attach атомарно (под mutex) привязывает volume к инстансу: in-use-CAS (чужой
+// инстанс → FailedPrecondition "Volume is in use"), идемпотентный replay
+// (already-ours → OK).
+func (c *StorageClient) Attach(_ context.Context, spec ports.VolumeAttachSpec) (*ports.VolumeAttachmentInfo, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.Err != nil {
+		return nil, c.Err
+	}
+	if e := c.AttachErrs[spec.VolumeID]; e != nil {
+		return nil, e
+	}
+	if ex, ok := c.byVol[spec.VolumeID]; ok {
+		if ex.InstanceID != spec.InstanceID {
+			return nil, grpcstatus.Error(grpccodes.FailedPrecondition, "Volume is in use")
+		}
+		cp := ex
+		return &cp, nil // idempotent replay: already ours
+	}
+	att := ports.VolumeAttachmentInfo{
+		VolumeID:     spec.VolumeID,
+		InstanceID:   spec.InstanceID,
+		InstanceName: spec.InstanceName,
+		DeviceName:   spec.DeviceName,
+		IsBoot:       spec.IsBoot,
+		Mode:         spec.Mode,
+		AutoDelete:   spec.AutoDelete,
+	}
+	c.byVol[spec.VolumeID] = att
+	cp := att
+	return &cp, nil
+}
+
+// Detach идемпотентно снимает привязку volume↔instance (already-free → OK).
+func (c *StorageClient) Detach(_ context.Context, volumeID, instanceID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.Err != nil {
+		return c.Err
+	}
+	if ex, ok := c.byVol[volumeID]; ok && ex.InstanceID == instanceID {
+		delete(c.byVol, volumeID)
+	}
+	return nil
+}
+
+// ListAttachments — batched read volume-привязок по instance-ids.
+func (c *StorageClient) ListAttachments(_ context.Context, instanceIDs []string) ([]ports.VolumeAttachmentInfo, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.ListErr != nil {
+		return nil, c.ListErr
+	}
+	if c.Err != nil {
+		return nil, c.Err
+	}
+	want := make(map[string]struct{}, len(instanceIDs))
+	for _, id := range instanceIDs {
+		want[id] = struct{}{}
+	}
+	var out []ports.VolumeAttachmentInfo
+	for _, a := range c.byVol {
+		if _, ok := want[a.InstanceID]; ok {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+var _ ports.StorageClient = (*StorageClient)(nil)
 
 // ---- operations.Repo ----
 
@@ -827,6 +991,24 @@ func (r *OpsRepo) CancelOwned(_ context.Context, id string, owner operations.Own
 	op.Error = &status.Status{Code: 1, Message: "operation cancelled"}
 	cp := *op
 	return &cp, nil
+}
+
+// ListOwned — ownership-scoped листинг: зеркалит List, но AND-ит
+// ownership-предикат (чужие строки не возвращаются, симметрично GetOwned).
+func (r *OpsRepo) ListOwned(_ context.Context, f operations.ListFilter, owner operations.Owner) ([]operations.Operation, string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []operations.Operation
+	for _, op := range r.ops {
+		if !opsOwnerMatches(op, owner) {
+			continue
+		}
+		if f.ResourceID != "" && extractResourceID(op) != f.ResourceID {
+			continue
+		}
+		out = append(out, *op)
+	}
+	return out, "", nil
 }
 
 var _ operations.OwnedOperationRepo = (*OpsRepo)(nil)

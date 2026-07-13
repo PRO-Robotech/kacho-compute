@@ -20,13 +20,15 @@ import (
 // happy no-op path returning the instance itself.
 func TestInstance_SimulateMaintenanceEvent(t *testing.T) {
 	t.Run("empty id → InvalidArgument (sync)", func(t *testing.T) {
-		svc, _, _, _, _ := newInstanceSvc(t, true)
+		k := newInstanceSvc(t, true)
+		svc := k.svc
 		_, err := svc.SimulateMaintenanceEvent(context.Background(), "")
 		require.Equal(t, codes.InvalidArgument, status.Code(err))
 	})
 
 	t.Run("missing id → op error NotFound (async)", func(t *testing.T) {
-		svc, _, _, _, ops := newInstanceSvc(t, true)
+		k := newInstanceSvc(t, true)
+		svc, ops := k.svc, k.ops
 		op, err := svc.SimulateMaintenanceEvent(context.Background(), "epdmissing")
 		require.NoError(t, err)
 		done := portmock.AwaitOpDone(t, ops, op.ID)
@@ -35,7 +37,8 @@ func TestInstance_SimulateMaintenanceEvent(t *testing.T) {
 	})
 
 	t.Run("happy → done op carrying the instance (no-op)", func(t *testing.T) {
-		svc, repo, _, _, ops := newInstanceSvc(t, true)
+		k := newInstanceSvc(t, true)
+		svc, repo, ops := k.svc, k.repo, k.ops
 		seedRunningInstance(repo, domain.InstanceStatusRunning)
 		op, err := svc.SimulateMaintenanceEvent(context.Background(), "epdvm1")
 		require.NoError(t, err)
@@ -50,13 +53,15 @@ func TestInstance_SimulateMaintenanceEvent(t *testing.T) {
 // and the happy path on an existing one.
 func TestInstance_ListOperations(t *testing.T) {
 	t.Run("missing instance → NotFound", func(t *testing.T) {
-		svc, _, _, _, _ := newInstanceSvc(t, true)
+		k := newInstanceSvc(t, true)
+		svc := k.svc
 		_, _, err := svc.ListOperations(context.Background(), "epdmissing", Pagination{})
 		require.Equal(t, codes.NotFound, status.Code(err))
 	})
 
 	t.Run("existing instance → no error", func(t *testing.T) {
-		svc, repo, _, _, _ := newInstanceSvc(t, true)
+		k := newInstanceSvc(t, true)
+		svc, repo := k.svc, k.repo
 		seedRunningInstance(repo, domain.InstanceStatusRunning)
 		_, _, err := svc.ListOperations(context.Background(), "epdvm1", Pagination{})
 		require.NoError(t, err)

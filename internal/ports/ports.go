@@ -68,8 +68,6 @@ type DiskRepo interface {
 	// а не software-check-then-act: detached → новый zone_id; attached →
 	// ErrFailedPrecondition; нет диска → ErrNotFound.
 	SetZoneIfDetached(ctx context.Context, id, zoneID string) (*domain.Disk, error)
-	// IsAttached — true если есть строка attached_disks для disk_id.
-	IsAttached(ctx context.Context, id string) (bool, error)
 }
 
 // ImageRepo — port-интерфейс репозитория образов.
@@ -97,10 +95,12 @@ type SnapshotRepo interface {
 type InstanceRepo interface {
 	Get(ctx context.Context, id string) (*domain.Instance, error)
 	List(ctx context.Context, f InstanceFilter, p Pagination) ([]*domain.Instance, string, error)
-	// Insert вставляет ВМ + attached_disks в одной TX. inlineDisks — диски,
-	// созданные из disk_spec (вставляются в этой же TX). Возвращает созданную
-	// ВМ (с заполненными AttachedDisks).
-	Insert(ctx context.Context, in *domain.Instance, inlineDisks []*domain.Disk) (*domain.Instance, error)
+	// Insert вставляет строку ВМ (+ outbox CREATED + FGA register-intent) в одной
+	// writer-tx. compute больше НЕ держит local attach-state (storage-split
+	// cutover): том↔Instance-привязка живёт в kacho-storage, boot_volume/
+	// secondary_volumes — read-only зеркало, пересчитываемое на чтении. Возвращает
+	// созданную ВМ (без attached-строк — их нет).
+	Insert(ctx context.Context, in *domain.Instance) (*domain.Instance, error)
 	// Update обновляет mutable descriptive/resource поля (status НЕ трогает —
 	// им владеет SetStatusCAS). emitLabelsRegister: true когда "labels" присутствует
 	// в update-mask (или full-object PATCH применяет labels) → repo эмитит свежий FGA
@@ -119,19 +119,29 @@ type InstanceRepo interface {
 	// обновлённую ВМ (+ outbox UPDATED в той же TX). Within-service-инвариант на
 	// DB-уровне (CAS), не software check-then-act — защита от second-writer-wins.
 	SetStatusCAS(ctx context.Context, id string, expected, next domain.InstanceStatus) (*domain.Instance, error)
-	// AttachDisk добавляет строку attached_disks. Возвращает обновлённую ВМ.
-	AttachDisk(ctx context.Context, id string, ad domain.AttachedDisk) (*domain.Instance, error)
-	// DetachDisk удаляет строку attached_disks по disk_id. Возвращает обновлённую ВМ.
-	DetachDisk(ctx context.Context, id, diskID string) (*domain.Instance, error)
+	// GateForAttach — compute-local CAS-гейт disk/NIC-attach саги: атомарно
+	// проверяет, что инстанс в {RUNNING, STOPPED}, и возвращает self-describing
+	// payload (zone_id, project_id, name) для форварда в storage/vpc. Инстанс не в
+	// допустимом состоянии → ErrFailedPrecondition ("Instance must be RUNNING or
+	// STOPPED"); отсутствует → ErrNotFound. Гейт закрывает attach-vs-delete гонку
+	// (Delete переводит инстанс в DELETING первым → гейт видит DELETING → 0 rows),
+	// на DB-уровне (CAS), не software check-then-act.
+	GateForAttach(ctx context.Context, id string) (zoneID, projectID, name string, err error)
+	// MarkDeleting атомарно переводит инстанс в DELETING (идемпотентно: повтор на
+	// уже-DELETING инстансе — no-op OK). Возвращает инстанс (для self-describing
+	// release-payload delete-саги). Отсутствует → ErrNotFound. Ставится ПЕРЕД
+	// release'ом привязок, чтобы конкурентный AttachDisk-гейт видел DELETING и падал.
+	MarkDeleting(ctx context.Context, id string) (*domain.Instance, error)
 	// MergeMetadata атомарно применяет delete+upsert дельту к map metadata одним
 	// SQL-statement'ом (within-service-инвариант на DB-уровне, project-rule 10 —
 	// не Go-side read-modify-write, иначе second-writer-wins под concurrency).
 	// Возвращает обновлённую ВМ.
 	MergeMetadata(ctx context.Context, id string, del []string, upsert map[string]string) (*domain.Instance, error)
-	// Delete удаляет ВМ. Диски с auto_delete=true определяются ВНУТРИ TX Delete из
-	// текущих строк attached_disks (не из snapshot вызывающего — иначе конкурентный
-	// AttachDisk между out-of-tx Get и Delete-TX оставил бы orphan-диск, project-rule
-	// 10); остальные строки attached_disks чистит FK CASCADE.
+	// Delete удаляет строку ВМ (+ outbox DELETED + FGA unregister-intent) в одной
+	// writer-tx. Это ФИНАЛЬНЫЙ шаг delete-саги: том/NIC-привязки уже сняты через
+	// storage.Detach/vpc.Detach в use-case ДО этого вызова (compute local
+	// attach-state больше нет; ПОРЯДОК — строка инстанса удаляется ПОСЛЕДНЕЙ, чтобы
+	// crash не осиротил привязки). Отсутствует → ErrNotFound.
 	Delete(ctx context.Context, id string) error
 }
 
@@ -150,6 +160,117 @@ type DiskTypeRepo interface {
 // `folder_id` миграцией 0009_rename_folder_to_project).
 type ProjectClient interface {
 	Exists(ctx context.Context, projectID string) (bool, error)
+}
+
+// NicAttachSpec — self-describing NIC-attach payload for compute→kacho-vpc
+// InternalNetworkInterfaceService.Attach. compute forwards the instance's
+// zone/name/project so kacho-vpc can validate zone-coherence (anycast/REGIONAL
+// subnet excepted) against its OWN network_interfaces + subnets rows — kacho-vpc
+// never calls compute back (acyclic edge; the NIC binding lives on the vpc-side
+// row, compute holds no local attach-state).
+type NicAttachSpec struct {
+	NICID          string
+	InstanceID     string
+	InstanceName   string
+	InstanceZoneID string
+	ProjectID      string
+	// Index — requested slot (eth0=0, eth1=1, …). 0 lets kacho-vpc assign the first
+	// free slot atomically.
+	Index int32
+}
+
+// NicAttachment — a single NIC↔Instance binding enriched with the instance-local
+// slot index + a denormalised mirror of the NIC's addressing (source of truth =
+// kacho-vpc NetworkInterface). Output-only on the compute side; used to build the
+// read-only Instance.network_interfaces[] mirror on Get/List.
+type NicAttachment struct {
+	NICID            string
+	InstanceID       string
+	Index            int32
+	SubnetID         string
+	PrimaryV4Address string
+	PrimaryV6Address string
+	SecurityGroupIDs []string
+	MACAddress       string
+}
+
+// NicClient — port for compute→kacho-vpc InternalNetworkInterfaceService (NIC↔
+// Instance attach coordination, internal :9091 mTLS). kacho-vpc owns the binding
+// and enforces the atomic used_by_id CAS + zone-coherence; compute only forwards a
+// self-describing payload and mirrors the result. Peer unavailable → fail-closed
+// (Unavailable) on the attach/detach mutations. ListByInstance is a best-effort
+// batched read for the Get/List mirror (graceful-degrade — the mirror is omitted
+// when kacho-vpc is unreachable, the Instance read itself never fails).
+type NicClient interface {
+	Attach(ctx context.Context, spec NicAttachSpec) (*NicAttachment, error)
+	Detach(ctx context.Context, nicID, instanceID string) error
+	ListByInstance(ctx context.Context, instanceIDs []string) ([]NicAttachment, error)
+}
+
+// VolumeAttachMode — access mode of a volume attachment. Neutral value type
+// (ports imports only domain, never a grpc-stub) mirroring the wire enum
+// storage.v1.VolumeAttachment.Mode by ordinal, so the clients-adapter maps it
+// trivially. UNSPECIFIED(0) → storage defaults to READ_WRITE.
+type VolumeAttachMode int32
+
+const (
+	// VolumeAttachModeUnspecified — mode not set (storage treats as READ_WRITE).
+	VolumeAttachModeUnspecified VolumeAttachMode = 0
+	// VolumeAttachModeReadWrite — read/write attachment.
+	VolumeAttachModeReadWrite VolumeAttachMode = 1
+	// VolumeAttachModeReadOnly — read-only attachment.
+	VolumeAttachModeReadOnly VolumeAttachMode = 2
+)
+
+// VolumeAttachSpec — self-describing volume-attach payload for compute→kacho-storage
+// InternalVolumeService.Attach. compute forwards the instance's zone/name/project +
+// the requested attach parameters so kacho-storage can validate zone/project
+// coherence and perform the atomic attach-CAS against its OWN `volumes` /
+// `volume_attachments` rows — kacho-storage never calls compute back (acyclic edge;
+// the attach-state lives on the storage-side row, compute holds no local attach-state).
+type VolumeAttachSpec struct {
+	VolumeID       string
+	InstanceID     string
+	InstanceName   string
+	InstanceZoneID string
+	ProjectID      string
+	// DeviceName — guest device name, unique within the instance.
+	DeviceName string
+	// IsBoot — whether the volume acts as the persistent root overlay.
+	IsBoot bool
+	// Mode — access mode of the attachment.
+	Mode VolumeAttachMode
+	// AutoDelete — whether the volume is deleted together with the instance.
+	AutoDelete bool
+}
+
+// VolumeAttachmentInfo — a single volume↔Instance attachment (source of truth =
+// kacho-storage Volume / volume_attachments row). Output-only on the compute side;
+// used to build the read-only Instance.attached_disks[] mirror on Get/List and as
+// the confirmed result of Attach. Carries its owning VolumeID (the wire
+// VolumeAttachment sub-record is nested under a Volume; ListAttachments/Attach flatten
+// it with the id attached).
+type VolumeAttachmentInfo struct {
+	VolumeID     string
+	InstanceID   string
+	InstanceName string
+	DeviceName   string
+	IsBoot       bool
+	Mode         VolumeAttachMode
+	AutoDelete   bool
+}
+
+// StorageClient — port for compute→kacho-storage InternalVolumeService (volume↔
+// Instance attach coordination, internal :9091 mTLS). kacho-storage owns the
+// attachment and enforces the atomic attach-CAS + zone/project coherence; compute
+// only forwards a self-describing payload and mirrors the result. Peer unavailable
+// → fail-closed (Unavailable) on the attach/detach mutations. ListAttachments is a
+// best-effort batched read for the Get/List mirror (graceful-degrade — the mirror is
+// omitted when kacho-storage is unreachable, the Instance read itself never fails).
+type StorageClient interface {
+	Attach(ctx context.Context, spec VolumeAttachSpec) (*VolumeAttachmentInfo, error)
+	Detach(ctx context.Context, volumeID, instanceID string) error
+	ListAttachments(ctx context.Context, instanceIDs []string) ([]VolumeAttachmentInfo, error)
 }
 
 // ZoneRegistry — port для existence-check zone_id в Disk.Create / Instance.Create
