@@ -3,8 +3,8 @@ module github.com/PRO-Robotech/kacho-compute
 go 1.26.4
 
 require (
-	github.com/PRO-Robotech/kacho-corelib v1.0.3-0.20260705005204-a60a829f8607
-	github.com/PRO-Robotech/kacho-proto v0.0.0-20260705184504-76475d976058
+	github.com/PRO-Robotech/kacho-corelib v1.0.3-0.20260712234555-666ca389fd55
+	github.com/PRO-Robotech/kacho-proto v0.0.0-20260712234552-8f1df0ce7887
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/pressly/goose/v3 v3.27.1
 	github.com/prometheus/client_golang v1.23.2
@@ -85,7 +85,3 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20260427160629-7cedc36a6bc4 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/PRO-Robotech/kacho-proto => ../kacho-proto
-
-replace github.com/PRO-Robotech/kacho-corelib => ../kacho-corelib
